@@ -77,7 +77,12 @@ async function runApify(actorId, input, errors = null) {
       return null
     }
     const data = await res.json()
-    return Array.isArray(data) ? data : null
+    if (!Array.isArray(data)) {
+      console.error(`Apify ${actorId} non-array response`)
+      if (errors) errors.push({ actorId, kind: 'non_array' })
+      return null
+    }
+    return data
   } catch (e) {
     console.error(`Apify ${actorId} failed:`, e.message, e.stack)
     if (errors) errors.push({ actorId, kind: 'error', message: e.message })
@@ -496,15 +501,22 @@ async function analyzeContent(url) {
     const descMatch  = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)
                     || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i)
     const metaDesc   = decodeHTMLEntities(descMatch?.[1]?.trim() || '')
-    const h1Match    = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/gi) || []
+    // FIX 4: strip script/template/noscript/comment blocks before counting H1s,
+    // otherwise inline templates and SEO-noscript content inflate the count.
+    const htmlForH1 = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<template[\s\S]*?<\/template>/gi, '')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+    const h1Match    = htmlForH1.match(/<h1[^>]*>([\s\S]*?)<\/h1>/gi) || []
     const h1s        = h1Match.map(h => decodeHTMLEntities(h.replace(/<[^>]+>/g,'').trim())).filter(Boolean)
     const imgTags    = html.match(/<img[^>]+>/gi) || []
-    const imgsWithoutAlt  = imgTags.filter(t => !t.match(/alt=["'][^"']+["']/i)).length
+    const imgsWithoutAlt  = imgTags.filter(t => !t.match(/alt=["'][^"']*["']/i)).length
     const imgAltScore     = imgTags.length > 0 ? Math.round(((imgTags.length - imgsWithoutAlt) / imgTags.length) * 100) : 100
     const canonicalPresent = /<link[^>]*rel=["']canonical["']/i.test(html)
     const ogTitlePresent   = /<meta[^>]*property=["']og:title["']/i.test(html)
     const ogDescPresent    = /<meta[^>]*property=["']og:description["']/i.test(html)
-    const structuredData   = html.includes('"@context"')
+    const structuredData   = html.includes('"@context"') || html.includes("'@context'")
     const hasCTA           = /buy now|get started|sign up|try free|book|schedule|contact us|shop now|order|subscribe|join|start free|get access|claim/i.test(html)
     const hasSocialProof   = /testimonial|review|rating|customer|client|trust|verified|guarantee|result|success|transform/i.test(html)
     const hasPriceVisible  = /\$[\d,.]+|€[\d,.]+|£[\d,.]+|per month|\/mo|one.time|free trial/i.test(html)
@@ -554,14 +566,16 @@ const BENCHMARKS = {
 
 function detectIndustry(url, copy) {
   const text = (url+' '+(copy?.heroHeadline||'')+' '+(copy?.rawText||'')).toLowerCase()
-  if (/\bcar\b|\bcars\b|motorsport|automobile|automotive|vehicle|\bsuv\b/.test(text)) return 'default'
-  if (/fitness|workout|\bgym\b|bodybuilding|weight loss|\bmuscle\b/.test(text))        return 'fitness'
-  if (/\bcoach\b|mentor|online course|\bteach\b|educat/.test(text))                    return 'coaching'
-  if (/\bshop\b|\bstore\b|\bproduct\b|\bbuy\b|\bcart\b|\border\b|shipping/.test(text)) return 'ecommerce'
-  if (/saas|\bsoftware\b|\bapi\b|dashboard|platform/.test(text))                       return 'saas'
-  if (/\bcreator\b|\bpodcast\b|newsletter/.test(text))                                 return 'creator'
-  if (/\bfood\b|\brecipe\b|restaurant|\bcafe\b/.test(text))                            return 'food'
-  if (/beauty|makeup|\bfashion\b|skincare/.test(text))                                 return 'beauty'
+  // Automotive check FIRST — must come before fitness to prevent motorsport/sportscar false positives
+  if (/\bcar\b|\bcars\b|motorsport|automobile|automotive|vehicle|\bsuv\b|\bvan\b|turbo|horsepower|dealership|autohaus|fahrzeug|kfz|gebrauchtwagen|neuwagen|pkw|tuning|racing|\bdrive\b.*\bcar|forum.*auto|auto.*forum/.test(text)) return 'default'
+  // Fitness — removed generic "sport" and "train" which cause false positives on automotive/sports forums
+  if (/fitness|workout|\bgym\b|bodybuilding|health coach|weight loss|\bmuscle\b|personal train|nutrition plan/.test(text)) return 'fitness'
+  if (/\bcoach\b|mentor|online course|learn|\bteach\b|educat|\bprogram\b.*skill|\blesson/.test(text)) return 'coaching'
+  if (/\bshop\b|\bstore\b|\bproduct\b|\bbuy\b|\bcart\b|\border\b|shipping|checkout|ecommerce/.test(text)) return 'ecommerce'
+  if (/saas|\bsoftware\b|\bapi\b|dashboard|platform|\btool\b|\bapp\b.*subscription/.test(text))      return 'saas'
+  if (/\bcreator\b|\bcontent\b.*creat|\bpodcast\b|newsletter|\bstreamer/.test(text))                 return 'creator'
+  if (/\bfood\b|\brecipe\b|restaurant|\bcafe\b|\bcook\b|\beat\b|cuisine/.test(text))                 return 'food'
+  if (/beauty|makeup|\bfashion\b|skincare|\bhair salon\b|cosmetic/.test(text))                       return 'beauty'
   return 'default'
 }
 
@@ -642,6 +656,29 @@ function processLinkedIn(items) {
   } catch (e) { console.error('LinkedIn parse error:', e.message); return null }
 }
 
+// ─── SSRF GUARD ──────────────────────────────────────────────────────────────
+function isPrivateOrLocalUrl(rawUrl) {
+  let host
+  try {
+    host = new URL(rawUrl).hostname.toLowerCase()
+  } catch {
+    return true
+  }
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '0.0.0.0') return true
+  const v6 = host.replace(/^\[|\]$/g, '')
+  if (v6 === '::1') return true
+  if (/^fe80:/i.test(v6) || /^fc[0-9a-f]{2}:/i.test(v6) || /^fd[0-9a-f]{2}:/i.test(v6)) return true
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (m) {
+    const a = parseInt(m[1], 10), b = parseInt(m[2], 10)
+    if (a === 127 || a === 10 || a === 0) return true
+    if (a === 172 && b >= 16 && b <= 31) return true
+    if (a === 192 && b === 168) return true
+    if (a === 169 && b === 254) return true
+  }
+  return false
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -653,6 +690,13 @@ export default async function handler(req, res) {
   if (!websiteUrl) return res.status(400).json({ error: 'websiteUrl required' })
 
   const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`
+
+  if (isPrivateOrLocalUrl(url)) {
+    return res.status(400).json({
+      error: 'invalid_url',
+      message: 'This URL points to a private or local network address and cannot be scanned.',
+    })
+  }
   const tiktokHandle  = cleanHandle(handles.tiktok)
   const igHandle      = cleanHandle(handles.instagram)
   const ytHandle      = cleanHandle(handles.youtube)
@@ -713,7 +757,9 @@ export default async function handler(req, res) {
 
     return res.status(502).json({
       error: 'scan_failed',
-      message: 'Something went wrong with your scan. You will receive a full refund within 3-5 business days. Contact us at info@velyr.io if you have questions.',
+      message: refundIssued
+        ? 'Something went wrong with your scan. You will receive a full refund within 3-5 business days. Contact us at info@velyr.io if you have questions.'
+        : 'Something went wrong with your scan. Please contact us at info@velyr.io for a refund.',
       refundIssued,
     })
   }

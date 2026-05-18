@@ -97,7 +97,14 @@ async function analyzeWebsiteContent(url) {
     // FIX 2: decode HTML entities in meta description
     const metaDesc = descMatch ? decodeHTMLEntities(descMatch[1].trim()) : ''
 
-    const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/gi) || []
+    // FIX 4: strip script/template/noscript/comment blocks before counting H1s,
+    // otherwise inline templates and SEO-noscript content inflate the count.
+    const htmlForH1 = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<template[\s\S]*?<\/template>/gi, '')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+    const h1Match = htmlForH1.match(/<h1[^>]*>([\s\S]*?)<\/h1>/gi) || []
     const h1s = h1Match.map(h => decodeHTMLEntities(h.replace(/<[^>]+>/g, '').trim())).filter(Boolean)
     const h2Match = html.match(/<h2[^>]*>([\s\S]*?)<\/h2>/gi) || []
     const h2s = h2Match.map(h => decodeHTMLEntities(h.replace(/<[^>]+>/g, '').trim())).filter(Boolean).slice(0, 5)

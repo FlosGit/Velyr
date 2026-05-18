@@ -126,6 +126,7 @@ Required:
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` — frontend Supabase client
 - `SUPABASE_SERVICE_ROLE_KEY` — backend API operations (never expose)
 - `OPENROUTER_API_KEY` — Claude AI report generation (model: `anthropic/claude-sonnet-4-5`)
+- `APIFY_TOKEN` — Apify actor runs for premium social scraping (TikTok, Instagram, YouTube, X/Twitter, Facebook, LinkedIn); if unset, every premium scan fails and triggers the auto-refund path
 - `PAGESPEED_API_KEY` (a.k.a. `GOOGLE_PAGESPEED_API_KEY`)
 - `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY_BASE64` / `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` — agent
 - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` / `TELEGRAM_CHAT_ID` — default chat for notifications
