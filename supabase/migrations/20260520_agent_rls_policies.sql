@@ -61,12 +61,12 @@ end $$;
 -- ─── Step 2: agent_subscriptions — root ownership (closes gap 2) ─────────────
 create policy agent_subscriptions_select_own on public.agent_subscriptions
   for select to authenticated
-  using (user_id = auth.uid() or auth_user_id = auth.uid());
+  using (user_id::uuid = auth.uid() or auth_user_id = auth.uid());
 
 create policy agent_subscriptions_update_own on public.agent_subscriptions
   for update to authenticated
-  using (user_id = auth.uid() or auth_user_id = auth.uid())
-  with check (user_id = auth.uid() or auth_user_id = auth.uid());
+  using (user_id::uuid = auth.uid() or auth_user_id = auth.uid())
+  with check (user_id::uuid = auth.uid() or auth_user_id = auth.uid());
 
 -- Column-level grant is what actually prevents the premium-status self-grant:
 -- the row policy alone would let a user UPDATE subscription_status on their own
@@ -93,7 +93,7 @@ begin
         for select to authenticated
         using (subscription_id in (
           select id from public.agent_subscriptions
-          where user_id = auth.uid() or auth_user_id = auth.uid()
+          where user_id::uuid = auth.uid() or auth_user_id = auth.uid()
         ));
     $f$, t||'_select_own', t);
   end loop;
@@ -102,27 +102,27 @@ end $$;
 -- ─── Step 4: agent_brand_guardrails — browser READS + UPSERTS (dashboard) ────
 create policy agent_brand_guardrails_select_own on public.agent_brand_guardrails
   for select to authenticated
-  using (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()));
+  using (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()));
 
 create policy agent_brand_guardrails_insert_own on public.agent_brand_guardrails
   for insert to authenticated
-  with check (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()));
+  with check (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()));
 
 create policy agent_brand_guardrails_update_own on public.agent_brand_guardrails
   for update to authenticated
-  using (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()))
-  with check (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()));
+  using (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()))
+  with check (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()));
 
 -- ─── Step 5: impact_metrics — now keyed by subscription_id (Flag 2 column) ───
 create policy impact_metrics_select_own on public.impact_metrics
   for select to authenticated
-  using (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()));
+  using (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()));
 
 -- ─── Step 6: agent_connections — sensitive (creds + verification binding) ────
 -- READ own (posthog key is encrypted at rest, Stage 4.1).
 create policy agent_connections_select_own on public.agent_connections
   for select to authenticated
-  using (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()));
+  using (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()));
 
 -- ⚠️ INTERIM browser write policies. Onboarding currently upserts this row
 -- from the browser (incl. verification_code_id / verified_at), so denying
@@ -132,12 +132,12 @@ create policy agent_connections_select_own on public.agent_connections
 -- server-side). Remove both when that lands.
 create policy agent_connections_insert_own_interim on public.agent_connections
   for insert to authenticated
-  with check (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()));
+  with check (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()));
 
 create policy agent_connections_update_own_interim on public.agent_connections
   for update to authenticated
-  using (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()))
-  with check (subscription_id in (select id from public.agent_subscriptions where user_id = auth.uid() or auth_user_id = auth.uid()));
+  using (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()))
+  with check (subscription_id in (select id from public.agent_subscriptions where user_id::uuid = auth.uid() or auth_user_id = auth.uid()));
 
 -- ─── Step 7: telegram_verification_codes (closes gap 1) ──────────────────────
 -- ⚠️ INTERIM. The secure end state is: NO browser policy + consume via a
