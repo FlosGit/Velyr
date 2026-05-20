@@ -126,7 +126,11 @@ function RunCard({ run }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', marginBottom: 4 }}>
         {bounceDelta != null && (
           <p style={{ fontSize: 13, color: C.text, fontWeight: 400 }}>
-            Bounce rate: <span style={{ color: bounceColor, fontWeight: 500 }}>{run.bounce_rate_before}% {bounceArrow} {run.bounce_rate_after}%</span>
+            {/* Stage 5: honest labeling — this is the SITE-WIDE bounce rate
+                measured around the change, not attributable to this single
+                edit. See api/agent/run.js handleRollbackCheck. */}
+            Site-wide bounce rate: <span style={{ color: bounceColor, fontWeight: 500 }}>{run.bounce_rate_before}% {bounceArrow} {run.bounce_rate_after}%</span>
+            <span style={{ color: C.textLight, fontWeight: 300 }}> (correlation, not attributed to this change)</span>
           </p>
         )}
         {run.pr_url && (
@@ -255,7 +259,7 @@ export default function AgentPublic({ navigate, slug }) {
 
         {/* Charts */}
         {scoreSeries.length >= 2  && <LineChart data={scoreSeries}  label="Score over time"        color={C.accent} suffix="" />}
-        {bounceSeries.length >= 2 && <LineChart data={bounceSeries} label="Bounce rate over time" color={C.accent} suffix="%" invertColor />}
+        {bounceSeries.length >= 2 && <LineChart data={bounceSeries} label="Site-wide bounce rate over time" color={C.accent} suffix="%" invertColor />}
 
         {/* Runs */}
         <div style={{ marginTop: 36, marginBottom: 36 }}>

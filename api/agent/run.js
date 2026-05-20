@@ -2,6 +2,12 @@ import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { App } from '@octokit/app'
 import { Octokit } from '@octokit/rest'
+import { throttling } from '@octokit/plugin-throttling'
+import crypto from 'node:crypto'
+
+// Stage 5.D: Octokit with automatic GitHub rate-limit / secondary-rate-limit
+// backoff (honors Retry-After). Mirrors the Edge Function.
+const ThrottledOctokit = Octokit.plugin(throttling)
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2026-04-22.dahlia',
@@ -11,6 +17,149 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
+
+// Stage 5.5: this file had no maxDuration, so the quick cron modes
+// (evaluate_ab / midweek / rollback_check / weekly_summary) ran under
+// Vercel's default 10s limit and could be killed mid-loop over subscribers —
+// leaving A/B tests half-evaluated or rollbacks half-applied. Pin to the
+// Hobby-plan ceiling (60s). This is correct for the current low subscriber
+// count; the modes loop over ALL active subscriptions doing PostHog queries
+// (+ occasional GitHub PRs in rollback_check), so once subscriber count grows
+// past what fits in 60s these should be delegated to the Supabase Edge
+// Function (same fire-and-forget pattern as the full Monday run) or paginated
+// with self-invocation. Flagged in the Stage 5 summary.
+export const config = { maxDuration: 60 }
+
+// Constant-time string equality for shared-secret comparisons.
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  const aBuf = Buffer.from(a, 'utf8')
+  const bBuf = Buffer.from(b, 'utf8')
+  if (aBuf.length !== bBuf.length) return false
+  return crypto.timingSafeEqual(aBuf, bBuf)
+}
+
+// ─── LLM COST GUARDRAILS (mirrored from Edge Function) ───────────────────────
+// Keep these in sync with supabase/functions/agent-run/index.ts. We duplicate
+// rather than share because Vercel (Node) and Supabase (Deno) don't share a
+// module graph and this is a single-purpose helper. Override via env vars.
+const LLM_MAX_TOKENS_PLAYBOOK   = Number(process.env.LLM_MAX_TOKENS_PLAYBOOK   || '1500')
+const LLM_INPUT_EUR_PER_M       = Number(process.env.LLM_INPUT_EUR_PER_M      || '3.0')
+const LLM_OUTPUT_EUR_PER_M      = Number(process.env.LLM_OUTPUT_EUR_PER_M     || '15.0')
+const LLM_MAX_PROMPT_BYTES      = Number(process.env.LLM_MAX_PROMPT_BYTES     || String(500 * 1024))
+const MONTHLY_SPEND_CAP_EUR     = Number(process.env.AGENT_MONTHLY_SPEND_CAP_EUR || '2.0')
+
+async function getMonthlySpend(subscriptionId) {
+  const period = new Date().toISOString().slice(0, 7)
+  const { data, error } = await supabase
+    .from('agent_llm_usage').select('cost_eur')
+    .eq('subscription_id', subscriptionId).eq('period', period).maybeSingle()
+  if (error) {
+    console.warn('[llm-cap] agent_llm_usage read failed (migration not applied?):', error.message)
+    return { spent: 0, period, capAvailable: false }
+  }
+  return { spent: Number(data?.cost_eur ?? 0), period, capAvailable: true }
+}
+
+async function recordLLMUsage(subscriptionId, inputTokens, outputTokens, callerLabel) {
+  const costEur = (inputTokens / 1_000_000) * LLM_INPUT_EUR_PER_M
+                + (outputTokens / 1_000_000) * LLM_OUTPUT_EUR_PER_M
+  const period = new Date().toISOString().slice(0, 7)
+  const { error } = await supabase.rpc('agent_llm_usage_increment', {
+    p_subscription_id: subscriptionId,
+    p_period:          period,
+    p_input_tokens:    inputTokens,
+    p_output_tokens:   outputTokens,
+    p_cost_eur:        costEur,
+  })
+  if (error) console.warn(`[llm-cap] failed to record usage for ${callerLabel}:`, error.message)
+}
+
+// ─── SECRET ENCRYPTION (Stage 4.1) ───────────────────────────────────────────
+// AES-256-GCM with a 12-byte IV and the 16-byte auth tag concatenated as
+// `iv || tag || ciphertext`, all base64'd and prefixed with `enc:v1:` so it's
+// distinguishable from legacy plaintext values. Legacy plaintext is still
+// accepted on read so the migration is forward-only and doesn't strand
+// existing rows. AGENT_TOKEN_ENCRYPTION_KEY must be a 64-char hex string
+// (32 bytes / AES-256). Throws on encrypt/decrypt failure rather than
+// silently returning bad data.
+const ENC_PREFIX = 'enc:v1:'
+
+function getEncryptionKey() {
+  const hex = process.env.AGENT_TOKEN_ENCRYPTION_KEY
+  if (!hex) throw new Error('AGENT_TOKEN_ENCRYPTION_KEY is not configured')
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error('AGENT_TOKEN_ENCRYPTION_KEY must be 64 hex chars (32 bytes)')
+  return Buffer.from(hex, 'hex')
+}
+
+function encryptSecret(plaintext) {
+  if (plaintext == null) return null
+  const key    = getEncryptionKey()
+  const iv     = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+  const ct     = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()])
+  const tag    = cipher.getAuthTag()
+  return ENC_PREFIX + Buffer.concat([iv, tag, ct]).toString('base64')
+}
+
+function decryptSecret(stored) {
+  if (stored == null) return null
+  // Legacy plaintext path — accept as-is. Encrypt-on-next-write does the
+  // migration without us needing a backfill job.
+  if (typeof stored !== 'string' || !stored.startsWith(ENC_PREFIX)) return stored
+  const blob = Buffer.from(stored.slice(ENC_PREFIX.length), 'base64')
+  const iv   = blob.subarray(0, 12)
+  const tag  = blob.subarray(12, 28)
+  const ct   = blob.subarray(28)
+  const decipher = crypto.createDecipheriv('aes-256-gcm', getEncryptionKey(), iv)
+  decipher.setAuthTag(tag)
+  return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8')
+}
+
+// Stage 4.4: fetch the repo's actual default branch instead of hard-coding
+// 'main'. Falls back to 'main' only if the API call fails.
+async function getDefaultBranch(octokit, owner, repo) {
+  try {
+    const { data } = await octokit.rest.repos.get({ owner, repo })
+    return data?.default_branch || 'main'
+  } catch (err) {
+    console.warn(`[default-branch] repos.get failed for ${owner}/${repo}, falling back to 'main':`, err?.message)
+    return 'main'
+  }
+}
+
+// Cron authorization. Accepts EITHER:
+//   • `x-cron-secret: $AGENT_CRON_SECRET`  — for external schedulers (Upstash
+//     QStash, GitHub Actions, Trigger.dev, manual curl). Header is arbitrary
+//     so cannot be set by a public caller against Vercel's edge.
+//   • `Authorization: Bearer $CRON_SECRET` — Vercel's native cron pattern: when
+//     the `CRON_SECRET` env var is set on the project, Vercel automatically
+//     attaches this header to cron-platform invocations and never to public
+//     traffic. See https://vercel.com/docs/cron-jobs/manage-cron-jobs.
+//
+// Both compares are constant-time. At least one of the two env vars must be
+// configured or the endpoint refuses all callers (500). Returns
+// { ok: true } on success or { ok: false, status, error } otherwise.
+function authorizeCron(req) {
+  const agentSecret  = process.env.AGENT_CRON_SECRET
+  const vercelSecret = process.env.CRON_SECRET
+  if (!agentSecret && !vercelSecret) {
+    console.error('[agent/run] Neither AGENT_CRON_SECRET nor CRON_SECRET configured — refusing request')
+    return { ok: false, status: 500, error: 'Server misconfigured' }
+  }
+  const xCron = req.headers['x-cron-secret']
+  if (xCron && agentSecret && safeEqual(String(xCron), agentSecret)) {
+    return { ok: true }
+  }
+  const authHeader = req.headers['authorization']
+  if (authHeader && vercelSecret) {
+    const m = /^Bearer\s+(.+)$/i.exec(authHeader)
+    if (m && safeEqual(m[1], vercelSecret)) {
+      return { ok: true }
+    }
+  }
+  return { ok: false, status: 401, error: 'Unauthorized' }
+}
 
 // ─── SHARED HELPERS (used by rollback flow) ───────────────────────────────────
 async function captureScreenshot(url) {
@@ -55,9 +204,7 @@ async function promotePendingDNAToSuccess() {
 }
 
 export default async function handler(req, res) {
-  const cronSecret = req.headers['x-cron-secret']
-  const vercelCron  = req.headers['x-vercel-cron']
-  const action      = req.query?.action
+  const action = req.query?.action
 
   // ── PUBLIC TIMELINE (no auth) ─────────────────────────────────────────────
   // GET /api/agent/run?action=public-timeline&slug=florian
@@ -129,8 +276,13 @@ export default async function handler(req, res) {
   }
 
   // ── Cron auth ─────────────────────────────────────────────────────────────
-  if (!vercelCron && cronSecret !== process.env.AGENT_CRON_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' })
+  // The previously-trusted `x-vercel-cron` header is gone: Vercel claims to
+  // strip it from inbound public traffic, but the audit treats that as un-
+  // provable defense-in-depth. We now require a shared secret on every cron
+  // invocation; see `authorizeCron` above for the two accepted headers.
+  const cronAuth = authorizeCron(req)
+  if (!cronAuth.ok) {
+    return res.status(cronAuth.status).json({ error: cronAuth.error })
   }
 
   const mode = req.query?.mode
@@ -142,31 +294,47 @@ export default async function handler(req, res) {
   if (mode === 'weekly_summary') return handleWeeklySummary(res)
 
   // ── Full run — fire Edge Function without awaiting ─────────────────────────
+  // The full Monday run is too heavy for Vercel's 60s budget, so we kick the
+  // Supabase Edge Function and intentionally do NOT await its completion. But
+  // we MUST distinguish "aborted because the Edge run is still going" (the
+  // expected case) from "the trigger never reached Supabase" (a real failure
+  // we previously swallowed silently and still reported success for).
   const edgeUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agent-run`
+  const triggerId = crypto.randomUUID()
 
-  // Fire and forget — do NOT await
   const controller = new AbortController()
-const timeoutId = setTimeout(() => controller.abort(), 2000)
-try {
-  await fetch(edgeUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ triggeredBy: 'cron' }),
-    signal: controller.signal,
-  })
-} catch (_) {
-  // Timeout oder abort ist ok — Request wurde trotzdem abgeschickt
-} finally {
-  clearTimeout(timeoutId)
-}
+  const timeoutId  = setTimeout(() => controller.abort(), 2000)
+  let dispatched = true
+  let dispatchError = null
+  try {
+    await fetch(edgeUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ triggeredBy: 'cron', triggerId }),
+      signal: controller.signal,
+    })
+  } catch (err) {
+    // AbortError = our own 2s timeout fired → the request WAS sent and the
+    // Edge function is (almost certainly) running. Anything else (DNS, TLS,
+    // connection refused, bad URL) means the trigger never landed.
+    if (err?.name === 'AbortError') {
+      console.log(`[agent/run] full-run trigger dispatched (triggerId=${triggerId}) — Edge function running, not awaited`)
+    } else {
+      dispatched = false
+      dispatchError = err?.message || String(err)
+      console.error(`[agent/run] FAILED to dispatch Edge function (triggerId=${triggerId}):`, dispatchError)
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
-return res.status(200).json({ success: true, message: 'Agent run started via Edge Function' })
-
-  // Return immediately — Vercel function is done
-  return res.status(200).json({ success: true, message: 'Agent run started via Edge Function' })
+  if (!dispatched) {
+    return res.status(502).json({ success: false, error: 'Failed to reach agent Edge function', detail: dispatchError, triggerId })
+  }
+  return res.status(200).json({ success: true, message: 'Agent run started via Edge Function', triggerId })
 }
 
 // ─── HELPER: Octokit ─────────────────────────────────────────────────────────
@@ -179,7 +347,19 @@ async function getOctokit(installationId) {
     'POST /app/installations/{installation_id}/access_tokens',
     { installation_id: installationId }
   )
-  return new Octokit({ auth: token })
+  return new ThrottledOctokit({
+    auth: token,
+    throttle: {
+      onRateLimit: (retryAfter, options, _octokit, retryCount) => {
+        console.warn(`[github] rate limit on ${options.method} ${options.url}, retryAfter=${retryAfter}s, retryCount=${retryCount}`)
+        return retryCount < 2
+      },
+      onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) => {
+        console.warn(`[github] secondary rate limit on ${options.method} ${options.url}, retryAfter=${retryAfter}s, retryCount=${retryCount}`)
+        return retryCount < 2
+      },
+    },
+  })
 }
 
 // ─── EVALUATE A/B ─────────────────────────────────────────────────────────────
@@ -200,7 +380,7 @@ async function handleEvaluateAB(res) {
         .from('agent_connections').select('*')
         .eq('subscription_id', test.subscription_id).single()
 
-      const apiKey    = conn?.posthog_api_key    || process.env.POSTHOG_API_KEY
+      const apiKey    = decryptSecret(conn?.posthog_api_key)    || process.env.POSTHOG_API_KEY
       const projectId = conn?.posthog_project_id || process.env.POSTHOG_PROJECT_ID
       const host      = conn?.posthog_host       || process.env.POSTHOG_HOST || 'https://eu.posthog.com'
       if (!apiKey) continue
@@ -261,7 +441,8 @@ async function handleEvaluateAB(res) {
             )
             const parentSha = agentCommit?.parents?.[0]?.sha
             if (parentSha) {
-              const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: 'heads/main' })
+              const defaultBranch = await getDefaultBranch(octokit, owner, repo)
+              const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` })
               const branchName    = `agent/ab-revert-${test.run_id.slice(0, 8)}`
               await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: ref.object.sha })
               const { data: originalFile } = await octokit.rest.repos.getContent({ owner, repo, path: run.analysis_result.file_to_edit, ref: parentSha })
@@ -271,13 +452,19 @@ async function handleEvaluateAB(res) {
                 message: `revert: A/B test — control won (${delta}%)`,
                 content: originalFile.content, sha: currentFile.sha, branch: branchName,
               })
+              // Stage 4.8: do NOT auto-merge revert PRs. Open the PR, mark the
+              // run as waiting_approval, and let the user confirm via Telegram.
               const { data: revertPr } = await octokit.rest.pulls.create({
                 owner, repo,
                 title: `🔄 A/B Auto-Revert: ${run.analysis_result.problem}`,
-                body: `## A/B Test — Control Won\n\nAfter 7 days, the control variant outperformed the treatment by ${Math.abs(delta)}%.\n\nThis PR reverts the change to restore the original.`,
-                head: branchName, base: 'main',
+                body: `## A/B Test — Control Won\n\nAfter 7 days, the control variant outperformed the treatment by ${Math.abs(delta)}%.\n\nThis PR reverts the change to restore the original.\n\n_Reply *YES* in Telegram to merge this revert, or *NO* to keep the treatment live._`,
+                head: branchName, base: defaultBranch,
               })
-              await octokit.rest.pulls.merge({ owner, repo, pull_number: revertPr.number, merge_method: 'squash' })
+              await supabase.from('agent_runs').update({
+                status:     'waiting_approval',
+                pr_number:  revertPr.number,
+                pr_url:     revertPr.html_url,
+              }).eq('id', test.run_id)
               revertedPrUrl = revertPr.html_url
             }
           }
@@ -288,7 +475,7 @@ async function handleEvaluateAB(res) {
 
       const outcomeMsg = winner === 'treatment'
         ? `✅ *A/B Test Winner: Treatment*\n📈 +${delta}% conversion lift confirmed.\nSaved to your Business DNA.`
-        : `📊 *A/B Result: Control Won*\n📉 Change did not improve conversions (${delta}%).\nLearning saved — agent will avoid similar patterns.${revertedPrUrl ? `\n🔄 Auto-revert PR merged: ${revertedPrUrl}` : ''}`
+        : `📊 *A/B Result: Control Won*\n📉 Change did not improve conversions (${delta}%).\nLearning saved — agent will avoid similar patterns.${revertedPrUrl ? `\n🔄 Revert PR opened (awaiting your approval): ${revertedPrUrl}\nReply *YES* to merge, *NO* to keep the treatment live.` : ''}`
 
       await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -330,7 +517,7 @@ async function handleRollbackCheck(res) {
         .from('agent_connections').select('*')
         .eq('subscription_id', run.subscription_id).single()
 
-      const apiKey    = conn?.posthog_api_key    || process.env.POSTHOG_API_KEY
+      const apiKey    = decryptSecret(conn?.posthog_api_key)    || process.env.POSTHOG_API_KEY
       const projectId = conn?.posthog_project_id || process.env.POSTHOG_PROJECT_ID
       const host      = conn?.posthog_host       || process.env.POSTHOG_HOST || 'https://eu.posthog.com'
       if (!apiKey || !projectId) continue
@@ -353,17 +540,40 @@ async function handleRollbackCheck(res) {
       ])
       const [before, after] = await Promise.all([beforeRes.json(), afterRes.json()])
 
+      // Stage 3.5: raise the noise floor. The previous `> 10 sessions` was
+      // statistical noise — at 11 sessions one bouncer moves the rate by 9
+      // percentage points. We now require ≥100 unique sessions per side; if
+      // either side is below that, record an "insufficient_data" learning
+      // and skip the rollback decision rather than fabricate a result.
+      const MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION = Number(process.env.MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION || '100')
       const calcBounceRate = (results) => {
         const counts = {}
         results?.forEach(row => { counts[row[0]] = (counts[row[0]] || 0) + 1 })
         const total   = Object.keys(counts).length
         const bounced = Object.values(counts).filter(c => c === 1).length
-        return total > 10 ? Math.round((bounced / total) * 100) : null
+        if (total < MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION) return { rate: null, sessions: total }
+        return { rate: Math.round((bounced / total) * 100), sessions: total }
       }
 
-      const bounceBefore = calcBounceRate(before.results)
-      const bounceAfter  = calcBounceRate(after.results)
-      if (bounceBefore === null || bounceAfter === null) continue
+      const beforeMeasure = calcBounceRate(before.results)
+      const afterMeasure  = calcBounceRate(after.results)
+      const bounceBefore  = beforeMeasure.rate
+      const bounceAfter   = afterMeasure.rate
+
+      if (bounceBefore === null || bounceAfter === null) {
+        // Record the honest "we couldn't measure" outcome so the user sees it
+        // in DNA / learnings rather than silently nothing-happened.
+        await supabase.from('agent_learnings').insert({
+          subscription_id: run.subscription_id, run_id: run.id,
+          change_type: run.analysis_result?.change_type || 'other',
+          summary: `Insufficient data to attribute outcome to this fix (before=${beforeMeasure.sessions} sessions, after=${afterMeasure.sessions} sessions, floor=${MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION}).`,
+          outcome: 'insufficient_data',
+          metric_type: 'site_wide_bounce_rate',
+          delta: 0,
+          confidence: 'none',
+        })
+        continue
+      }
 
       const bounceDelta    = bounceAfter - bounceBefore
       const shouldRollback = bounceDelta >= 15
@@ -380,8 +590,22 @@ async function handleRollbackCheck(res) {
       })()
       const screenshotAfter = await captureScreenshot(targetUrl)
 
+      // Stage 3.6: the metric is the SITE-WIDE bounce rate (PostHog $pageview
+      // counts across every route, not filtered to the edited page). Storing
+      // it under metric_type='bounce_rate' previously let the weekly summary
+      // claim "bounce rate −X% after agent change" — false attribution. We
+      // now label it as site_wide so downstream consumers state it honestly.
+      // Filtering PostHog events to the edited page's route was considered
+      // and rejected per audit §2: route mapping from file_to_edit to URL is
+      // unreliable (Next.js dynamic routes, basename rewrites, SPA history,
+      // etc.) and would silently mislabel many runs as "no data".
+      // FINAL/Flag 2: stamp subscription_id so the dashboard query
+      // (.eq('subscription_id', …)) works and the RLS policy can key on it
+      // directly like every other child table. run_id is kept as the
+      // authoritative FK; subscription_id is a denormalized convenience.
       await supabase.from('impact_metrics').insert({
-        run_id: run.id, metric_type: 'bounce_rate',
+        run_id: run.id, subscription_id: run.subscription_id,
+        metric_type: 'site_wide_bounce_rate',
         value_before: bounceBefore, value_after: bounceAfter,
         measured_at: new Date().toISOString(),
       })
@@ -391,7 +615,11 @@ async function handleRollbackCheck(res) {
         change_type: run.analysis_result?.change_type || 'other',
         summary: run.analysis_result?.problem || 'Unknown change',
         outcome: shouldRollback ? 'negative' : 'positive',
-        metric_type: 'bounce_rate', delta: -bounceDelta, confidence: 'high',
+        metric_type: 'site_wide_bounce_rate',
+        delta: -bounceDelta,
+        // High confidence on the measurement (sessions >= floor), low
+        // confidence on attribution — the metric is site-wide.
+        confidence: 'medium',
       })
 
       // Persist new agent_runs columns (Part 1) for the public timeline + dashboard
@@ -417,14 +645,29 @@ async function handleRollbackCheck(res) {
         const repo    = conn.github_repo_name
 
         try {
-          const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, per_page: 10 })
-          const agentCommit = commits.find(c =>
-            c.commit.message.startsWith('fix:') &&
-            c.commit.message.includes(run.analysis_result?.problem?.slice(0, 30))
-          )
+          // Stage 5.8: prefer the stored squash-merge SHA (deterministic).
+          // Fall back to the legacy commit-message search only for runs that
+          // were merged before merge_commit_sha was recorded.
+          let agentCommit = null
+          if (run.merge_commit_sha) {
+            try {
+              const { data: c } = await octokit.rest.repos.getCommit({ owner, repo, ref: run.merge_commit_sha })
+              agentCommit = c
+            } catch (shaErr) {
+              console.warn(`[rollback] stored merge_commit_sha ${run.merge_commit_sha} not found, falling back to message search:`, shaErr?.message)
+            }
+          }
+          if (!agentCommit) {
+            const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, per_page: 10 })
+            agentCommit = commits.find(c =>
+              c.commit.message.startsWith('fix:') &&
+              c.commit.message.includes(run.analysis_result?.problem?.slice(0, 30))
+            )
+          }
 
           if (agentCommit) {
-            const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: 'heads/main' })
+            const defaultBranch = await getDefaultBranch(octokit, owner, repo)
+            const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` })
             const branchName    = `agent/rollback-${run.id.slice(0, 8)}`
             await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: ref.object.sha })
 
@@ -442,20 +685,32 @@ async function handleRollbackCheck(res) {
               const { data: pr } = await octokit.rest.pulls.create({
                 owner, repo,
                 title: `🔄 Auto-Rollback: ${run.analysis_result?.problem}`,
-                body: `## Automatic Rollback\n\nBounce rate increased by **+${bounceDelta}%** in the 48h after deployment.\n\n- Before: ${bounceBefore}%\n- After: ${bounceAfter}%`,
-                head: branchName, base: 'main',
+                body: `## Automatic Rollback (awaiting approval)\n\n_**Site-wide** bounce rate rose by **+${bounceDelta}pp** in the 48h after this PR merged (correlation, not proven causation — the metric covers every page, not just \`${run.analysis_result?.file_to_edit || 'the edited file'}\`)._\n\n- Site-wide bounce before merge: ${bounceBefore}%\n- Site-wide bounce after merge:  ${bounceAfter}%\n- Sessions sampled per side: ≥ ${Number(process.env.MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION || '100')}\n\n_Reply *YES* in Telegram to merge this rollback, *NO* to keep the change live and accept the bounce trend._`,
+                head: branchName, base: defaultBranch,
               })
-              await octokit.rest.pulls.merge({ owner, repo, pull_number: pr.number, merge_method: 'squash' })
-              await supabase.from('agent_runs').update({ status: 'rolled_back' }).eq('id', run.id)
+              // Stage 4.8: do NOT auto-merge. Mark the run waiting_approval and
+              // let the user decide. The standard YES/NO flow in
+              // api/webhooks/telegram.js handles the merge.
+              await supabase.from('agent_runs').update({
+                status:           'waiting_approval',
+                rollback_reason:  'metrics_dropped',
+                pr_number:        pr.number,
+                pr_url:           pr.html_url,
+              }).eq('id', run.id)
 
-              await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  chat_id: process.env.TELEGRAM_CHAT_ID,
-                  text: `🔄 *Velyr Auto-Rollback Triggered*\n\n*Change:* ${run.analysis_result?.problem}\n\n📉 Bounce rate: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}%)\n\n✅ Reverted automatically.`,
-                  parse_mode: 'Markdown',
-                }),
-              })
+              // Always notify the actual subscription owner, not env TELEGRAM_CHAT_ID
+              const { data: subRow } = await supabase.from('agent_subscriptions')
+                .select('telegram_chat_id').eq('id', run.subscription_id).single()
+              if (subRow?.telegram_chat_id) {
+                await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    chat_id: subRow.telegram_chat_id,
+                    text: `⚠️ *Velyr Rollback Recommended*\n\n*Change:* ${run.analysis_result?.problem}\n\n📉 Site-wide bounce rate: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n_(correlation, not proven causation)_\n\n🔍 Review PR: ${pr.html_url}\n\nReply *YES* to merge the rollback, or *NO* to keep the change live.`,
+                    parse_mode: 'Markdown',
+                  }),
+                })
+              }
             }
           }
         } catch (rollbackErr) {
@@ -505,7 +760,7 @@ async function handleWeeklySummary(res) {
 
       const [analytics, weekRunsRes, completedABRes, allLearningsRes, subRes] = await Promise.all([
         getPostHogAnalytics(
-          conn.posthog_api_key    || process.env.POSTHOG_API_KEY,
+          decryptSecret(conn.posthog_api_key)    || process.env.POSTHOG_API_KEY,
           conn.posthog_project_id || process.env.POSTHOG_PROJECT_ID,
           conn.posthog_host       || process.env.POSTHOG_HOST
         ),
@@ -549,12 +804,21 @@ async function handleWeeklySummary(res) {
         : a.bounceRate > 50 ? `🟡 ${a.bounceRate}%`
         : `✅ ${a.bounceRate}%`
 
+      // Stage 3.6: weekly summary now reports SITE-WIDE bounce delta in the
+      // week of each change, explicitly labeled as correlation rather than
+      // attribution. Old text ("Best result: bounce rate −X% after agent
+      // change") was fabrication — the agent edits one page, the metric is
+      // every page. Matches both the new and legacy metric_type strings so
+      // historical rows still surface.
       let bestMetricLine = ''
-      const bounceMetrics = impactMetrics.filter(m => m.metric_type === 'bounce_rate' && m.value_before && m.value_after)
+      const bounceMetrics = impactMetrics.filter(m =>
+        (m.metric_type === 'site_wide_bounce_rate' || m.metric_type === 'bounce_rate') &&
+        m.value_before && m.value_after
+      )
       if (bounceMetrics.length > 0) {
         const best        = bounceMetrics.sort((a, b) => (a.value_before - a.value_after) - (b.value_before - b.value_after))[0]
         const improvement = Math.round(best.value_before - best.value_after)
-        if (improvement > 0) bestMetricLine = `\n📉 Best result: bounce rate −${improvement}% after agent change`
+        if (improvement > 0) bestMetricLine = `\n📉 Site-wide bounce rate dropped ${improvement}% in the week of an agent change (correlation, not attribution — the metric covers every page)`
       }
 
       let abSummary = ''
@@ -615,7 +879,7 @@ async function handleMidweek(res) {
 
   for (const conn of connections) {
     const analytics = await getPostHogAnalytics(
-      conn.posthog_api_key    || process.env.POSTHOG_API_KEY,
+      decryptSecret(conn.posthog_api_key)    || process.env.POSTHOG_API_KEY,
       conn.posthog_project_id || process.env.POSTHOG_PROJECT_ID,
       conn.posthog_host       || process.env.POSTHOG_HOST
     )
@@ -757,9 +1021,15 @@ async function handlePublicTimeline(req, res) {
     .eq('public_slug', slug).eq('is_public', true).maybeSingle()
   if (!sub) return res.status(404).json({ error: 'Not found' })
 
+  // Stage 4.11: explicit field projection on the public timeline. We used to
+  // select `analysis_result` wholesale and then dereference one field from it
+  // — that leaked the AI's full JSON (file_to_edit paths, code_change.find/
+  // replace snippets, internal confidence reasoning) into any future code
+  // path that touched the response. Now we project `problem_description`
+  // (already denormalized at run time) and use it directly.
   const [runsRes, dnaRes] = await Promise.all([
     supabase.from('agent_runs')
-      .select('id, status, created_at, completed_at, problem_description, screenshot_before, screenshot_after, bounce_rate_before, bounce_rate_after, score_before, score_after, pr_url, competitor_changes, ab_test_variants, analysis_result, pages_fixed')
+      .select('id, status, created_at, completed_at, problem_description, screenshot_before, screenshot_after, bounce_rate_before, bounce_rate_after, score_before, score_after, pr_url, competitor_changes, ab_test_variants, pages_fixed')
       .eq('subscription_id', sub.id)
       .order('created_at', { ascending: false }).limit(50),
     supabase.from('agent_business_dna')
@@ -768,15 +1038,16 @@ async function handlePublicTimeline(req, res) {
       .order('created_at', { ascending: false }).limit(100),
   ])
 
-  // Derive problem_description from analysis_result if column is null (legacy rows).
-  // Strip A/B variants details to "winner only if resolved".
+  // Strip A/B variants details to "winner only if resolved" — withhold the
+  // raw find/replace strings so visitors don't see the unchanged-from-control
+  // copy of an in-flight test.
   const runs = (runsRes.data || []).map(r => {
     const ab = r.ab_test_variants
     const abPublic = ab && ab.winner ? { winner: ab.winner, change_type: ab.change_type } : null
     return {
       id: r.id, status: r.status,
       date: r.completed_at || r.created_at,
-      problem: r.problem_description || r.analysis_result?.problem || null,
+      problem: r.problem_description || null,
       screenshot_before: r.screenshot_before, screenshot_after: r.screenshot_after,
       bounce_rate_before: r.bounce_rate_before, bounce_rate_after: r.bounce_rate_after,
       score_before: r.score_before, score_after: r.score_after,
@@ -895,16 +1166,37 @@ Write the Playbook in 4 sections, no fluff:
 4. Competitor context — what the tracked competitors are doing differently.
 Max 600 words. Clear, direct language. Use short headers for each section.`
 
+  // Monthly spend pre-flight — share the same per-subscription ceiling as
+  // the Edge Function's weekly run. User-initiated, so respond with 429 and
+  // a clear message rather than silently failing.
+  const spend = await getMonthlySpend(sub.id)
+  if (spend.capAvailable && spend.spent >= MONTHLY_SPEND_CAP_EUR) {
+    return res.status(429).json({
+      error: 'monthly_llm_cap_reached',
+      message: `Monthly AI usage cap reached for this subscription (€${spend.spent.toFixed(2)} / €${MONTHLY_SPEND_CAP_EUR.toFixed(2)} in ${spend.period}). Resets on the 1st of next month.`,
+    })
+  }
+
   try {
+    const requestBody = JSON.stringify({
+      model: 'anthropic/claude-sonnet-4-5',
+      max_tokens: LLM_MAX_TOKENS_PLAYBOOK,
+      messages: [{ role: 'user', content: prompt }],
+    })
+    if (Buffer.byteLength(requestBody, 'utf8') > LLM_MAX_PROMPT_BYTES) {
+      console.error(`[llm-cap] export-dna prompt size exceeds ceiling — aborting`)
+      return res.status(413).json({ error: 'Prompt too large' })
+    }
+
     const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'anthropic/claude-sonnet-4-5',
-        messages: [{ role: 'user', content: prompt }],
-      }),
+      body: requestBody,
     })
     const data = await aiRes.json()
+    if (data?.usage) {
+      await recordLLMUsage(sub.id, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0, 'export-dna')
+    }
     const playbook = data.choices?.[0]?.message?.content?.trim()
     if (!playbook) return res.status(502).json({ error: 'Empty response from AI' })
     return res.status(200).json({ playbook })

@@ -824,6 +824,29 @@ export default function AgentOnboarding({ navigate }) {
       console.log('[onboarding/step4] agent_subscriptions update result:', { data: subUpdate.data, error: subUpdate.error, status: subUpdate.status })
       if (subUpdate.error) throw subUpdate.error
 
+      // Stage 4.13: capture the verification code's id BEFORE marking it
+      // used, so we can record it as the audit trail on agent_connections.
+      // getActiveSubId in api/webhooks/telegram.js now requires this FK to
+      // be set, so a chat can only command the bot if its onboarding row
+      // points at a real, consumed verification code.
+      const { data: codeRow, error: codeFetchErr } = await supabase
+        .from('telegram_verification_codes')
+        .select('id, chat_id, expires_at, used')
+        .eq('code', allData.telegramCode)
+        .maybeSingle()
+      if (codeFetchErr || !codeRow) {
+        throw new Error(codeFetchErr?.message || 'Verification code not found.')
+      }
+      if (codeRow.used) {
+        throw new Error('This verification code has already been used. Please run /start in Telegram again to get a fresh code.')
+      }
+      if (codeRow.expires_at && new Date(codeRow.expires_at) < new Date()) {
+        throw new Error('This verification code has expired. Please run /start in Telegram again.')
+      }
+      if (String(codeRow.chat_id) !== String(allData.telegramChatId)) {
+        throw new Error('Verification code does not match the Telegram chat that requested it.')
+      }
+
       // Upsert connection (idempotent on subscription_id)
       const connPayload = {
         subscription_id: sub.id,
@@ -836,6 +859,10 @@ export default function AgentOnboarding({ navigate }) {
         posthog_host: 'https://eu.posthog.com',
         posthog_snippet_token: null,
         telegram_chat_id: allData.telegramChatId,
+        // Stage 4.13: strong chat_id binding. Both columns must be set for
+        // the bot to accept commands from this chat.
+        verification_code_id: codeRow.id,
+        verified_at:          new Date().toISOString(),
       }
       console.log('[onboarding/step4] agent_connections upsert payload:', connPayload, '| parsed installationId:', connPayload.github_installation_id, '| isNaN:', Number.isNaN(connPayload.github_installation_id))
       console.log('[onboarding/step4] agent_connections upsert payload FULL:', JSON.stringify(connPayload, null, 2))
