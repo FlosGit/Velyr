@@ -43,6 +43,7 @@ async function handleCheckout(req, res) {
       session = await stripe.checkout.sessions.create({
         mode: 'subscription',
         line_items: [{ price: process.env.STRIPE_PRICE_GROWTH, quantity: 1 }],
+        allow_promotion_codes: true,
         // Paid subscribers go straight to onboarding so they can connect GitHub
         // and Telegram. The onboarding mount gate will accept them once the
         // webhook has flipped subscription_status to 'active'.
