@@ -4,7 +4,6 @@ import { startCheckout } from '../utils/startCheckout.js'
 import CheckoutConfirmModal from './CheckoutConfirmModal.jsx'
 
 const LABELS = {
-  full_scan: 'Get Full Report – €9',
   subscription: 'Subscribe – €29/month',
 }
 
@@ -13,8 +12,8 @@ const LABELS = {
 //   fallback) and route to /agent/register?intent=subscription so the user can
 //   sign up; the intent is later honoured by App.jsx's post-signup handler and
 //   by AgentAuth after a manual login.
-// - full_scan or signed-in user → call the shared startCheckout util, which
-//   POSTs to /api/stripe and redirects to the Stripe Checkout URL.
+// - signed-in user → call the shared startCheckout util, which POSTs to
+//   /api/stripe and redirects to the Stripe Checkout URL.
 export async function beginCheckout(type, navigate) {
   const { data: { session } } = await supabase.auth.getSession()
 
@@ -32,9 +31,9 @@ export async function beginCheckout(type, navigate) {
 
 export default function SubscribeButton({ type, style = {}, className = '', navigate }) {
   const [loading, setLoading] = useState(false)
-  // Pre-checkout consent gate (Widerrufsverzicht for full_scan,
-  // recurring-charge acknowledgment for subscription). Existing checkout
-  // logic below is unchanged — it only runs after the user actively confirms.
+  // Pre-checkout consent gate (recurring-charge acknowledgment for the
+  // subscription). Existing checkout logic below is unchanged — it only runs
+  // after the user actively confirms.
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const startActualCheckout = async () => {

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 
 // Pre-checkout confirmation modal. Required for EU consumer-law compliance:
-//   - full_scan (€9 one-time):  Widerrufsverzicht / §356 Abs. 5 BGB
 //   - subscription (€29/mo):    Recurring-charge acknowledgment + §312j BGB summary
 //
 // The modal gates the existing Stripe-redirect flow. The hosting component
@@ -35,8 +34,7 @@ export default function CheckoutConfirmModal({ type, open, onCancel, onConfirm, 
 
   if (!open) return null
 
-  const isFullScan = type === 'full_scan'
-  const title = isFullScan ? 'Confirm your order' : 'Confirm your subscription'
+  const title = 'Confirm your subscription'
 
   return (
     <div
@@ -60,7 +58,7 @@ export default function CheckoutConfirmModal({ type, open, onCancel, onConfirm, 
         }}
       >
         <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, fontWeight: 500, marginBottom: 10 }}>
-          {isFullScan ? 'Order summary' : 'Subscription summary'}
+          Subscription summary
         </p>
         <h3 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 24, color: C.text, marginBottom: 18, letterSpacing: '-.015em' }}>
           {title}
@@ -68,21 +66,11 @@ export default function CheckoutConfirmModal({ type, open, onCancel, onConfirm, 
 
         {/* Summary block */}
         <div style={{ background: 'rgba(42,92,69,0.04)', border: '1px solid rgba(42,92,69,0.15)', borderRadius: 10, padding: '14px 16px', marginBottom: 18 }}>
-          {isFullScan ? (
-            <>
-              <p style={{ fontSize: 14, color: C.text, fontWeight: 500, marginBottom: 4 }}>Full Report — €9</p>
-              <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>One-time payment · Digital report delivered immediately after the scan completes.</p>
-              <p style={{ fontSize: 11, color: C.textLight, fontWeight: 300, marginTop: 6 }}>* Endpreis gem. § 19 UStG — no VAT charged</p>
-            </>
-          ) : (
-            <>
-              <p style={{ fontSize: 14, color: C.text, fontWeight: 500, marginBottom: 4 }}>Growth Agent — €29 / month</p>
-              <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>
-                Recurring monthly charge, billed in advance via Stripe. You can cancel anytime from your dashboard — cancellation takes effect at the end of the current billing period.
-              </p>
-              <p style={{ fontSize: 11, color: C.textLight, fontWeight: 300, marginTop: 6 }}>* Endpreis gem. § 19 UStG — no VAT charged</p>
-            </>
-          )}
+          <p style={{ fontSize: 14, color: C.text, fontWeight: 500, marginBottom: 4 }}>Growth Agent — €29 / month</p>
+          <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>
+            Recurring monthly charge, billed in advance via Stripe. You can cancel anytime from your dashboard — cancellation takes effect at the end of the current billing period.
+          </p>
+          <p style={{ fontSize: 11, color: C.textLight, fontWeight: 300, marginTop: 6 }}>* Endpreis gem. § 19 UStG — no VAT charged</p>
         </div>
 
         {/* Consent checkbox */}
@@ -94,11 +82,7 @@ export default function CheckoutConfirmModal({ type, open, onCancel, onConfirm, 
             style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0, accentColor: C.accent }}
           />
           <span style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.55 }}>
-            {isFullScan ? (
-              <>I request immediate delivery of the digital report and acknowledge that my right of withdrawal expires upon delivery (§356 Abs. 5 BGB).</>
-            ) : (
-              <>I understand this is a recurring monthly charge of €29 and agree to the Terms of Service.</>
-            )}
+            I understand this is a recurring monthly charge of €29 and agree to the Terms of Service.
           </span>
         </label>
 

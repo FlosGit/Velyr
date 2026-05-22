@@ -94,20 +94,7 @@ export default async function handler(req, res) {
         const userId = session.client_reference_id
         const type = session.metadata?.type
 
-        if (session.mode === 'payment' || type === 'full_scan') {
-          if (userId) {
-            const result = await supabase
-              .from('agent_subscriptions')
-              .upsert({
-                user_id: userId,
-                full_scan_purchased: true,
-                full_scan_purchased_at: new Date().toISOString(),
-              }, { onConflict: 'user_id' })
-            console.log('[webhook/checkout] full_scan upsert result:', { data: result.data, error: result.error, status: result.status })
-          } else {
-            console.log('[webhook/checkout] full_scan SKIPPED — client_reference_id is missing')
-          }
-        } else if (session.mode === 'subscription') {
+        if (session.mode === 'subscription') {
           const subscriptionId = session.subscription
           const customerId = session.customer
 

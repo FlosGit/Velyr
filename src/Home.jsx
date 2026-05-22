@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { demoData } from './data/demoData'
-import SubscribeButton, { beginCheckout } from './components/SubscribeButton.jsx'
-import CheckoutConfirmModal from './components/CheckoutConfirmModal.jsx'
+import SubscribeButton from './components/SubscribeButton.jsx'
 
 const C = {
   bg:          '#f7f4ef',
@@ -181,9 +180,6 @@ function Logo({ size = 32, color = '#2a5c45' }) {
 function Nav({ navigate }) {
   const [scrolled, setScrolled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [checkoutLoading, setCheckoutLoading] = useState(false)
-  // Pre-checkout Widerrufsverzicht gate (§356 Abs. 5 BGB) for the Nav "Full report" button.
-  const [navConfirmOpen, setNavConfirmOpen] = useState(false)
   useEffect(() => { const fn = () => setScrolled(window.scrollY > 32); window.addEventListener('scroll', fn); return () => window.removeEventListener('scroll', fn) }, [])
   useEffect(() => {
     if (!menuOpen) return
@@ -195,32 +191,8 @@ function Nav({ navigate }) {
 
   const goAndClose = (fn) => () => { setMenuOpen(false); fn() }
 
-  const doFullScanCheckout = async () => {
-    if (checkoutLoading) return
-    setCheckoutLoading(true)
-    try {
-      const result = await beginCheckout('full_scan', navigate)
-      if (!result?.redirected) setCheckoutLoading(false)
-    } catch (e) {
-      console.error('Checkout error:', e)
-      setCheckoutLoading(false)
-    }
-  }
-
-  const handleFullScanCheckout = () => {
-    if (checkoutLoading) return
-    setNavConfirmOpen(true)
-  }
-
   return (
     <>
-      <CheckoutConfirmModal
-        type="full_scan"
-        open={navConfirmOpen}
-        onCancel={() => setNavConfirmOpen(false)}
-        onConfirm={() => { setNavConfirmOpen(false); doFullScanCheckout() }}
-        loading={checkoutLoading}
-      />
       <nav style={{
         position:'fixed', top:0, left:0, right:0, zIndex:100, height:60,
         padding:'0 24px', display:'flex', alignItems:'center', justifyContent:'space-between',
@@ -246,21 +218,6 @@ function Nav({ navigate }) {
             onMouseEnter={e => e.currentTarget.style.color=C.textMuted}
             onMouseLeave={e => e.currentTarget.style.color=C.textLight}
           >Log in</button>
-          <div className="nav-ctas" style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <button className="nav-cta-ghost" onClick={() => document.getElementById('scan-form')?.scrollIntoView({ behavior:'smooth' })} style={{
-              background:'transparent', color:C.text, border:'1px solid rgba(28,25,23,0.15)', borderRadius:8,
-              padding:'7px 16px', fontFamily:'Jost,sans-serif', fontWeight:400, fontSize:13,
-              cursor:'pointer', transition:'all .2s',
-            }}
-              onMouseEnter={e => { e.target.style.borderColor='rgba(28,25,23,0.3)'; e.target.style.background='rgba(28,25,23,0.04)' }}
-              onMouseLeave={e => { e.target.style.borderColor='rgba(28,25,23,0.15)'; e.target.style.background='transparent' }}
-            >Free scan</button>
-            <button onClick={handleFullScanCheckout} disabled={checkoutLoading}
-              style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'8px 16px', fontFamily:'Jost,sans-serif', fontWeight:500, fontSize:13, cursor: checkoutLoading ? 'not-allowed' : 'pointer', opacity: checkoutLoading ? 0.7 : 1, transition:'background .2s', letterSpacing:'.01em', whiteSpace:'nowrap' }}
-              onMouseEnter={e => { if (!checkoutLoading) e.target.style.background='#1e4433' }}
-              onMouseLeave={e => { if (!checkoutLoading) e.target.style.background=C.accent }}
-            >{checkoutLoading ? 'Redirecting…' : 'Full report'}</button>
-          </div>
           <button
             className="nav-burger"
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
@@ -308,12 +265,6 @@ function Nav({ navigate }) {
           display:'flex', flexDirection:'column', gap:8,
         }}
       >
-        <button onClick={goAndClose(() => document.getElementById('scan-form')?.scrollIntoView({ behavior:'smooth' }))}
-          style={{ width:'100%', background:'transparent', color:C.text, border:`1px solid ${C.border}`, borderRadius:10, padding:'13px 16px', fontSize:14, fontFamily:'Jost,sans-serif', fontWeight:400, cursor:'pointer', textAlign:'left', letterSpacing:'.01em' }}
-        >Free scan</button>
-        <button onClick={goAndClose(handleFullScanCheckout)} disabled={checkoutLoading}
-          style={{ width:'100%', background:C.accent, color:'#fff', border:'none', borderRadius:10, padding:'13px 16px', fontSize:14, fontFamily:'Jost,sans-serif', fontWeight:500, cursor: checkoutLoading ? 'not-allowed' : 'pointer', opacity: checkoutLoading ? 0.7 : 1, textAlign:'left', letterSpacing:'.01em' }}
-        >{checkoutLoading ? 'Redirecting…' : 'Full report — €9'}</button>
         <button onClick={goAndClose(() => document.getElementById('pricing-section')?.scrollIntoView({ behavior:'smooth' }))}
           style={{ width:'100%', background:'transparent', color:C.accent, border:`1px solid rgba(42,92,69,0.35)`, borderRadius:10, padding:'13px 16px', fontSize:14, fontFamily:'Jost,sans-serif', fontWeight:400, cursor:'pointer', textAlign:'left', letterSpacing:'.01em', display:'flex', alignItems:'center', gap:8 }}
         >
@@ -324,246 +275,6 @@ function Nav({ navigate }) {
         >Log in →</button>
       </div>
     </>
-  )
-}
-
-// ─── Hero ──────────────────────────────────────────────────────────────────────
-function Hero({ onScanStart, navigate }) {
-  const [url, setUrl] = useState('')
-  const [error, setError] = useState('')
-  const [socialOpen, setSocialOpen] = useState(false)
-  const [social, setSocial] = useState({ tiktokFollowers:'', tiktokAvgViews:'', tiktokEngagement:'', igFollowers:'', igAvgLikes:'', igEngagement:'', ytSubscribers:'', ytAvgViews:'', twFollowers:'' })
-  const [activePlatforms, setActivePlatforms] = useState([])
-  const urlInputRef = useRef(null)
-
-  useEffect(() => {
-    if (urlInputRef.current) urlInputRef.current.focus()
-  }, [])
-
-  const platforms = [
-    { key:'tiktok',    icon:'🎵', label:'TikTok' },
-    { key:'instagram', icon:'📸', label:'Instagram' },
-    { key:'youtube',   icon:'▶️', label:'YouTube' },
-    { key:'twitter',   icon:'𝕏',  label:'X / Twitter' },
-  ]
-
-  const platformFields = {
-    tiktok:    [{ key:'tiktokFollowers', label:'Followers', placeholder:'e.g. 12400' }, { key:'tiktokAvgViews', label:'Avg. Views', placeholder:'e.g. 8500' }, { key:'tiktokEngagement', label:'Engagement %', placeholder:'e.g. 4.2' }],
-    instagram: [{ key:'igFollowers', label:'Followers', placeholder:'e.g. 3200' }, { key:'igAvgLikes', label:'Avg. Likes', placeholder:'e.g. 180' }, { key:'igEngagement', label:'Engagement %', placeholder:'e.g. 3.1' }],
-    youtube:   [{ key:'ytSubscribers', label:'Subscribers', placeholder:'e.g. 5100' }, { key:'ytAvgViews', label:'Avg. Views', placeholder:'e.g. 2200' }],
-    twitter:   [{ key:'twFollowers', label:'Followers', placeholder:'e.g. 1800' }],
-  }
-
-  const togglePlatform = (key) => setActivePlatforms(p => p.includes(key) ? p.filter(k=>k!==key) : [...p, key])
-
-  const normalizeUrl = (raw) => {
-    const trimmed = raw.trim()
-    if (!trimmed) return ''
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed
-    return `https://${trimmed}`
-  }
-
-  const buildManualSocial = () => {
-    const m = {}
-    if (activePlatforms.includes('tiktok') && social.tiktokFollowers)
-      m.tiktok = { followers:parseInt(social.tiktokFollowers)||0, avgViews:parseInt(social.tiktokAvgViews)||0, engagementRate:(social.tiktokEngagement||'0').replace(',', '.'), hasLink:true, bio:'', videoCount:0, topVideos:[] }
-    if (activePlatforms.includes('instagram') && social.igFollowers)
-      m.instagram = { followers:parseInt(social.igFollowers)||0, avgLikes:parseInt(social.igAvgLikes)||0, engagementRate:(social.igEngagement||'0').replace(',', '.'), hasLink:true, bio:'', postsCount:0 }
-    if (activePlatforms.includes('youtube') && social.ytSubscribers)
-      m.youtube = { subscribers:parseInt(social.ytSubscribers)||0, totalViews:parseInt(social.ytAvgViews)||0, videoCount:0 }
-    if (activePlatforms.includes('twitter') && social.twFollowers)
-      m.twitter = { followers:parseInt(social.twFollowers)||0 }
-    return m
-  }
-
-  const handleScan = () => {
-    if (!url.trim()) { setError('Please enter your website URL.'); return }
-    if (!/^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}/i.test(url.trim())) {
-      setError("That doesn't look like a valid URL. Try yourbusiness.com")
-      return
-    }
-    setError('')
-    onScanStart({ url: normalizeUrl(url), manualSocial: buildManualSocial() })
-  }
-
-  return (
-    <section className="hero-pad" style={{ paddingTop:120, paddingBottom:96, paddingLeft:24, paddingRight:24, position:'relative' }}>
-      <div style={{ position:'absolute', top:0, left:0, right:0, height:500, backgroundImage:'repeating-linear-gradient(0deg, transparent, transparent 59px, rgba(28,25,23,0.033) 59px, rgba(28,25,23,0.033) 60px)', pointerEvents:'none', maskImage:'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.22) 18%, rgba(0,0,0,0.22) 82%, transparent 100%)' }} />
-      <div style={{ maxWidth:580, margin:'0 auto', position:'relative' }}>
-        <div style={{ animation:'fadeUp .5s ease both', marginBottom:28, display:'flex', alignItems:'center', gap:10 }}>
-          <Logo size={16} />
-          <span style={{ fontSize:11, fontWeight:400, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent }}>AI Business Audit & Growth Agent</span>
-        </div>
-
-        <h1 style={{ fontFamily:'Cormorant Garant, serif', fontSize:'clamp(40px, 7vw, 70px)', fontWeight:300, lineHeight:1.06, letterSpacing:'-.025em', color:C.text, marginBottom:14, animation:'fadeUp .6s .08s ease both' }}>
-          Score your website and socials <em style={{ fontStyle:'italic', color:C.warm }}>in under a minute.</em>
-        </h1>
-
-        <p style={{ fontFamily:'Cormorant Garant, serif', fontStyle:'italic', fontSize:'clamp(18px, 2.4vw, 24px)', fontWeight:300, color:C.textMuted, lineHeight:1.3, letterSpacing:'-.01em', marginBottom:14, animation:'fadeUp .6s .11s ease both' }}>
-          Find out what's actually holding your business back.
-        </p>
-
-        <p style={{ fontSize:15, color:C.textMuted, lineHeight:1.55, marginBottom:28, animation:'fadeUp .6s .14s ease both', fontWeight:300 }}>
-          Your website score, benchmark comparisons, and the 2 biggest issues holding you back — in under a minute.
-        </p>
-
-        <div id="scan-form" className="scan-form" style={{ background:'#fff', border:'1px solid rgba(28,25,23,0.1)', borderRadius:18, padding:28, animation:'fadeUp .6s .2s ease both', boxShadow:'0 4px 32px rgba(28,25,23,0.07)' }}>
-
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
-            <p style={{ fontSize:13, fontWeight:500, color:C.text }}>Scan your business</p>
-            <span style={{ fontSize:11, color:C.textLight, fontWeight:300, display:'flex', alignItems:'center', gap:4 }}>
-              <span style={{ fontSize:10 }}>🔒</span> Free · No account
-            </span>
-          </div>
-
-          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-            <div style={{ position:'relative' }}>
-              <span style={{ position:'absolute', left:14, top:'50%', transform:'translateY(-50%)', fontSize:16 }}>🌐</span>
-              <input
-                ref={urlInputRef}
-                className="inp"
-                value={url}
-                onChange={e => setUrl(e.target.value)}
-                placeholder="yourbusiness.com"
-                onKeyDown={e => e.key==='Enter' && handleScan()}
-                autoFocus
-              />
-            </div>
-
-            {error && <p style={{ fontSize:13, color:'#c0392b', padding:'8px 12px', background:'rgba(192,57,43,0.06)', borderRadius:8 }}>{error}</p>}
-
-            {/* Social accordion */}
-            <button className="social-accordion-toggle" onClick={() => setSocialOpen(o => !o)}>
-              <span style={{ display:'flex', alignItems:'center', gap:7 }}>
-                <span style={{ fontSize:14 }}>📱</span>
-                Also analyse your social media <span style={{ fontSize:11, color:C.textLight, marginLeft:2 }}>(optional — improves the report)</span>
-              </span>
-              <span style={{ fontSize:14, color:C.textLight, transition:'transform .25s', transform:socialOpen?'rotate(180deg)':'none', display:'block' }}>↓</span>
-            </button>
-
-            <div style={{ maxHeight:socialOpen?800:0, overflow:'hidden', transition:'max-height .35s cubic-bezier(.4,0,.2,1)' }}>
-              <div style={{ paddingTop:8, display:'flex', flexDirection:'column', gap:12 }}>
-                <div className="chips-row" style={{ display:'flex', gap:7, flexWrap:'wrap' }}>
-                  {platforms.map(p => (
-                    <button key={p.key} onClick={() => togglePlatform(p.key)} style={{ background:activePlatforms.includes(p.key)?'rgba(42,92,69,0.08)':'transparent', border:`1px solid ${activePlatforms.includes(p.key)?'rgba(42,92,69,0.35)':'rgba(28,25,23,0.12)'}`, borderRadius:8, padding:'7px 13px', fontSize:13, cursor:'pointer', fontFamily:'Jost,sans-serif', fontWeight:300, color:activePlatforms.includes(p.key)?C.accent:C.textMuted, display:'flex', alignItems:'center', gap:5, transition:'all .2s' }}>
-                      {p.icon} {p.label} {activePlatforms.includes(p.key) && <span style={{ fontSize:10 }}>✓</span>}
-                    </button>
-                  ))}
-                </div>
-                {activePlatforms.map(pKey => (
-                  <div key={pKey} style={{ background:'rgba(28,25,23,0.02)', border:'1px solid rgba(28,25,23,0.07)', borderRadius:12, padding:14 }}>
-                    <p style={{ fontSize:11, letterSpacing:'.08em', textTransform:'uppercase', color:C.textLight, marginBottom:10, fontWeight:400 }}>{platforms.find(p=>p.key===pKey)?.icon} {platforms.find(p=>p.key===pKey)?.label}</p>
-                    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))', gap:8 }}>
-                      {platformFields[pKey].map(f => (
-                        <div key={f.key}>
-                          <label style={{ fontSize:11, color:C.textLight, fontWeight:300, display:'block', marginBottom:4 }}>{f.label}</label>
-                          <input className="inp" style={{ paddingLeft:12 }} value={social[f.key]} onChange={e => setSocial(s=>({...s,[f.key]:e.target.value}))} placeholder={f.placeholder} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {activePlatforms.length===0 && <p style={{ fontSize:13, color:C.textLight, fontStyle:'italic', textAlign:'center', padding:'4px 0 8px' }}>Select the platforms you're active on.</p>}
-                <p style={{ fontSize:12, color:C.textLight, fontWeight:300, lineHeight:1.5, textAlign:'center', padding:'2px 0 4px' }}>
-                  Don't have these handy? The Full Report pulls your social data automatically.
-                </p>
-              </div>
-            </div>
-
-            <button className="btn-primary" onClick={handleScan}>
-              Scan my business — it's free →
-            </button>
-            <p style={{ fontSize:12, color:C.textLight, textAlign:'center', marginTop:2 }}>Takes under a minute · No account needed</p>
-            <p style={{ fontSize:11, color:C.textLight, fontWeight:300, textAlign:'center', marginTop:6, lineHeight:1.55 }}>
-              By scanning you agree to our{' '}
-              <button
-                onClick={() => navigate('/privacy')}
-                style={{ background:'none', border:'none', padding:0, color:C.accent, fontSize:11, fontFamily:'Jost, sans-serif', fontWeight:300, cursor:'pointer', textDecoration:'underline', textDecorationColor:'rgba(42,92,69,0.35)' }}
-              >Privacy Policy</button>.
-            </p>
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// ─── How it works ─────────────────────────────────────────────────────────────
-function HowItWorks() {
-  const [ref, visible] = useReveal()
-  const steps = [
-    { n:'01', title:'Paste your URL',                            desc:'Drop your website link into the scan form above.' },
-    { n:'02', title:'We scan your website & socials',            desc:'Performance, SEO, copy, and engagement — analysed in parallel.' },
-    { n:'03', title:'Get your scored report in under a minute',  desc:'Plain-English findings, real benchmarks, and the fixes that matter most.' },
-  ]
-  return (
-    <section className="section-pad" style={{ background:C.bg, padding:'24px 24px 80px' }}>
-      <div style={{ maxWidth:1060, margin:'0 auto' }}>
-        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:24 }}>
-          <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>How it works</p>
-        </div>
-        <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-          {steps.map((s, i) => (
-            <div key={s.n} style={{
-              flex:'1 1 240px',
-              display:'flex', flexDirection:'column', gap:8,
-              padding:'22px 24px',
-              background:'#fff', border:`1px solid ${C.border}`, borderRadius:14,
-              opacity:visible?1:0, transform:visible?'none':'translateY(14px)',
-              transition:`all .5s ease ${0.06 + i*0.08}s`,
-            }}>
-              <span style={{ fontFamily:'DM Mono, monospace', fontSize:11, color:C.textLight, letterSpacing:'.08em' }}>{s.n}</span>
-              <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:20, letterSpacing:'-.015em', color:C.text }}>{s.title}</h3>
-              <p style={{ fontSize:13.5, color:C.textMuted, fontWeight:300, lineHeight:1.6 }}>{s.desc}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// ─── What we check ─────────────────────────────────────────────────────────────
-function WhatCard({ item, index, total }) {
-  const [cardRef, cardVisible] = useReveal(index * 80)
-  const br = index === 0 ? '14px 0 0 14px' : index === total - 1 ? '0 14px 14px 0' : '0'
-  return (
-    <div ref={cardRef} className="what-card" style={{ padding:'38px 32px', background:'#fff', border:'1px solid rgba(28,25,23,0.07)', borderRadius:br, opacity:cardVisible?1:0, transform:cardVisible?'none':'translateY(16px)', transition:`all .55s ease ${index*.1}s` }}>
-      <div style={{ fontSize:26, marginBottom:18 }}>{item.icon}</div>
-      <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:22, letterSpacing:'-.015em', marginBottom:12, color:C.text }}>{item.title}</h3>
-      <p style={{ color:C.textMuted, lineHeight:1.75, fontSize:14.5, fontWeight:300 }}>{item.desc}</p>
-    </div>
-  )
-}
-
-function WhatWeCheck() {
-  const [ref, visible] = useReveal()
-  const items = [
-    { icon:'🌐', title:'Your website', desc:'Load speed, mobile experience, SEO meta, copy clarity, call-to-action presence, and trust signals — scored against real benchmarks.' },
-    { icon:'📱', title:'Your social content', desc:'TikTok, Instagram, YouTube, X, Facebook, LinkedIn — engagement rates, content mix, hook patterns, posting times, and hashtag strategy.' },
-    { icon:'📋', title:'A clear action list', desc:'A score from 0–100 for every area, plus prioritised fixes written in plain language — no jargon, no guessing, no generic advice.' },
-  ]
-  return (
-    <section className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, padding:'96px 24px' }}>
-      <div style={{ maxWidth:1060, margin:'0 auto' }}>
-        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:16 }}>
-          <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>What the scan checks</p>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em', lineHeight:1.12 }}>Every part of your online presence,<br />in one report.</h2>
-          <p style={{ fontSize:15, color:C.textMuted, fontWeight:300, marginTop:14, maxWidth:520, lineHeight:1.65 }}>
-            Both the free scan and the full report analyse these three areas. The free scan shows your score and 2 critical issues — the full report goes deep on every one.
-          </p>
-        </div>
-        <div style={{ display:'flex', gap:8, marginBottom:44, flexWrap:'wrap' }}>
-          <span style={{ fontSize:12, background:'rgba(42,92,69,0.08)', border:'1px solid rgba(42,92,69,0.18)', borderRadius:20, padding:'5px 14px', color:C.accent, fontWeight:400 }}>✓ Free scan — score + 2 issues</span>
-          <span style={{ fontSize:12, background:'rgba(28,25,23,0.05)', border:'1px solid rgba(28,25,23,0.12)', borderRadius:20, padding:'5px 14px', color:C.textMuted, fontWeight:300 }}>★ Full report — all 5 issues + deep analysis</span>
-        </div>
-        <div className="what-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:2 }}>
-          {items.map((item, i) => (
-            <WhatCard key={i} item={item} index={i} total={items.length} />
-          ))}
-        </div>
-      </div>
-    </section>
   )
 }
 
@@ -769,41 +480,6 @@ function GrowthAgentSection({ navigate }) {
         </div>
       </div>
     </section>
-  )
-}
-
-// ─── Sample report helpers ─────────────────────────────────────────────────────
-function SampleMiniBar({ label, value, color }) {
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:9 }}>
-      <div style={{ width:90, fontSize:12, color:C.textMuted, fontWeight:300, flexShrink:0 }}>{label}</div>
-      <div style={{ flex:1, height:4, background:'rgba(28,25,23,0.07)', borderRadius:2, overflow:'hidden' }}>
-        <div style={{ height:'100%', width:`${value}%`, background:color, borderRadius:2, transition:'width 1.1s cubic-bezier(.4,0,.2,1)' }}/>
-      </div>
-      <div style={{ width:26, fontSize:12, color, fontWeight:500, textAlign:'right', fontFamily:'DM Mono, monospace' }}>{value}</div>
-    </div>
-  )
-}
-
-function SampleBmRow({ platform, metric, yours, benchmark, diff, up, note }) {
-  return (
-    <div className="sample-bm-row" style={{ display:'grid', gridTemplateColumns:'1fr auto auto auto', gap:8, alignItems:'center', padding:'9px 0', borderBottom:'1px solid rgba(28,25,23,0.06)' }}>
-      <div>
-        <span style={{ fontSize:12, color:C.textMuted, fontWeight:300, display:'block' }}>{platform} · {metric}</span>
-        {note && <span style={{ fontSize:10, color:up?C.accent:C.red, fontWeight:400 }}>{note}</span>}
-      </div>
-      <div style={{ textAlign:'right' }}>
-        <div style={{ fontSize:14, fontWeight:500, fontFamily:'Cormorant Garant, serif', color:C.text }}>{yours}</div>
-        <div style={{ fontSize:9, color:C.textLight, textTransform:'uppercase', letterSpacing:'.05em' }}>yours</div>
-      </div>
-      <span className="sample-bm-col-hide" style={{ fontSize:10, padding:'2px 7px', borderRadius:4, background:up?'rgba(42,92,69,0.1)':'rgba(192,57,43,0.08)', color:up?C.accent:C.red, fontWeight:500 }}>
-        {up?'↑':'↓'} {diff}
-      </span>
-      <div className="sample-bm-col-hide" style={{ textAlign:'right' }}>
-        <div style={{ fontSize:12, color:C.textLight, fontWeight:300 }}>{benchmark}</div>
-        <div style={{ fontSize:9, color:C.textLight, textTransform:'uppercase', letterSpacing:'.05em' }}>avg</div>
-      </div>
-    </div>
   )
 }
 
@@ -1329,160 +1005,10 @@ function AgentRequirements() {
   )
 }
 
-// ─── Sample Report ─────────────────────────────────────────────────────────────
-function SampleReport({ navigate, onScanStart }) {
-  const [ref, visible] = useReveal()
-  const [tab, setTab] = useState('free')
-
-  const cardStyle = (delay, extra={}) => ({
-    background:'#fff', border:'1px solid rgba(28,25,23,0.08)', borderRadius:16, padding:'22px 24px', marginBottom:12,
-    opacity:visible?1:0, transform:visible?'none':'translateY(14px)', transition:`all .55s ease ${delay}s`, ...extra
-  })
-  const accentCardStyle = (delay) => ({ ...cardStyle(delay), border:'1px solid rgba(42,92,69,0.2)' })
-
-  const r=54, circ=2*Math.PI*r
-
-  return (
-    <section className="section-pad" style={{ padding:'96px 24px', background:C.bg }}>
-      <div style={{ maxWidth:1060, margin:'0 auto' }}>
-        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:40 }}>
-          <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Sample output</p>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em', lineHeight:1.12 }}>See exactly what you get.</h2>
-          <p style={{ color:C.textMuted, marginTop:12, fontSize:15, fontWeight:300 }}>Real data. Benchmark comparisons. Specific fixes — and a live dashboard when you're on the Growth Agent.</p>
-        </div>
-
-        <div className="tab-row" style={{ display:'flex', gap:0, marginBottom:32, background:'rgba(28,25,23,0.05)', borderRadius:12, padding:4, width:'fit-content', maxWidth:'100%' }}>
-          {[
-            { key:'free',   label:'Free scan' },
-            { key:'full',   label:'★ Full report — €9' },
-            { key:'agent',  label:'⚡ Growth Agent dashboard' },
-          ].map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)} style={{
-              background:tab===t.key?'#fff':'transparent',
-              border:'none', borderRadius:9, padding:'9px 20px',
-              fontFamily:'Jost,sans-serif', fontSize:13, fontWeight:tab===t.key?500:300,
-              color:tab===t.key?(t.key==='full'?C.accent:t.key==='agent'?C.warm:C.text):C.textLight,
-              cursor:'pointer', transition:'all .2s', whiteSpace:'nowrap',
-              boxShadow:tab===t.key?'0 1px 6px rgba(28,25,23,0.1)':'none',
-            }}>{t.label}</button>
-          ))}
-        </div>
-
-        {tab === 'free' && (
-          <div className="sample-grid" style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:16, alignItems:'start' }}>
-            <div>
-              <div style={{ ...cardStyle(0.1), display:'flex', gap:18, alignItems:'center', flexWrap:'wrap' }}>
-                <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4, flexShrink:0 }}>
-                  <svg width="110" height="110" viewBox="0 0 140 140">
-                    <circle cx="70" cy="70" r={r} fill="none" stroke="rgba(28,25,23,0.08)" strokeWidth="8"/>
-                    <circle cx="70" cy="70" r={r} fill="none" stroke={C.yellow} strokeWidth="8" strokeLinecap="round"
-                      strokeDasharray={`${visible?(41/100)*circ:0} ${circ}`} strokeDashoffset={circ*0.25}
-                      style={{ transition:'stroke-dasharray 1.2s cubic-bezier(0.4,0,0.2,1) 0.2s' }}/>
-                    <text x="70" y="66" textAnchor="middle" fontFamily="Cormorant Garant, serif" fontSize="32" fontWeight="300" fill="#1c1917">41</text>
-                    <text x="70" y="81" textAnchor="middle" fontFamily="Jost, sans-serif" fontSize="11" fontWeight="300" fill="#a09890" letterSpacing="2">/100</text>
-                  </svg>
-                  <span style={{ fontSize:10, letterSpacing:'.08em', textTransform:'uppercase', color:C.yellow, fontWeight:500 }}>Needs Work</span>
-                </div>
-                <div style={{ flex:1, minWidth:140 }}>
-                  <p style={{ fontSize:13, fontWeight:500, color:C.yellow, marginBottom:6, lineHeight:1.4 }}>At 41/100, you're losing visitors before they read a single word.</p>
-                  <p style={{ fontSize:12, color:C.textMuted, lineHeight:1.65, fontWeight:300 }}>Site loads in 6.1s — 3.6s over Google's limit. TikTok engagement 63% below the fitness average. No CTA above the fold.</p>
-                </div>
-              </div>
-              <div style={cardStyle(0.18)}>
-                <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', color:C.textLight, fontWeight:500, marginBottom:14 }}>Score Breakdown</p>
-                <SampleMiniBar label="Performance" value={27} color={C.red} />
-                <SampleMiniBar label="SEO"         value={54} color={C.yellow} />
-                <SampleMiniBar label="Copy & UX"   value={35} color={C.red} />
-                <SampleMiniBar label="TikTok"      value={22} color={C.red} />
-              </div>
-              <div style={{ ...accentCardStyle(0.24), padding:0, overflow:'hidden' }}>
-                <div style={{ padding:'13px 18px 9px', borderBottom:'1px solid rgba(28,25,23,0.07)' }}>
-                  <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', color:C.accent, fontWeight:500, marginBottom:1 }}>Market Benchmarks</p>
-                  <p style={{ fontSize:11, color:C.textMuted, fontWeight:300 }}>vs. Fitness & Health</p>
-                </div>
-                <div style={{ padding:'2px 18px 8px' }}>
-                  <SampleBmRow platform="Website" metric="Mobile Speed" yours="27/100" benchmark="45/100" diff="18pts" up={false} note="Slower than 73% of mobile pages" />
-                  <SampleBmRow platform="TikTok"  metric="Engagement"   yours="1.8%" benchmark="4.8%" diff="63%" up={false} note="Worse than 68% of Fitness accounts" />
-                  <SampleBmRow platform="TikTok"  metric="Avg. Views"   yours="4,200" benchmark="15,000" diff="72%" up={false} />
-                </div>
-              </div>
-            </div>
-            <div>
-              <div style={{ marginBottom:10 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:9 }}>
-                  <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', color:C.textLight, fontWeight:500 }}>Priority Actions</p>
-                  <p style={{ fontSize:11, color:C.textLight, fontWeight:300 }}>2 of 5 shown</p>
-                </div>
-                {[
-                  { bg:'#fdf2f2', border:'#f5c6c6', label:'🔴 Critical', color:C.red, title:'Site takes 6.1s to load — fix the hero image', desc:'Your load time puts you in the bottom 27% of mobile pages. Compress your hero image to under 150kb and add loading="eager" to cut it to under 2s.' },
-                  { bg:'#fdf2f2', border:'#f5c6c6', label:'🔴 Critical', color:C.red, title:'No call-to-action above the fold — visitors leave', desc:'Sites with a visible CTA above the fold convert 3.5× better. Add one button in the first viewport with a benefit-led label.' },
-                ].map((issue, i) => (
-                  <div key={i} style={{ background:issue.bg, border:`1px solid ${issue.border}`, borderRadius:12, padding:'15px 17px', marginBottom:10, opacity:visible?1:0, transform:visible?'none':'translateX(14px)', transition:`all .5s ease ${0.28+i*0.08}s` }}>
-                    <span style={{ fontSize:10, letterSpacing:'.08em', textTransform:'uppercase', color:issue.color, fontWeight:500, display:'block', marginBottom:4 }}>{issue.label}</span>
-                    <p style={{ fontSize:13, fontWeight:500, color:C.text, marginBottom:4 }}>{issue.title}</p>
-                    <p style={{ fontSize:12, color:C.textMuted, lineHeight:1.65, fontWeight:300 }}>{issue.desc}</p>
-                  </div>
-                ))}
-                <div style={{ background:'#fefdf2', border:'1px solid #f5e6a3', borderRadius:12, padding:'15px 17px', position:'relative', overflow:'hidden', opacity:visible?1:0, transform:visible?'none':'translateX(14px)', transition:'all .5s ease .44s' }}>
-                  <span style={{ fontSize:10, letterSpacing:'.08em', textTransform:'uppercase', color:C.yellow, fontWeight:500, display:'block', marginBottom:4 }}>🟡 Important</span>
-                  <p style={{ fontSize:13, fontWeight:500, color:C.text, marginBottom:4 }}>TikTok engagement 63% below fitness average</p>
-                  <p style={{ fontSize:12, color:C.textMuted, lineHeight:1.65, fontWeight:300, filter:'blur(4px)', userSelect:'none', pointerEvents:'none' }}>Your 1.8% engagement vs 4.8% fitness benchmark means your hooks aren't landing. Your top 3 videos average 4× normal views — reverse-engineer their first 2 seconds.</p>
-                  <div style={{ position:'absolute', bottom:0, left:0, right:0, height:40, background:'linear-gradient(transparent, rgba(254,253,242,0.9))' }} />
-                </div>
-              </div>
-              <div style={{ background:'#fff', border:'1px solid rgba(42,92,69,0.22)', borderRadius:16, padding:'24px 22px', textAlign:'center', opacity:visible?1:0, transform:visible?'none':'translateY(10px)', transition:'all .5s ease .5s' }}>
-                <div style={{ fontSize:18, marginBottom:9 }}>★</div>
-                <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:20, letterSpacing:'-.015em', marginBottom:7, color:C.text }}>Get the full report — €9</h3>
-                <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.65, fontWeight:300, marginBottom:14, maxWidth:280, margin:'0 auto 14px' }}>All 5 issues, exact step-by-step fixes, deep social analysis, caption rewrites, and benchmarks.</p>
-                <button onClick={() => setTab('full')} style={{ background:'rgba(42,92,69,0.08)', color:C.accent, border:'1px solid rgba(42,92,69,0.2)', borderRadius:8, padding:'8px 18px', fontSize:12, fontFamily:'Jost,sans-serif', fontWeight:500, cursor:'pointer', marginBottom:12, transition:'all .2s' }}>See full report sample ↓</button>
-                <br />
-                <button onClick={() => document.getElementById('scan-form')?.scrollIntoView({ behavior:'smooth', block:'center' })} style={{ background:C.text, color:C.bg, border:'none', borderRadius:9, padding:'12px 24px', fontSize:13, fontFamily:'Jost,sans-serif', fontWeight:500, cursor:'pointer', letterSpacing:'.02em', transition:'background .2s' }}
-                  onMouseEnter={e=>e.currentTarget.style.background=C.accent}
-                  onMouseLeave={e=>e.currentTarget.style.background=C.text}
-                >Scan my business first — it's free</button>
-                <p style={{ fontSize:11, color:C.textLight, marginTop:9, fontWeight:300 }}>Free scan · No account · Instant</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {tab === 'full' && (
-          <div style={{ textAlign:'center', padding:'48px 24px' }}>
-            <p style={{ fontSize:32, marginBottom:16 }}>📋</p>
-            <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:32, letterSpacing:'-.02em', marginBottom:12, color:C.text }}>Full report includes everything.</h3>
-            <p style={{ fontSize:15, color:C.textMuted, fontWeight:300, maxWidth:480, margin:'0 auto 32px', lineHeight:1.7 }}>All 5 priority actions with exact copy-paste fixes, deep social dive, hook analysis on every post, caption rewrites, brand clarity score, and an action plan by time required.</p>
-            <SubscribeButton type="full_scan" style={{ background:C.accent, width:'auto', display:'inline-flex', padding:'14px 28px', fontSize:14 }} />
-            <p style={{ fontSize:12, color:C.textLight, marginTop:10, fontWeight:300 }}>No account · Results in under a minute</p>
-          </div>
-        )}
-
-        {tab === 'agent' && (
-          <div>
-            <div style={{ marginBottom:20, display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexWrap:'wrap', gap:12 }}>
-              <div>
-                <p style={{ fontSize:14, color:C.textMuted, fontWeight:300, maxWidth:480, lineHeight:1.65 }}>
-                  This is your Growth Agent dashboard after connecting your website, PostHog analytics, and GitHub. Example data shown.
-                </p>
-              </div>
-              <SubscribeButton type="subscription" style={{ width:'auto', display:'inline-flex', padding:'12px 22px', fontSize:13, flexShrink:0 }} />
-            </div>
-            <AgentDashboardPreview navigate={navigate} />
-            <p style={{ fontSize:12, color:C.textLight, marginTop:14, textAlign:'center', fontWeight:300 }}>Set up in 5 minutes · Cancel anytime · Nothing ships without your OK</p>
-          </div>
-        )}
-      </div>
-    </section>
-  )
-}
-
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 function Pricing({ navigate }) {
   const [ref, visible] = useReveal()
   const [allFeaturesOpen, setAllFeaturesOpen] = useState(false)
-
-  const scrollToScan = () => {
-    document.getElementById('scan-form')?.scrollIntoView({ behavior:'smooth', block:'center' })
-  }
 
   const agentFeaturesTop = ['AI analyses your repo + analytics weekly','Writes the code fix automatically','Reply YES or NO via Telegram','Auto-rollback if metrics drop','Competitor weekly scan','A/B testing automation']
   const agentFeaturesExtra = ['Identifies #1 conversion problem','Opens a GitHub Pull Request','Brand Guardrails — your rules enforced','Full funnel analysis (all pages)','Multi-page sprint when root cause is shared','Weekly email summary','Monthly roast report — brutal honesty','Business DNA — learns over time','Public impact timeline (shareable)']
@@ -1495,75 +1021,6 @@ function Pricing({ navigate }) {
           <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em' }}>Simple. No surprises.</h2>
         </div>
         <div className="pricing-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:16, alignItems:'start' }}>
-
-          {/* Free scan card */}
-          <div className="pricing-card" style={{
-            background:'#fff', border:'1px solid rgba(28,25,23,0.08)', borderRadius:18, padding:32,
-            opacity:visible?1:0, transform:visible?'none':'translateY(20px)', transition:'all .55s ease 0s',
-          }}>
-            <p style={{ fontWeight:500, fontSize:15, marginBottom:5, color:C.text }}>Free scan</p>
-            <p style={{ color:C.textLight, fontSize:13, fontWeight:300, marginBottom:20 }}>See where you stand.</p>
-            <span style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:52, letterSpacing:'-.03em', color:C.text }}>€0</span>
-            <p style={{ color:C.textLight, fontSize:12, marginBottom:26, fontWeight:300, marginTop:4 }}>no account required</p>
-            <div style={{ display:'flex', flexDirection:'column', gap:9, marginBottom:28 }}>
-              {['Overall score 0–100','Full website analysis (speed, SEO, copy)','Social media stats & engagement rates','Industry benchmark comparisons','Your 2 most critical issues to fix','No account needed — ever'].map((f,j) => (
-                <div key={j} style={{ display:'flex', alignItems:'flex-start', gap:9, fontSize:13 }}>
-                  <span style={{ color:C.textLight, flexShrink:0, marginTop:1 }}>✓</span>
-                  <span style={{ color:C.textMuted, fontWeight:300 }}>{f}</span>
-                </div>
-              ))}
-            </div>
-            <button onClick={scrollToScan} style={{ background:'transparent', color:C.text, border:'1px solid rgba(28,25,23,0.18)', borderRadius:10, padding:'14px 28px', fontSize:15, fontFamily:'Jost,sans-serif', fontWeight:500, cursor:'pointer', width:'100%', letterSpacing:'.03em', transition:'all .2s' }}
-              onMouseEnter={e=>{ e.currentTarget.style.background='rgba(28,25,23,0.03)'; e.currentTarget.style.borderColor='rgba(28,25,23,0.35)'; e.currentTarget.style.transform='translateY(-1px)' }}
-              onMouseLeave={e=>{ e.currentTarget.style.background='transparent'; e.currentTarget.style.borderColor='rgba(28,25,23,0.18)'; e.currentTarget.style.transform='none' }}
-            >Start for free</button>
-          </div>
-
-          {/* Full report card — navigates to /premium */}
-          <div className="pricing-card" style={{
-            background:'#fff', border:'1px solid rgba(42,92,69,0.28)', borderRadius:18, padding:32, position:'relative',
-            opacity:visible?1:0, transform:visible?'none':'translateY(20px)', transition:'all .55s ease .12s',
-            boxShadow:'0 8px 40px rgba(42,92,69,0.1)',
-          }}>
-            <p style={{ fontWeight:500, fontSize:15, marginBottom:5, color:C.text }}>Full report</p>
-            <p style={{ color:C.textLight, fontSize:13, fontWeight:300, marginBottom:20 }}>Everything you need to actually improve.</p>
-            <span style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:52, letterSpacing:'-.03em', color:C.text }}>€9</span>
-            <sup style={{ fontSize:14, color:C.textLight, fontWeight:300, marginLeft:2 }}>*</sup>
-            <p style={{ color:C.textLight, fontSize:12, marginBottom:4, fontWeight:300, marginTop:4 }}>one-time · no subscription</p>
-            <div style={{ display:'flex', flexDirection:'column', gap:9, marginBottom:28 }}>
-              {[
-                'Everything in the free scan',
-                'All 5 priority actions with exact fixes',
-                'Deep social analysis on your focus platform',
-                '  → Best posting times from your data',
-                '  → Content mix & hook pattern breakdown',
-                '  → Hashtag strategy analysis',
-                'Hook quality analysis — post by post',
-                'Caption & CTA rewrite suggestions',
-                'Brand clarity score + specific improvements',
-              ].map((f,j) => {
-                const isIndented = f.startsWith('  →')
-                const text = isIndented ? f.trim() : f
-                return (
-                  <div key={j} style={{ display:'flex', alignItems:'flex-start', gap:9, fontSize:13, paddingLeft:isIndented?16:0 }}>
-                    <span style={{ color:isIndented?C.textLight:C.accent, flexShrink:0, marginTop:1, fontSize:isIndented?11:13 }}>{isIndented?'→':'✓'}</span>
-                    <span style={{ color:isIndented?C.textLight:C.textMuted, fontWeight:300, fontSize:isIndented?12:13 }}>{text}</span>
-                  </div>
-                )
-              })}
-            </div>
-
-            <div style={{ background:'rgba(42,92,69,0.04)', border:'1px solid rgba(42,92,69,0.15)', borderRadius:12, padding:'16px', marginBottom:0 }}>
-              <p style={{ fontSize:12, color:C.accent, fontWeight:400, marginBottom:4 }}>
-                Website + social handles — all pulled automatically.
-              </p>
-              <p style={{ fontSize:11, color:C.textLight, fontWeight:300, marginBottom:12 }}>
-                No manual numbers needed. We scrape your real data.
-              </p>
-              <SubscribeButton type="full_scan" style={{ borderRadius:9, padding:'13px', fontSize:14 }} />
-              <p style={{ fontSize:11, color:C.textLight, textAlign:'center', marginTop:8, fontWeight:300 }}>No account · Results in under a minute</p>
-            </div>
-          </div>
 
           {/* Growth Agent card */}
           <div className="pricing-card" style={{
@@ -1638,15 +1095,6 @@ function Pricing({ navigate }) {
 function FAQ() {
   const [ref, visible] = useReveal()
   const [open, setOpen] = useState(null)
-  const [activeTab, setActiveTab] = useState('scan')
-
-  const scanItems = [
-    { q:'Do I need an account?', a:'No. You can scan your business and see your score without creating an account. The full report is a one-time €9 payment — no login, no subscription.' },
-    { q:'Which platforms does Velyr support?', a:'Website, TikTok, Instagram, YouTube, X (Twitter), Facebook, and LinkedIn. You don\'t need all of them — just add what you have. For the full report you can pick one platform as your "focus" for a deeper analysis.' },
-    { q:"Free vs. full report — what's the real difference?", a:'The free scan gives you your score, website analysis, social stats, benchmark comparisons, and your 2 most critical issues. The full report (€9, one-time) adds all 5 issues with exact copy-paste fixes, the deep social dive on your focus platform, hook-by-hook analysis of your posts, a caption rewrite, and brand clarity scoring.' },
-    { q:'How accurate is the analysis?', a:"We use real scraped data from your profiles — actual engagement rates, real posts, real timestamps. The AI interprets this data and identifies patterns. It's not perfect, but it's based on what actually happens in your account, not generic advice." },
-    { q:'Is my data safe?', a:'Yes. Your data is only used to run the agent and generate your reports. We never sell or share it.' },
-  ]
 
   const agentItems = [
     { q:'What is the Growth Agent?', a:'The Growth Agent is a semi-autonomous AI that runs every Monday. It reads your real PostHog analytics and your GitHub repo, finds the biggest conversion problem, writes the code fix, opens a Pull Request, and sends you a Telegram message — reply YES to deploy or NO to skip. All automatically.' },
@@ -1656,7 +1104,7 @@ function FAQ() {
     { q:'What is Full Funnel analysis?', a:'Instead of only looking at your homepage, the agent scans every page in your GitHub repo, cross-references them with your real analytics, and identifies where visitors are dropping off. It then prioritises the highest-leverage page to fix.' },
   ]
 
-  const items = activeTab === 'scan' ? scanItems : agentItems
+  const items = agentItems
 
   return (
     <section className="section-pad" style={{ padding:'96px 24px' }}>
@@ -1666,21 +1114,8 @@ function FAQ() {
           <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 48px)', letterSpacing:'-.02em' }}>Questions you might have.</h2>
         </div>
 
-        <div style={{ display:'flex', gap:0, marginBottom:32, background:'rgba(28,25,23,0.05)', borderRadius:10, padding:4, width:'fit-content' }}>
-          {[{ key:'scan', label:'Free Scan & Full Report' }, { key:'agent', label:'Growth Agent' }].map(t => (
-            <button key={t.key} onClick={() => { setActiveTab(t.key); setOpen(null) }} style={{
-              background:activeTab===t.key?'#fff':'transparent',
-              border:'none', borderRadius:7, padding:'9px 18px',
-              fontFamily:'Jost,sans-serif', fontSize:13, fontWeight:activeTab===t.key?500:300,
-              color:activeTab===t.key?C.text:C.textLight,
-              cursor:'pointer', transition:'all .2s', whiteSpace:'nowrap',
-              boxShadow:activeTab===t.key?'0 1px 6px rgba(28,25,23,0.1)':'none',
-            }}>{t.label}</button>
-          ))}
-        </div>
-
         {items.map((item, i) => (
-          <div key={`${activeTab}-${i}`} style={{ borderBottom:`1px solid ${C.border}` }}>
+          <div key={`agent-${i}`} style={{ borderBottom:`1px solid ${C.border}` }}>
             <button onClick={() => setOpen(open===i?null:i)} style={{ width:'100%', background:'none', border:'none', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'19px 0', textAlign:'left' }}>
               <span style={{ fontWeight:400, fontSize:15, color:C.text, paddingRight:16 }}>{item.q}</span>
               <span style={{ color:C.textLight, fontSize:20, lineHeight:1, flexShrink:0, transition:'transform .25s', transform:open===i?'rotate(45deg)':'none', display:'block' }}>+</span>
@@ -1690,27 +1125,6 @@ function FAQ() {
             </div>
           </div>
         ))}
-      </div>
-    </section>
-  )
-}
-
-// ─── Final CTA ────────────────────────────────────────────────────────────────
-function FinalCTA() {
-  const [ref, visible] = useReveal()
-  return (
-    <section style={{ background:C.text, padding:'96px 24px' }}>
-      <div ref={ref} style={{ maxWidth:520, margin:'0 auto', textAlign:'center', opacity:visible?1:0, transform:visible?'none':'translateY(20px)', transition:'all .65s ease' }}>
-        <div style={{ marginBottom:28, animation:visible?'float 4s ease-in-out infinite':'none', display:'inline-block' }}>
-          <Logo size={36} color="#f0ece4" />
-        </div>
-        <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, color:C.bg, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, marginBottom:16 }}>Your score is one scan away.</h2>
-        <p style={{ color:'rgba(247,244,239,0.5)', fontSize:16, marginBottom:40, lineHeight:1.7, fontWeight:300 }}>Find out in under a minute what's holding your business back — and exactly how to fix it.</p>
-        <button onClick={() => document.getElementById('scan-form')?.scrollIntoView({ behavior:'smooth', block:'center' })} style={{ background:C.bg, color:C.text, border:'none', borderRadius:10, padding:'15px 32px', fontFamily:'Jost,sans-serif', fontWeight:500, fontSize:15, cursor:'pointer', letterSpacing:'.02em', transition:'background .2s', display:'inline-block' }}
-          onMouseEnter={e=>e.target.style.background='#ede8e0'}
-          onMouseLeave={e=>e.target.style.background=C.bg}
-        >Scan my business — it's free</button>
-        <p style={{ marginTop:14, fontSize:12, color:'rgba(247,244,239,0.25)', fontWeight:300 }}>No account · No credit card · Instant results</p>
       </div>
     </section>
   )
@@ -1745,7 +1159,7 @@ function Footer({ navigate }) {
   )
 }
 
-export default function Home({ navigate, onScanStart, scrollToPricing }) {
+export default function Home({ navigate, scrollToPricing }) {
   useEffect(() => {
     if (scrollToPricing) {
       setTimeout(() => {
@@ -1758,15 +1172,23 @@ export default function Home({ navigate, onScanStart, scrollToPricing }) {
     <>
       <style>{CSS}</style>
       <Nav navigate={navigate} />
-      <Hero onScanStart={onScanStart} navigate={navigate} />
-      <HowItWorks />
-      <WhatWeCheck />
       <GrowthAgentSection navigate={navigate} />
       <AgentRequirements />
-      <SampleReport navigate={navigate} onScanStart={onScanStart} />
+      {/* Agent dashboard preview — standalone section (was the 'agent' tab of the removed SampleReport).
+          Placeholder framing; S0b will repurpose with proper landing copy. */}
+      <section className="section-pad" style={{ padding:'96px 24px', background:C.bg }}>
+        <div style={{ maxWidth:1060, margin:'0 auto' }}>
+          <div style={{ marginBottom:40 }}>
+            <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Growth Agent dashboard</p>
+            <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em', lineHeight:1.12 }}>A live look at the agent at work.</h2>
+            <p style={{ color:C.textMuted, marginTop:12, fontSize:15, fontWeight:300 }}>Example data shown — this is your dashboard after connecting your website, PostHog analytics, and GitHub.</p>
+          </div>
+          <AgentDashboardPreview navigate={navigate} />
+          <p style={{ fontSize:12, color:C.textLight, marginTop:14, textAlign:'center', fontWeight:300 }}>Set up in 5 minutes · Cancel anytime · Nothing ships without your OK</p>
+        </div>
+      </section>
       <Pricing navigate={navigate} />
       <FAQ />
-      <FinalCTA />
       <Footer navigate={navigate} />
     </>
   )
