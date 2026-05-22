@@ -36,7 +36,10 @@
       "Bash(echo \"Exit code: $?\")",
       "Bash(magick --version)",
       "Bash(convert --version)",
-      "Bash(magick -version)"
+      "Bash(magick -version)",
+      "Bash(git *)",
+      "Bash(grep -nE \"^\\(async \\)?function |^const [A-Z_]+ =|^export |^const [a-zA-Z]+ = \\(async \\)?\\\\\\(|=> \\\\{$\" index.ts)",
+      "Bash(python -c ' *)"
     ]
   }
 }
