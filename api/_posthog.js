@@ -6,7 +6,7 @@ export const posthogClient = new PostHog(process.env.POSTHOG_API_KEY, {
 
 // Erstellt automatisch ein PostHog-Projekt für einen neuen User
 export async function createPostHogProject(projectName) {
-  const host = process.env.POSTHOG_HOST || 'https://eu.posthog.com'
+  const host = process.env.POSTHOG_HOST || 'https://us.i.posthog.com'
   const orgId = process.env.POSTHOG_ORG_ID // neu in .env — deine Org-ID
 
   const res = await fetch(`${host}/api/organizations/${orgId}/projects/`, {

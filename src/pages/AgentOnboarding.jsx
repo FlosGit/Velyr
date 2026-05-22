@@ -856,7 +856,7 @@ export default function AgentOnboarding({ navigate }) {
         website_url: allData.websiteUrl,
         posthog_api_key: null,
         posthog_project_id: null,
-        posthog_host: 'https://eu.posthog.com',
+        posthog_host: 'https://us.i.posthog.com',
         posthog_snippet_token: null,
         telegram_chat_id: allData.telegramChatId,
         // Stage 4.13: strong chat_id binding. Both columns must be set for

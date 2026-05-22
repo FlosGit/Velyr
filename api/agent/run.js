@@ -382,7 +382,7 @@ async function handleEvaluateAB(res) {
 
       const apiKey    = decryptSecret(conn?.posthog_api_key)    || process.env.POSTHOG_API_KEY
       const projectId = conn?.posthog_project_id || process.env.POSTHOG_PROJECT_ID
-      const host      = conn?.posthog_host       || process.env.POSTHOG_HOST || 'https://eu.posthog.com'
+      const host      = conn?.posthog_host       || process.env.POSTHOG_HOST || 'https://us.i.posthog.com'
       if (!apiKey) continue
 
       const flagRes  = await fetch(`${host}/api/projects/${projectId}/feature_flags/${test.posthog_flag_id}/`, {
@@ -519,7 +519,7 @@ async function handleRollbackCheck(res) {
 
       const apiKey    = decryptSecret(conn?.posthog_api_key)    || process.env.POSTHOG_API_KEY
       const projectId = conn?.posthog_project_id || process.env.POSTHOG_PROJECT_ID
-      const host      = conn?.posthog_host       || process.env.POSTHOG_HOST || 'https://eu.posthog.com'
+      const host      = conn?.posthog_host       || process.env.POSTHOG_HOST || 'https://us.i.posthog.com'
       if (!apiKey || !projectId) continue
 
       const deployedAt    = new Date(run.completed_at)
@@ -936,7 +936,7 @@ ${pagesLines ? `*Most visited:*\n${pagesLines}` : ''}
 }
 
 // ─── POSTHOG ANALYTICS (needed by weekly_summary + midweek) ──────────────────
-async function getPostHogAnalytics(posthogApiKey, posthogProjectId, posthogHost = 'https://eu.posthog.com') {
+async function getPostHogAnalytics(posthogApiKey, posthogProjectId, posthogHost = 'https://us.i.posthog.com') {
   try {
     const headers       = { 'Authorization': `Bearer ${posthogApiKey}`, 'Content-Type': 'application/json' }
     const sevenDaysAgo  = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString().split('T')[0]

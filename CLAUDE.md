@@ -115,7 +115,7 @@ Additional endpoints not covered above:
 
 ### Analytics
 
-PostHog is loaded inline in `index.html` (EU host, key `phc_kfqurzaEB9iZBg4Wc7wm7AV6amEKrgmLmz5jn5K5EtJ8`). Server-side capture uses `posthog-node` via `api/posthog.js`.
+PostHog is loaded inline in `index.html` (US host, key `phc_qmLvjZawzLuEnR5ns5eFKXSFiSD5AX4y87LvELP9nqB5`). Server-side capture uses `posthog-node` via `api/posthog.js`.
 
 ## Environment Variables
 

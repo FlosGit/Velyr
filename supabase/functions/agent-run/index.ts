@@ -650,7 +650,7 @@ async function fetchBrandGuardrails(subscriptionId: string) {
 }
 
 // ─── POSTHOG ANALYTICS ───────────────────────────────────────────────────────
-async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: string, posthogHost = 'https://eu.posthog.com') {
+async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: string, posthogHost = 'https://us.i.posthog.com') {
   try {
     const headers         = { 'Authorization': `Bearer ${posthogApiKey}`, 'Content-Type': 'application/json' }
     const sevenDaysAgo    = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
@@ -794,7 +794,7 @@ async function fetchCompetitorData(competitorUrls: string[]) {
 // FIX: removed 'continue' outside loop — now returns early with null instead
 async function setupPostHogForConnection(conn: any) {
   try {
-    const host  = Deno.env.get('POSTHOG_HOST') || 'https://eu.posthog.com'
+    const host  = Deno.env.get('POSTHOG_HOST') || 'https://us.i.posthog.com'
     const orgId = Deno.env.get('POSTHOG_ORG_ID')
     if (!orgId) { console.error('POSTHOG_ORG_ID not set'); return null }
 
@@ -820,8 +820,8 @@ async function setupPostHogForConnection(conn: any) {
     const isNext      = conn.github_repo_name?.toLowerCase().includes('next')
     const framework   = isNext ? 'Next.js' : 'React/Vite'
     const snippetCode = isNext
-      ? `// pages/_app.jsx  OR  app/layout.tsx\nimport posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://eu.posthog.com' })\n}`
-      : `// src/main.jsx\nimport posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://eu.posthog.com' })`
+      ? `// pages/_app.jsx  OR  app/layout.tsx\nimport posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n}`
+      : `// src/main.jsx\nimport posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })`
 
     const { data: sub } = await supabase
       .from('agent_subscriptions').select('telegram_chat_id')
