@@ -10,10 +10,6 @@
       "schedule": "0 9 * * 3"
     },
     {
-      "path": "/api/agent/run?mode=evaluate_ab",
-      "schedule": "0 9 * * 1"
-    },
-    {
       "path": "/api/agent/run?mode=rollback_check",
       "schedule": "0 10 * * 3"
     },

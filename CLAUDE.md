@@ -63,15 +63,14 @@ Industry detection uses URL + hero headline keywords to pick from fitness / SaaS
 
 ### Agent System
 
-Subscribers authenticate via Supabase Auth, connect GitHub via OAuth, and configure their site. `vercel.json` defines five cron entries that all hit `/api/agent/run` with different `?mode=` params:
+Subscribers authenticate via Supabase Auth, connect GitHub via OAuth, and configure their site. `vercel.json` defines four cron entries that all hit `/api/agent/run` with different `?mode=` params:
 
 - Mon 09:00 UTC — full run (no mode)
 - Wed 09:00 UTC — `mode=midweek`
-- Mon 09:00 UTC — `mode=evaluate_ab`
 - Wed 10:00 UTC — `mode=rollback_check`
 - Mon 08:00 UTC — `mode=weekly_summary`
 
-**Important**: the full Monday run is too heavy for Vercel's 60s budget. `/api/agent/run` (no mode) **fires a request to a Supabase Edge Function `agent-run` and returns immediately without awaiting** (2s `AbortController` timeout, errors ignored). The actual analysis → GitHub PR → Telegram message happens inside the Edge Function (not in this repo — it lives in Supabase). Quick modes (`evaluate_ab`, `midweek`, `rollback_check`, `weekly_summary`) run inline in Vercel.
+**Important**: the full Monday run is too heavy for Vercel's 60s budget. `/api/agent/run` (no mode) **fires a request to a Supabase Edge Function `agent-run` and returns immediately without awaiting** (2s `AbortController` timeout, errors ignored). The actual analysis → GitHub PR → Telegram message happens inside that Edge Function, whose source **is in this repo** at `supabase/functions/agent-run/` (entry `index.ts`, with the discovery/reasoning pipeline split across `repo-mapper.ts`, `import-graph.ts`, `component-ranker.ts`, `deep-reader.ts`, and `receipt-builder.ts`); it is deployed to Supabase via `supabase functions deploy`. Quick modes (`midweek`, `rollback_check`, `weekly_summary`) run inline in Vercel. (The `evaluate_ab` mode handler remains in `api/agent/run.js` but its cron was removed — the agent no longer creates A/B tests.)
 
 Auth: cron requests must carry either Vercel's `x-vercel-cron` header or `x-cron-secret: $AGENT_CRON_SECRET`. The same endpoint handles user `?action=pause|resume|delete|update-settings|export-dna` calls authenticated via Bearer token (Supabase user JWT).
 
