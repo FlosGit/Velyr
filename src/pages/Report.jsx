@@ -387,7 +387,7 @@ function EmailCapture({ reportId, visible, navigate }) {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setEmailError('Please enter a valid email address.'); return }
     setEmailError(''); setEmailLoading(true)
     try {
-      const res = await fetch('/api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reportId, email }) })
+      const res = await fetch('/api/stripe?action=email_report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reportId, email }) })
       const data = await res.json()
       if (data.ok) setEmailSent(true)
       else setEmailError(data.error || 'Something went wrong. Try again.')

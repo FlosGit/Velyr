@@ -203,6 +203,39 @@ async function promotePendingDNAToSuccess() {
   }
 }
 
+// Folded from api/agent/enforce-subscriptions.js (FOLD stage): the daily sweep
+// that cancels subscriptions past their period end and GCs the Telegram dedupe
+// table. Logic unchanged; it reuses this file's `supabase` client (same project
+// + service-role key as the original) and runs under this file's cron auth, so
+// the standalone authorizeCron from the old file is no longer needed.
+async function handleEnforceSubscriptions(res) {
+  const now = new Date().toISOString()
+  const { error } = await supabase
+    .from('agent_subscriptions')
+    .update({ subscription_status: 'cancelled' })
+    .eq('cancel_at_period_end', true)
+    .lt('current_period_end', now)
+    .eq('subscription_status', 'active')
+
+  if (error) {
+    console.error('enforce-subscriptions error:', error)
+    return res.status(500).json({ error: error.message })
+  }
+
+  // Stage 5.D: GC the Telegram webhook dedupe table. Telegram never replays an
+  // update older than ~24h, so 7 days is a safe retention floor. Piggybacked
+  // on this daily cron so it needs no pg_cron / extra scheduler. Best-effort —
+  // a failure here must not fail the subscription sweep.
+  const dedupeCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const { error: gcError } = await supabase
+    .from('telegram_webhook_dedupe')
+    .delete()
+    .lt('received_at', dedupeCutoff)
+  if (gcError) console.warn('[enforce-subscriptions] dedupe GC failed:', gcError.message)
+
+  return res.json({ ok: true, ran_at: now })
+}
+
 export default async function handler(req, res) {
   const action = req.query?.action
 
@@ -288,10 +321,11 @@ export default async function handler(req, res) {
   const mode = req.query?.mode
 
   // ── Quick modes — stay in Vercel ──────────────────────────────────────────
-  if (mode === 'evaluate_ab')    return handleEvaluateAB(res)
-  if (mode === 'midweek')        return handleMidweek(res)
-  if (mode === 'rollback_check') return handleRollbackCheck(res)
-  if (mode === 'weekly_summary') return handleWeeklySummary(res)
+  if (mode === 'evaluate_ab')          return handleEvaluateAB(res)
+  if (mode === 'midweek')              return handleMidweek(res)
+  if (mode === 'rollback_check')       return handleRollbackCheck(res)
+  if (mode === 'weekly_summary')       return handleWeeklySummary(res)
+  if (mode === 'enforce_subscriptions') return handleEnforceSubscriptions(res)
 
   // ── Full run — fire Edge Function without awaiting ─────────────────────────
   // The full Monday run is too heavy for Vercel's 60s budget, so we kick the
