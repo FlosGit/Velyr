@@ -1,0 +1,67 @@
+-- ════════════════════════════════════════════════════════════════════════════
+-- OA6 — Retire the interim browser policies on telegram_verification_codes.
+--
+-- Context: 20260520_agent_rls_policies.sql added two INTERIM policies so the old
+-- onboarding flow could read + mark codes from the browser:
+--     tvc_select_live_interim   (FOR SELECT)   using (used=false and unexpired)
+--     tvc_update_live_interim   (FOR UPDATE)   using (used=false and unexpired)
+--                                              with check (true)
+-- Both were user-UNSCOPED: any authenticated user could read or flip ANY live
+-- code (harvest a victim's VELYR-XXXXXX + chat_id, or pre-consume codes). The
+-- migration's own comment named the secure end state: "NO browser policy +
+-- consume via a SECURITY DEFINER RPC".
+--
+-- That has now landed (OA6):
+--   • Generation stays service-role (the Telegram bot, api/webhooks/telegram.js).
+--   • Validation moved to the service-role endpoint
+--     /api/onboarding?action=verify_telegram_code (read-only UI affordance).
+--   • Consumption (mark used) is now ATOMIC inside
+--     /api/onboarding?action=finalize: UPDATE ... WHERE id=? AND used=false,
+--     gated by subscription ownership + a chat_id match, BEFORE the
+--     agent_connections write — closing the old "bound but not consumed" window.
+-- No browser path touches this table anymore, so we drop both policies.
+--
+-- After this: telegram_verification_codes has RLS ENABLED and ZERO policies for
+-- anon/authenticated → the browser (anon key) cannot SELECT/INSERT/UPDATE/DELETE
+-- it at all. The service-role key bypasses RLS, so the bot + onboarding endpoint
+-- keep working. This mirrors what 20260522_retire_interim_oauth_rls.sql did for
+-- agent_connections' write policies.
+--
+-- Idempotent: drop if exists. No read/write access for service role changes;
+-- no other table is touched.
+-- ════════════════════════════════════════════════════════════════════════════
+
+drop policy if exists tvc_select_live_interim on public.telegram_verification_codes;
+drop policy if exists tvc_update_live_interim on public.telegram_verification_codes;
+
+-- ─── Rollback (restoration DDL) ──────────────────────────────────────────────
+-- To revert OA6's RLS change (e.g. if the server-side flow must be temporarily
+-- disabled and the browser flow re-enabled), recreate the two interim policies
+-- exactly as 20260520_agent_rls_policies.sql defined them:
+--
+--   create policy tvc_select_live_interim on public.telegram_verification_codes
+--     for select to authenticated
+--     using (used = false and (expires_at is null or expires_at > now()));
+--
+--   create policy tvc_update_live_interim on public.telegram_verification_codes
+--     for update to authenticated
+--     using (used = false and (expires_at is null or expires_at > now()))
+--     with check (true);
+
+-- ─── Test plan (run after applying) ──────────────────────────────────────────
+-- With a BROWSER anon/authenticated client (NOT the service-role key), both of
+-- these must now fail / return zero rows (RLS denies — no matching policy):
+--
+--   -- expect: 0 rows (no SELECT policy)
+--   select * from public.telegram_verification_codes limit 1;
+--
+--   -- expect: 0 rows affected / permission denied (no UPDATE policy)
+--   update public.telegram_verification_codes set used = true where used = false;
+--
+-- Verify no browser-reachable policy remains:
+--   select policyname, cmd from pg_policies
+--   where schemaname='public' and tablename='telegram_verification_codes';
+--   -- expect: 0 rows.
+--
+-- Confirm RLS is still enabled (must be true):
+--   select relrowsecurity from pg_class where relname='telegram_verification_codes';

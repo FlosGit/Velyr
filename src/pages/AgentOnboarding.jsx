@@ -594,22 +594,29 @@ function Step4({ onNext, onBack, loading }) {
     setVerifying(true)
     setError('')
 
-    const { data: record, error: dbError } = await supabase
-      .from('telegram_verification_codes')
-      .select('*')
-      .eq('code', trimmed)
-      .eq('used', false)
-      .gt('expires_at', new Date().toISOString())
-      .single()
-
-    if (dbError || !record) {
+    // OA6: validation moved server-side. The browser can no longer read
+    // telegram_verification_codes (tvc RLS policies retired). This is a
+    // read-only "is this code live?" check for fast feedback; the actual
+    // ownership-bound consume happens atomically in finalize at submit.
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/onboarding?action=verify_telegram_code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ code: trimmed }),
+      })
+      const json = await res.json().catch(() => ({}))
       setVerifying(false)
-      setError('Code not found or expired. Please go back to Telegram and type /start again.')
-      return
+      if (!res.ok) {
+        setError(json.error || 'Code not found or expired. Please go back to Telegram and type /start again.')
+        return
+      }
+      // Thread codeId forward — finalize binds + consumes it at final submit.
+      onNext({ telegramCode: trimmed, telegramChatId: json.chatId, codeId: json.codeId })
+    } catch {
+      setVerifying(false)
+      setError('Could not verify your code. Please check your connection and try again.')
     }
-
-    setVerifying(false)
-    onNext({ telegramCode: trimmed, telegramChatId: record.chat_id })
   }
 
   return (
@@ -908,29 +915,10 @@ export default function AgentOnboarding({ navigate }) {
       console.log('[onboarding/step4] agent_subscriptions update result:', { data: subUpdate.data, error: subUpdate.error, status: subUpdate.status })
       if (subUpdate.error) throw subUpdate.error
 
-      // Stage 4.13: capture the verification code's id BEFORE marking it
-      // used, so we can record it as the audit trail on agent_connections.
-      // getActiveSubId in api/webhooks/telegram.js now requires this FK to
-      // be set, so a chat can only command the bot if its onboarding row
-      // points at a real, consumed verification code.
-      const { data: codeRow, error: codeFetchErr } = await supabase
-        .from('telegram_verification_codes')
-        .select('id, chat_id, expires_at, used')
-        .eq('code', allData.telegramCode)
-        .maybeSingle()
-      if (codeFetchErr || !codeRow) {
-        throw new Error(codeFetchErr?.message || 'Verification code not found.')
-      }
-      if (codeRow.used) {
-        throw new Error('This verification code has already been used. Please run /start in Telegram again to get a fresh code.')
-      }
-      if (codeRow.expires_at && new Date(codeRow.expires_at) < new Date()) {
-        throw new Error('This verification code has expired. Please run /start in Telegram again.')
-      }
-      if (String(codeRow.chat_id) !== String(allData.telegramChatId)) {
-        throw new Error('Verification code does not match the Telegram chat that requested it.')
-      }
-
+      // OA6: the verification code is re-validated AND atomically consumed
+      // server-side inside finalize (no browser SELECT/UPDATE on
+      // telegram_verification_codes anymore). We just thread the codeId
+      // captured at Step 4 entry.
       // OA5: the agent_connections write is now SERVER-SIDE. The browser can no
       // longer write that table (the interim RLS write policies were retired in
       // 20260522_retire_interim_oauth_rls.sql), so we POST the remaining,
@@ -949,9 +937,9 @@ export default function AgentOnboarding({ navigate }) {
           posthogProjectId: null,
           posthogHost: 'https://us.i.posthog.com',
           telegramChatId: allData.telegramChatId,
-          // Stage 4.13: strong chat_id binding — the bot only accepts commands
-          // from a chat whose connection row points at a real, consumed code.
-          verificationCodeId: codeRow.id,
+          // Stage 4.13 binding: finalize validates this code matches the chat,
+          // marks it used, and writes the FK — all atomically (OA6).
+          verificationCodeId: allData.codeId,
         }),
       })
       const finalizeJson = await finalizeRes.json().catch(() => ({}))
@@ -959,12 +947,6 @@ export default function AgentOnboarding({ navigate }) {
       if (!finalizeRes.ok || !finalizeJson.ok) {
         throw new Error(finalizeJson.error || 'Could not finish onboarding.')
       }
-
-      const tgUpdate = await supabase
-        .from('telegram_verification_codes')
-        .update({ used: true })
-        .eq('code', allData.telegramCode)
-      console.log('[onboarding/step4] telegram_verification_codes update result:', { data: tgUpdate.data, error: tgUpdate.error, status: tgUpdate.status })
 
       // OA4: the OAuth redirect stashed form data under this key; onboarding is
       // finished now, so clear it. (The separate velyr_onboarding_session_id key

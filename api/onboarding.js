@@ -234,6 +234,50 @@ async function handleFinalize(req, res) {
     return res.status(400).json({ error: 'GitHub connection not found. Reconnect GitHub.' })
   }
 
+  // ── OA6: validate + atomically consume the Telegram verification code ───────
+  // This MUST succeed before the agent_connections write, eliminating the old
+  // "bound but not consumed" window (the browser previously marked used=true
+  // AFTER finalize). If the connection write later fails, the code is left
+  // used — the safe direction: a stale-used code is re-issuable via /start,
+  // whereas a live-but-bound code would be undetectable by the bot.
+  if (!verificationCodeId) {
+    return res.status(400).json({ error: 'Missing verification code.' })
+  }
+  const { data: codeRow, error: codeErr } = await serviceClient
+    .from('telegram_verification_codes')
+    .select('id, chat_id, used, expires_at')
+    .eq('id', verificationCodeId)
+    .maybeSingle()
+  if (codeErr) {
+    console.error('onboarding/finalize: code lookup failed:', codeErr.message)
+    return res.status(500).json({ error: 'Could not complete onboarding. Try again.' })
+  }
+  if (!codeRow) return res.status(400).json({ error: 'Verification code not found.' })
+  if (codeRow.used) return res.status(400).json({ error: 'This code has already been used.' })
+  if (codeRow.expires_at && new Date(codeRow.expires_at) < new Date()) {
+    return res.status(400).json({ error: 'This code has expired.' })
+  }
+  if (String(codeRow.chat_id) !== String(telegramChatId)) {
+    return res.status(400).json({ error: 'Code/chat mismatch.' })
+  }
+
+  // Atomic consume: the `.eq('used', false)` guard means only one concurrent
+  // request can flip it. 0 rows back ⇒ another request consumed it between the
+  // check above and here — bail BEFORE touching agent_connections.
+  const { data: consumed, error: consumeErr } = await serviceClient
+    .from('telegram_verification_codes')
+    .update({ used: true })
+    .eq('id', verificationCodeId)
+    .eq('used', false)
+    .select('id')
+  if (consumeErr) {
+    console.error('onboarding/finalize: code consume failed:', consumeErr.message)
+    return res.status(500).json({ error: 'Could not complete onboarding. Try again.' })
+  }
+  if (!consumed || consumed.length === 0) {
+    return res.status(409).json({ error: 'Code was just consumed by another request. Try again.' })
+  }
+
   let encryptedPosthogKey
   try {
     encryptedPosthogKey = encryptSecret(posthogApiKey) // null when empty/absent
@@ -274,9 +318,58 @@ async function handleFinalize(req, res) {
   return res.status(200).json({ ok: true })
 }
 
+// ─── action=verify_telegram_code (POST) ──────────────────────────────────────
+// Lightweight, read-only Step-4 affordance: tells the UI whether a pasted code
+// is currently valid (exists, unused, unexpired) so it can show "connected to
+// @username" before the user finishes the remaining steps. It does NOT mark the
+// code used and does NOT bind it to a subscription — that happens atomically in
+// finalize. It deliberately does not check code ownership (the user has no claim
+// to a specific code yet; the ownership-bound consume is finalize's job). The
+// bare code is never echoed back, only its id + chat_id + username.
+const TELEGRAM_CODE_RE = /^VELYR-[A-Z0-9]{6}$/
+async function handleVerifyTelegramCode(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+  if (!SERVICE_ROLE_KEY) {
+    console.error('onboarding/verify_telegram_code: SUPABASE_SERVICE_ROLE_KEY not configured')
+    return res.status(500).json({ error: 'Onboarding is not configured. Contact support.' })
+  }
+
+  const auth = await getUser(req)
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' })
+
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : ''
+  if (!TELEGRAM_CODE_RE.test(code)) {
+    return res.status(400).json({ error: 'Invalid code format. It should look like VELYR-XXXXXX.' })
+  }
+
+  const { data: row, error } = await serviceClient
+    .from('telegram_verification_codes')
+    .select('id, chat_id, expires_at, used, telegram_username')
+    .eq('code', code)
+    .maybeSingle()
+  if (error) {
+    console.error('onboarding/verify_telegram_code: lookup failed:', error.message)
+    return res.status(500).json({ error: 'Could not verify code. Try again.' })
+  }
+  if (!row) {
+    return res.status(400).json({ error: 'Invalid code. Make sure you sent /start to the Velyr bot first.' })
+  }
+  if (row.used) {
+    return res.status(400).json({ error: 'This code has already been used.' })
+  }
+  if (row.expires_at && new Date(row.expires_at) < new Date()) {
+    return res.status(400).json({ error: 'This code has expired. Request a new one from the bot.' })
+  }
+
+  return res.status(200).json({ codeId: row.id, chatId: row.chat_id, telegramUsername: row.telegram_username })
+}
+
 // ─── dispatcher ──────────────────────────────────────────────────────────────
-// No top-level method guard — snapshot is GET, complete/finalize are POST; each
-// guards its own method internally.
+// No top-level method guard — snapshot is GET, the rest are POST; each guards
+// its own method internally.
 export default async function handler(req, res) {
   if (!SUPABASE_URL || !ANON_KEY || !STATE_SECRET) {
     console.error('onboarding: missing required env var(s)')
@@ -284,8 +377,9 @@ export default async function handler(req, res) {
   }
 
   const action = req.query.action
-  if (action === 'snapshot') return handleSnapshot(req, res)
-  if (action === 'complete') return handleComplete(req, res)
-  if (action === 'finalize') return handleFinalize(req, res)
+  if (action === 'snapshot')             return handleSnapshot(req, res)
+  if (action === 'complete')             return handleComplete(req, res)
+  if (action === 'finalize')             return handleFinalize(req, res)
+  if (action === 'verify_telegram_code') return handleVerifyTelegramCode(req, res)
   return res.status(400).json({ error: 'Unknown action' })
 }
