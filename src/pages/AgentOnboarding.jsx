@@ -292,181 +292,247 @@ function Step1({ onNext, onBack, navigate }) {
   )
 }
 
-// ─── STEP 2: GitHub ──────────────────────────────────────────────────────────
-function Step2({ onNext, onBack }) {
-  const [installationId, setInstallationId] = useState('')
-  const [repoOwner, setRepoOwner]     = useState('')
-  const [repoName, setRepoName]       = useState('')
-  const [error, setError]             = useState('')
-  const [appInstalled, setAppInstalled] = useState(false)
+function GitHubIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.88-1.54-3.88-1.54-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.06 11.06 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.68.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5z"/>
+    </svg>
+  )
+}
 
-  // FIX 1: GitHub validation state
-  const [validating, setValidating]   = useState(false)
-  const [repoValid, setRepoValid]     = useState(null) // null | true | false
+function Spinner({ size = 16, color = C.accent }) {
+  return (
+    <div style={{ width: size, height: size, border: `2px solid rgba(28,25,23,0.15)`, borderTopColor: color, borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
+  )
+}
 
-  // Validate repo via Velyr's own backend to avoid CORS issues with GitHub API
-  const validateRepo = async () => {
-    if (!installationId.trim() || !repoOwner.trim() || !repoName.trim()) {
-      setError('Please fill in all fields before validating.')
-      return
-    }
-    setValidating(true)
-    setError('')
-    setRepoValid(null)
+// ─── STEP 2: GitHub (OAuth + ownership-verified repo picker) ──────────────────
+// Replaces the old manual "Installation ID + owner + repo" form. The user
+// authorizes via GitHub OAuth (OA2 → OA3); on return we read the signed handoff
+// cookie's snapshot (OA4 /api/onboarding?action=snapshot) and present only the
+// repos GitHub actually exposed. Picking one calls ?action=complete, which is
+// the only path that writes the verified installation via complete_onboarding.
+function Step2({ onNext, onBack, user, subscriptionId, formData }) {
+  // 'idle' | 'redirecting' | 'returning' | 'picking' | 'submitting' | 'error'
+  const [state, setState]       = useState('idle')
+  const [error, setError]       = useState('')
+  const [snapshot, setSnapshot] = useState(null) // { githubLogin, installations }
 
+  const authHeader = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    return { Authorization: `Bearer ${session?.access_token}` }
+  }
+
+  const fetchSnapshot = async () => {
     try {
-      const res = await fetch('/api/github/validate-repo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          installationId: parseInt(installationId),
-          repoOwner: repoOwner.trim(),
-          repoName: repoName.trim(),
-        }),
-      })
+      const res = await fetch('/api/onboarding?action=snapshot', { headers: await authHeader() })
       const json = await res.json()
-      if (res.ok && json.valid) {
-        setRepoValid(true)
-        setError('')
+      if (res.ok) {
+        setSnapshot(json)
+        setState('picking')
       } else {
-        setRepoValid(false)
-        setError(json.message || 'Could not access this repository. Check your details and try again.')
+        setError(json.error || 'Your GitHub session expired. Please reconnect.')
+        setState('error')
       }
     } catch {
-      setRepoValid(false)
-      setError('Validation failed. Please check your connection and try again.')
-    } finally {
-      setValidating(false)
+      setError('Could not load your GitHub repositories. Please reconnect.')
+      setState('error')
     }
   }
 
-  // Reset validation when inputs change
-  const handleOwnerChange  = (v) => { setRepoOwner(v);  setRepoValid(null); setError('') }
-  const handleNameChange   = (v) => { setRepoName(v);   setRepoValid(null); setError('') }
-  const handleIdChange     = (v) => { setInstallationId(v); setRepoValid(null); setError('') }
+  // On return from GitHub the page has fully reloaded — pick up ?oauth=… here.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const oauth = params.get('oauth')
+    if (oauth === 'success') {
+      setState('returning')
+      fetchSnapshot()
+      window.history.replaceState({}, '', '/agent/onboarding')
+    } else if (oauth === 'error') {
+      setError(params.get('reason') || 'GitHub connection failed. Please try again.')
+      setState('error')
+      window.history.replaceState({}, '', '/agent/onboarding')
+    }
+  }, [])
 
-  const handleNext = () => {
-    if (!installationId.trim() || !repoOwner.trim() || !repoName.trim()) {
-      setError('Please fill in all fields.')
-      return
+  const connectGitHub = async () => {
+    setState('redirecting')
+    setError('')
+    try {
+      // The OAuth ownership checks (oauth-initiate + complete_onboarding) key on
+      // agent_subscriptions.auth_user_id, which is otherwise only set at the
+      // final step. Set it now (RLS grants authenticated UPDATE on this column
+      // for the row it owns) so initiate's 403 check passes.
+      await supabase
+        .from('agent_subscriptions')
+        .update({ auth_user_id: user.id, email: user.email, plan: 'growth' })
+        .eq('id', subscriptionId)
+
+      // The redirect to GitHub is a full page navigation — persist collected
+      // form data (website URL from step 1) so we can restore it on return.
+      try { localStorage.setItem('velyr_onboarding_data', JSON.stringify(formData || {})) } catch {}
+
+      const res = await fetch('/api/github/oauth-initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+        body: JSON.stringify({ subscriptionId }),
+      })
+      const json = await res.json()
+      if (res.ok && json.redirectUrl) {
+        window.location.href = json.redirectUrl
+      } else {
+        setError(json.error || 'Could not start GitHub authorization. Please try again.')
+        setState('error')
+      }
+    } catch {
+      setError('Could not start GitHub authorization. Please try again.')
+      setState('error')
     }
-    if (repoValid !== true) {
-      setError('Please validate your repository first.')
-      return
-    }
-    onNext({ installationId, repoOwner, repoName })
   }
 
-  const allFilled = installationId.trim() && repoOwner.trim() && repoName.trim()
+  const pickRepo = async (installationId, repoFullName) => {
+    setState('submitting')
+    setError('')
+    try {
+      const res = await fetch('/api/onboarding?action=complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+        body: JSON.stringify({ subscriptionId, installationId, repoFullName }),
+      })
+      const json = await res.json()
+      if (res.ok && json.ok) {
+        const [repoOwner, repoName] = repoFullName.split('/')
+        // GitHub connection is now verified + persisted server-side. Carry the
+        // selection forward for display; the remaining steps write Telegram etc.
+        onNext({ installationId, repoFullName, repoOwner, repoName })
+      } else {
+        setError(json.error || 'Could not connect this repository. Please try again.')
+        setState('picking') // keep the picker open so they can retry
+      }
+    } catch {
+      setError('Could not connect this repository. Please try again.')
+      setState('picking')
+    }
+  }
 
-  return (
-    <div>
+  const heading = (
+    <>
       <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 4</p>
       <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect GitHub
       </h2>
-      <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
-        The agent reads your code and creates Pull Requests with fixes — directly in your repo.
-      </p>
+    </>
+  )
 
-      {/* Install App card */}
-      <div style={{ border: `1px solid ${appInstalled ? 'rgba(42,92,69,0.3)' : C.border}`, background: appInstalled ? 'rgba(42,92,69,0.04)' : '#fff', borderRadius: 12, padding: '16px 18px', marginBottom: 12, transition: 'all .3s' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 22, height: 22, borderRadius: '50%', background: appInstalled ? C.accent : 'transparent', border: `1px solid ${appInstalled ? C.accent : C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: appInstalled ? '#fff' : C.textLight, fontWeight: 500, flexShrink: 0 }}>
-              {appInstalled ? '✓' : '1'}
-            </div>
-            <p style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Install the Velyr GitHub App</p>
-          </div>
-          {appInstalled && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />}
-        </div>
-        <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6, marginBottom: 12, paddingLeft: 32 }}>
-          Click the button, install on your account, and select the repo. After installing you'll see a URL like{' '}
-          <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>
-            github.com/settings/installations/12345678
-          </code>{' '}
-          — copy that number.
-        </p>
-        <div style={{ paddingLeft: 32, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <a href="https://github.com/apps/velyr-growth-agent/installations/new" target="_blank" rel="noreferrer" onClick={() => setTimeout(() => setAppInstalled(true), 3000)}
-            style={{ display: 'inline-block', background: C.text, color: '#fff', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontFamily: 'Jost, sans-serif', fontWeight: 500, textDecoration: 'none', transition: 'background .2s' }}
-            onMouseEnter={e => e.currentTarget.style.background = C.accent}
-            onMouseLeave={e => e.currentTarget.style.background = C.text}
-          >
-            Install GitHub App →
-          </a>
-          {!appInstalled && (
-            <button onClick={() => setAppInstalled(true)} style={{ background: 'none', border: 'none', fontSize: 12, color: C.textLight, cursor: 'pointer', fontFamily: 'Jost, sans-serif', fontWeight: 300, textDecoration: 'underline' }}>
-              Already installed
-            </button>
-          )}
+  // ── returning / submitting: loading states ─────────────────────────────────
+  if (state === 'returning' || state === 'submitting') {
+    return (
+      <div>
+        {heading}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '40px 0' }}>
+          <Spinner size={28} />
+          <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300 }}>
+            {state === 'returning' ? 'Loading your repositories…' : 'Connecting your repository…'}
+          </p>
         </div>
       </div>
+    )
+  }
 
-      {/* Details + validation card */}
-      <div style={{ border: `1px solid ${repoValid === true ? 'rgba(42,92,69,0.3)' : repoValid === false ? 'rgba(192,57,43,0.3)' : C.border}`, background: repoValid === true ? 'rgba(42,92,69,0.04)' : '#fff', borderRadius: 12, padding: '16px 18px', marginBottom: 16, opacity: appInstalled ? 1 : 0.5, transition: 'all .3s' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ width: 22, height: 22, borderRadius: '50%', background: repoValid === true ? C.accent : 'transparent', border: `1px solid ${repoValid === true ? C.accent : C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: repoValid === true ? '#fff' : C.textLight, fontWeight: 500, flexShrink: 0 }}>
-            {repoValid === true ? '✓' : '2'}
-          </div>
-          <p style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Enter your details</p>
-          {repoValid === true && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e', marginLeft: 'auto' }} />}
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div>
-            <label style={{ fontSize: 12, color: C.textLight, display: 'block', marginBottom: 6 }}>GitHub Username / Organization</label>
-            <input className={`ob-inp${repoValid === true ? ' valid' : repoValid === false ? ' invalid' : ''}`} placeholder="e.g. FlosGit" value={repoOwner} onChange={e => handleOwnerChange(e.target.value)} disabled={!appInstalled} />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: C.textLight, display: 'block', marginBottom: 6 }}>Repository Name</label>
-            <input className={`ob-inp${repoValid === true ? ' valid' : repoValid === false ? ' invalid' : ''}`} placeholder="e.g. my-website" value={repoName} onChange={e => handleNameChange(e.target.value)} disabled={!appInstalled} />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: C.textLight, display: 'block', marginBottom: 6 }}>
-              Installation ID
-              <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 300 }}>(the number in the URL: /installations/<strong>12345678</strong>)</span>
-            </label>
-            <input className={`ob-inp${repoValid === true ? ' valid' : repoValid === false ? ' invalid' : ''}`} placeholder="e.g. 129153460" value={installationId} onChange={e => handleIdChange(e.target.value)} disabled={!appInstalled} />
-          </div>
+  // ── picking: ownership-verified repo list ──────────────────────────────────
+  if (state === 'picking') {
+    const installations = snapshot?.installations || []
+    const hasRepos = installations.some(i => (i.repos || []).length > 0)
+    return (
+      <div>
+        {heading}
+        <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 20 }}>
+          Connected as <strong style={{ fontWeight: 500, color: C.text }}>@{snapshot?.githubLogin}</strong>. Choose the repository the agent should work on.
+        </p>
 
-          {/* Validate button */}
-          {appInstalled && repoValid !== true && (
-            <button
-              onClick={validateRepo}
-              disabled={!allFilled || validating}
-              style={{
-                background: allFilled && !validating ? 'rgba(42,92,69,0.1)' : 'transparent',
-                border: `1px solid ${allFilled ? 'rgba(42,92,69,0.35)' : C.border}`,
-                borderRadius: 8, padding: '10px 16px', fontSize: 13,
-                fontFamily: 'Jost, sans-serif', fontWeight: 500,
-                color: allFilled ? C.accent : C.textLight,
-                cursor: allFilled && !validating ? 'pointer' : 'not-allowed',
-                transition: 'all .2s', display: 'flex', alignItems: 'center', gap: 8,
-              }}
-            >
-              {validating ? (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
-                    <path d="M21 12a9 9 0 11-6.219-8.56"/>
-                  </svg>
-                  Validating…
-                </>
-              ) : '→ Validate repository access'}
-            </button>
-          )}
+        {!hasRepos && (
+          <div style={{ background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.2)', borderRadius: 10, padding: '13px 16px', marginBottom: 16 }}>
+            <p style={{ fontSize: 13, color: C.red, fontWeight: 400 }}>No installations match your GitHub account. Install Velyr on your account first.</p>
+          </div>
+        )}
 
-          {repoValid === true && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.accent, fontWeight: 400 }}>
-              <span>✓</span> Repository verified — the agent can access <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 12 }}>{repoOwner}/{repoName}</code>
+        {installations.map((inst) => (
+          <div key={inst.installationId} style={{ marginBottom: 18 }}>
+            <p style={{ fontSize: 12, color: C.textLight, marginBottom: 8, letterSpacing: '.03em' }}>
+              Account: <strong style={{ fontWeight: 500, color: C.textMuted }}>@{inst.account?.login}</strong>
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(inst.repos || []).map((repo) => (
+                <button
+                  key={repo.fullName}
+                  onClick={() => pickRepo(inst.installationId, repo.fullName)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                    background: '#fff', border: `1px solid ${C.border}`, borderRadius: 10,
+                    padding: '13px 16px', cursor: 'pointer', fontFamily: 'Jost, sans-serif',
+                    fontWeight: 400, fontSize: 14, color: C.text, transition: 'all .2s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(42,92,69,0.4)'; e.currentTarget.style.background = 'rgba(42,92,69,0.03)' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = '#fff' }}
+                >
+                  <GitHubIcon size={16} />
+                  <span style={{ flex: 1 }}>{repo.fullName}</span>
+                  <span style={{ fontSize: 13, color: C.accent }}>→</span>
+                </button>
+              ))}
             </div>
-          )}
+          </div>
+        ))}
+
+        <p style={{ fontSize: 12, color: C.textLight, fontWeight: 300, lineHeight: 1.6, marginTop: 8, marginBottom: 12 }}>
+          Don't see the repo you want? Make sure the Velyr Growth Agent is installed on the right repository.{' '}
+          <a href="https://github.com/apps/velyr-growth-agent/installations/new" target="_blank" rel="noreferrer" style={{ color: C.accent, textDecoration: 'underline' }}>Manage installation →</a>
+        </p>
+        <p style={{ fontSize: 12, color: C.textLight, fontWeight: 300, lineHeight: 1.6, marginBottom: 16 }}>
+          Installed on a GitHub organization? Org-level onboarding is coming soon — for now, please reinstall on your personal account.
+        </p>
+
+        {error && <p style={{ fontSize: 13, color: C.red, marginBottom: 12 }}>{error}</p>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
         </div>
+      </div>
+    )
+  }
+
+  // ── idle / redirecting / error: the connect CTA ────────────────────────────
+  return (
+    <div>
+      {heading}
+      <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
+        The agent reads your code and creates Pull Requests with fixes — directly in your repo. Authorize with GitHub to choose a repository.
+      </p>
+
+      <div style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 12, padding: '18px', marginBottom: 16 }}>
+        <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6, marginBottom: 14 }}>
+          You'll be sent to GitHub to authorize Velyr and pick which repositories it can access. We never see your password, and you can revoke access any time from GitHub.
+        </p>
+        <button
+          onClick={connectGitHub}
+          disabled={state === 'redirecting' || !subscriptionId}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            width: '100%', background: C.text, color: '#fff', border: 'none', borderRadius: 10,
+            padding: '15px', fontFamily: 'Jost, sans-serif', fontWeight: 500, fontSize: 15,
+            cursor: state === 'redirecting' ? 'not-allowed' : 'pointer', opacity: state === 'redirecting' ? 0.6 : 1,
+            transition: 'background .2s, transform .15s', letterSpacing: '.03em',
+          }}
+          onMouseEnter={e => { if (state !== 'redirecting') e.currentTarget.style.background = C.accent }}
+          onMouseLeave={e => { e.currentTarget.style.background = C.text }}
+        >
+          {state === 'redirecting' ? <Spinner size={16} color="#fff" /> : <GitHubIcon size={18} />}
+          {state === 'redirecting' ? 'Redirecting to GitHub…' : 'Connect GitHub'}
+        </button>
       </div>
 
       {error && <p style={{ fontSize: 13, color: C.red, marginBottom: 12 }}>{error}</p>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
-        <button className="ob-btn" onClick={handleNext} disabled={!appInstalled || repoValid !== true}>Continue →</button>
       </div>
     </div>
   )
@@ -612,12 +678,28 @@ export default function AgentOnboarding({ navigate }) {
   const [error, setError]       = useState('')
   const [formData, setFormData] = useState({})
   const [gateChecked, setGateChecked] = useState(false)
+  const [subscriptionId, setSubscriptionId] = useState(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { navigate('/agent/login'); return }
       setUser(session.user)
     })
+  }, [])
+
+  // Returning from the GitHub OAuth redirect (OA3 → /agent/onboarding?oauth=…):
+  // the full page reload wiped React state, so restore the form data we stashed
+  // before redirecting and jump straight to the GitHub step. Step2 reads the
+  // ?oauth= param itself to drive its snapshot fetch / error display.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('oauth')) {
+      try {
+        const saved = localStorage.getItem('velyr_onboarding_data')
+        if (saved) setFormData(prev => ({ ...JSON.parse(saved), ...prev }))
+      } catch {}
+      setStep(2)
+    }
   }, [])
 
   // Subscription gate — block the onboarding form until the user has an active
@@ -695,10 +777,12 @@ export default function AgentOnboarding({ navigate }) {
 
       const { data: sub } = await supabase
         .from('agent_subscriptions')
-        .select('status')
+        .select('id, status')
         .eq('user_id', user.id)
         .single()
       if (cancelled || gatePassed) return
+
+      if (sub?.id) setSubscriptionId(sub.id)
 
       if (sub?.status === 'active') {
         passGate()
@@ -847,37 +931,45 @@ export default function AgentOnboarding({ navigate }) {
         throw new Error('Verification code does not match the Telegram chat that requested it.')
       }
 
-      // Upsert connection (idempotent on subscription_id)
-      const connPayload = {
-        subscription_id: sub.id,
-        github_installation_id: parseInt(allData.installationId),
-        github_repo_owner: allData.repoOwner,
-        github_repo_name: allData.repoName,
-        website_url: allData.websiteUrl,
-        posthog_api_key: null,
-        posthog_project_id: null,
-        posthog_host: 'https://us.i.posthog.com',
-        posthog_snippet_token: null,
-        telegram_chat_id: allData.telegramChatId,
-        // Stage 4.13: strong chat_id binding. Both columns must be set for
-        // the bot to accept commands from this chat.
-        verification_code_id: codeRow.id,
-        verified_at:          new Date().toISOString(),
+      // OA5: the agent_connections write is now SERVER-SIDE. The browser can no
+      // longer write that table (the interim RLS write policies were retired in
+      // 20260522_retire_interim_oauth_rls.sql), so we POST the remaining,
+      // non-GitHub fields to /api/onboarding?action=finalize, which writes them
+      // with the service role after re-checking ownership + that the GitHub
+      // step (complete_onboarding) already ran. The GitHub columns were written
+      // by that RPC at the GitHub step (closes OA3-A) and are not touched here.
+      const { data: { session } } = await supabase.auth.getSession()
+      const finalizeRes = await fetch('/api/onboarding?action=finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({
+          subscriptionId: sub.id,
+          websiteUrl: allData.websiteUrl,
+          posthogApiKey: null,        // zero-setup onboarding collects no key
+          posthogProjectId: null,
+          posthogHost: 'https://us.i.posthog.com',
+          telegramChatId: allData.telegramChatId,
+          // Stage 4.13: strong chat_id binding — the bot only accepts commands
+          // from a chat whose connection row points at a real, consumed code.
+          verificationCodeId: codeRow.id,
+        }),
+      })
+      const finalizeJson = await finalizeRes.json().catch(() => ({}))
+      console.log('[onboarding/step4] finalize result:', { status: finalizeRes.status, body: finalizeJson })
+      if (!finalizeRes.ok || !finalizeJson.ok) {
+        throw new Error(finalizeJson.error || 'Could not finish onboarding.')
       }
-      console.log('[onboarding/step4] agent_connections upsert payload:', connPayload, '| parsed installationId:', connPayload.github_installation_id, '| isNaN:', Number.isNaN(connPayload.github_installation_id))
-      console.log('[onboarding/step4] agent_connections upsert payload FULL:', JSON.stringify(connPayload, null, 2))
-      const connResult = await supabase
-        .from('agent_connections')
-        .upsert(connPayload, { onConflict: 'subscription_id' })
-      console.log('[onboarding/step4] agent_connections upsert result:', { data: connResult.data, error: connResult.error, status: connResult.status })
-
-      if (connResult.error) throw connResult.error
 
       const tgUpdate = await supabase
         .from('telegram_verification_codes')
         .update({ used: true })
         .eq('code', allData.telegramCode)
       console.log('[onboarding/step4] telegram_verification_codes update result:', { data: tgUpdate.data, error: tgUpdate.error, status: tgUpdate.status })
+
+      // OA4: the OAuth redirect stashed form data under this key; onboarding is
+      // finished now, so clear it. (The separate velyr_onboarding_session_id key
+      // cleanup is intentionally still left to the dashboard's verify effect.)
+      try { localStorage.removeItem('velyr_onboarding_data') } catch {}
 
       // localStorage cleanup intentionally NOT done here — the dashboard's
       // verify effect owns cleanup after confirming with Stripe. Removing the
@@ -927,7 +1019,7 @@ export default function AgentOnboarding({ navigate }) {
             <StepIndicator current={step} total={5} />
             {step === 0 && <Step0 onNext={handleStep0} />}
             {step === 1 && <Step1 onNext={handleStep1} onBack={() => setStep(0)} navigate={navigate} />}
-            {step === 2 && <Step2 onNext={handleStep2} onBack={() => setStep(1)} />}
+            {step === 2 && <Step2 onNext={handleStep2} onBack={() => setStep(1)} user={user} subscriptionId={subscriptionId} formData={formData} />}
             {step === 3 && <Step3 onNext={handleStep3} onBack={() => setStep(2)} />}
             {step === 4 && <Step4 onNext={handleStep4} onBack={() => setStep(3)} loading={loading} />}
             {error && (

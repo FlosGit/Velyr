@@ -1,0 +1,32 @@
+-- ════════════════════════════════════════════════════════════════════════════
+-- OA5 — Retire the interim browser-write policies on agent_connections.
+--
+-- Context: 20260520_agent_rls_policies.sql added two INTERIM, owner-scoped
+-- write policies so the old onboarding flow could upsert agent_connections from
+-- the browser:
+--     agent_connections_insert_own_interim   (FOR INSERT)
+--     agent_connections_update_own_interim   (FOR UPDATE)
+-- Their own comment said: "The OAuth-block complete_onboarding() RPC REPLACES
+-- these (deny browser writes; write server-side). Remove both when that lands."
+--
+-- That has now landed:
+--   • GitHub columns are written by complete_onboarding() (SECURITY DEFINER).
+--   • The remaining columns (website_url, posthog_*, telegram_chat_id,
+--     verification_code_id, verified_at) are written by the service-role
+--     /api/onboarding?action=finalize endpoint (OA5 Part 1).
+-- Neither path relies on a browser write policy, so we drop both. After this,
+-- agent_connections has ONLY agent_connections_select_own — the browser can
+-- read its own row but can no longer write ANY column, closing the parallel
+-- unguarded write path that undercut the OA4 cross-tenant defense.
+--
+-- Idempotent: drop if exists. Additive to the security posture — no read access
+-- is changed, no other table is touched.
+--
+-- NOTE (out of scope for OA5): the telegram_verification_codes interim policies
+-- (tvc_select_live_interim / tvc_update_live_interim) are intentionally LEFT IN
+-- PLACE. handleStep4 still reads + marks verification codes from the browser;
+-- moving that server-side (and dropping those policies) is a separate stage.
+-- ════════════════════════════════════════════════════════════════════════════
+
+drop policy if exists agent_connections_insert_own_interim on public.agent_connections;
+drop policy if exists agent_connections_update_own_interim on public.agent_connections;
