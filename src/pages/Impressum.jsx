@@ -128,12 +128,12 @@ export default function Impressum({ navigate }) {
 
           <div style={block}>
             <span style={label}>Hinweis zur Dienstleistung</span>
-            <p>Velyr ist ein KI-gestütztes Analyse- und Optimierungstool für Online-Auftritte. Die Ergebnisse basieren auf öffentlich zugänglichen Daten und automatisierten Analysen. Sie stellen keine rechtliche, steuerliche oder geschäftliche Beratung dar. Für Entscheidungen auf Basis der Berichte wird keine Haftung übernommen.</p>
+            <p>Velyr ist ein KI-gestützter Growth Agent, der die Website von Abonnenten wöchentlich analysiert und Verbesserungen als Pull Requests vorschlägt. Änderungen werden ausschließlich nach ausdrücklicher Freigabe durch den Nutzer übernommen. Die Ergebnisse beruhen auf automatisierten Analysen und stellen keine rechtliche, steuerliche oder geschäftliche Beratung dar. Für Entscheidungen auf Basis der Empfehlungen des Growth Agent wird keine Haftung übernommen.</p>
           </div>
 
           <div style={block}>
             <span style={label}>Zahlungsabwicklung</span>
-            <p>Die Zahlungsabwicklung für kostenpflichtige Leistungen (Full Report €9, Growth Agent €29/Monat) erfolgt über Stripe Payments Europe, Ltd., 1 Grand Canal Street Lower, Grand Canal Dock, Dublin, D02 H210, Irland. Zahlungsdaten werden ausschließlich von Stripe verarbeitet und nicht von Velyr gespeichert.</p>
+            <p>Die Zahlungsabwicklung für kostenpflichtige Leistungen (Growth Agent €29/Monat) erfolgt über Stripe Payments Europe, Ltd., 1 Grand Canal Street Lower, Grand Canal Dock, Dublin, D02 H210, Irland. Zahlungsdaten werden ausschließlich von Stripe verarbeitet und nicht von Velyr gespeichert.</p>
           </div>
 
           <hr style={{ border: 'none', borderTop: '1px solid rgba(28,25,23,0.09)', margin: '8px 0 36px' }} />

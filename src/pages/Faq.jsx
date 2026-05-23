@@ -21,32 +21,16 @@ const SHARED_CSS = `
 
 const FAQS = [
   {
-    q: 'How does an automated AI business scan work?',
-    a: 'An automated AI business scan analyzes your business across multiple public data points — your website performance, SEO signals, copy and conversion elements, and your social media presence — and produces a scored report in minutes. Velyr does exactly this: it pulls Core Web Vitals, scrapes your page structure, benchmarks your social engagement against industry averages, and uses Claude AI to write a plain-English explanation of what is working and what is dragging growth. Everything runs in parallel, so you get a complete picture without filling out a single questionnaire. No consultant, no scheduling, no kickoff call.'
-  },
-  {
     q: 'What is an AI Growth Agent and how does it help my business grow?',
     a: 'An AI Growth Agent is a semi-autonomous system that continuously analyzes your business data, prioritizes the single highest-impact change each week, and ships the fix on your behalf. Velyr\'s Growth Agent reads your live analytics every Monday, identifies your worst-performing area (bounce rate, low-converting page, weak headline, missing CTA), writes the code change, opens a GitHub Pull Request, and sends it to you on Telegram for one-tap approval. After deployment, it monitors impact for 48 hours and automatically rolls back if metrics drop. It is the difference between hiring a growth consultant once and having a tireless one working every week.'
   },
   {
-    q: 'How much does AI-powered business analysis cost compared to hiring a consultant?',
-    a: 'A traditional growth or marketing consultant typically charges €1,500–€8,000 per month, plus several weeks of onboarding before any output. AI-powered business analysis tools like Velyr start at €29 per month for a fully autonomous Growth Agent that ships improvements weekly — roughly 50–250x cheaper than a human consultant. For one-off analysis, Velyr offers a free instant audit and a €9 full report, so you can validate the depth of insight before committing to a subscription. Most SMEs recover the monthly cost from a single improved conversion.'
-  },
-  {
-    q: 'What growth opportunities can an AI business audit tool identify?',
-    a: 'A modern AI business audit tool surfaces opportunities across performance, positioning, and conversion. Velyr identifies slow-loading pages that hurt mobile bounce rates, missing or weak calls-to-action, headlines that focus on features instead of customer outcomes, absent social proof, hidden pricing, broken SEO basics (titles, meta descriptions, H1, alt text), and underperforming social channels benchmarked against your detected industry. It also spots gaps versus competitors when you connect competitor URLs. Each finding comes with a specific recommendation, not a vague best-practice tip.'
-  },
-  {
-    q: 'Can I automatically scan my business for weaknesses and blind spots?',
-    a: 'Yes — automated scanning is exactly what Velyr is built for. Drop in your website URL and any social handles, and within 15–25 seconds you get a composite 0–100 score broken down across performance, SEO, copy/UX, and social engagement. The scan flags blind spots most owners never see: pages slower than 70% of mobile sites, headlines that fail to address customer outcomes, missing trust signals, or social engagement well below your industry benchmark. You do not need to install anything or grant any access for the basic scan.'
-  },
-  {
-    q: 'What is the difference between a business scan and a traditional business audit?',
-    a: 'A traditional business audit is a multi-week engagement where a consultant interviews stakeholders, reviews documents, and delivers a slide deck. A business scan, by contrast, is automated, data-driven, and finished in minutes — it analyzes the live signals your customers actually see (your site, your socials, your conversion path) rather than producing a strategic narrative. Velyr replaces the discovery phase of a traditional audit with an instant, evidence-based scorecard, and the implementation phase with an AI Growth Agent that ships fixes weekly. The result is faster, cheaper, and continuously refreshed instead of going stale after the final report.'
+    q: 'How much does an AI Growth Agent cost compared to hiring a consultant?',
+    a: 'A traditional growth or marketing consultant typically charges €1,500–€8,000 per month, plus several weeks of onboarding before any output. Velyr\'s Growth Agent costs €29 per month for a fully autonomous service that ships improvements weekly — roughly 50–250x cheaper than a human consultant. Most SMEs recover the monthly cost from a single improved conversion.'
   },
   {
     q: 'How do I use AI for my SME growth strategy?',
-    a: 'The most effective way to use AI for SME growth is to let it handle the work humans are slow at: continuous monitoring, benchmark comparison, and writing the actual fix. Start by running a free AI audit — Velyr scores your site and socials in under 30 seconds — so you have a baseline. Then plug in an AI Growth Agent that watches your analytics weekly, proposes the single highest-leverage change, and waits for your approval before deploying. Keep your role at the strategic level (saying yes or no) while AI handles diagnosis, prioritization, and implementation.'
+    a: 'The most effective way to use AI for SME growth is to let it handle the work humans are slow at: continuous monitoring, benchmark comparison, and writing the actual fix. Velyr\'s Growth Agent watches your analytics weekly, proposes the single highest-leverage change, and waits for your approval before deploying. Keep your role at the strategic level (saying yes or no) while AI handles diagnosis, prioritization, and implementation.'
   },
   {
     q: 'Why use an AI growth agent instead of a traditional business consultant?',
@@ -54,11 +38,7 @@ const FAQS = [
   },
   {
     q: 'What does a fully automated business intelligence tool do for small businesses?',
-    a: 'A fully automated business intelligence tool turns the data small businesses already generate — analytics, social engagement, conversion behavior — into a prioritized action list without anyone having to build dashboards or run reports. Velyr does this end-to-end: it scans your business, scores it, identifies your weakest link against industry benchmarks, and (on the Growth Agent plan) ships the fix. For a small team without a dedicated analyst, this is the difference between guessing where to invest time and knowing. Weekly summaries delivered to Telegram keep you informed without logging into another dashboard.'
-  },
-  {
-    q: "How quickly can an AI tool give me a complete picture of my company's strengths and weaknesses?",
-    a: 'A modern AI audit tool can produce a complete strengths-and-weaknesses snapshot in under a minute. Velyr typically returns a free scan in 15–25 seconds, including performance, SEO, copy/UX, social benchmarks, and an AI-written explanation of what to fix first. The premium full audit takes 30–60 seconds and adds deeper social diagnostics, hook analysis, and brand clarity scoring. Compared to a traditional consulting engagement that takes 2–6 weeks to deliver a comparable diagnostic, that is roughly 10,000x faster.'
+    a: 'A fully automated business intelligence tool turns the data small businesses already generate — analytics, conversion behavior — into a prioritized action list without anyone having to build dashboards or run reports. Velyr\'s Growth Agent reads your analytics each week, identifies your weakest link, writes the fix, and ships it after your approval. For a small team without a dedicated analyst, this is the difference between guessing where to invest time and knowing. Weekly summaries delivered to Telegram keep you informed without logging into another dashboard.'
   },
 ]
 
@@ -79,7 +59,7 @@ function Logo({ size = 24, color = '#2a5c45' }) {
 export default function Faq({ navigate }) {
   useEffect(() => {
     const prevTitle = document.title
-    document.title = 'FAQ — Velyr AI Business Audit'
+    document.title = 'FAQ — Velyr Growth Agent'
 
     const setOrCreateMeta = (name, content) => {
       let tag = document.querySelector(`meta[name="${name}"]`)
@@ -166,9 +146,9 @@ export default function Faq({ navigate }) {
 
           <div style={{ marginTop: 56, padding: 24, background: '#ffffff', borderRadius: 14, border: '1px solid rgba(28,25,23,0.08)' }}>
             <h2 style={{ marginBottom: 8 }}>Still have questions?</h2>
-            <p style={{ marginBottom: 12 }}>The fastest way to see what Velyr can do for your business is to run a free scan. No account required.</p>
+            <p style={{ marginBottom: 12 }}>The fastest way to see what Velyr can do for your business is to start the Growth Agent.</p>
             <p>
-              <button onClick={() => navigate('/')} style={{ background: '#2a5c45', color: '#f7f4ef', border: 'none', borderRadius: 8, padding: '10px 20px', fontSize: 14, fontFamily: 'Jost, sans-serif', fontWeight: 400, cursor: 'pointer', letterSpacing: '.02em' }}>Run a free scan</button>
+              <button onClick={() => navigate('/agent/login')} style={{ background: '#2a5c45', color: '#f7f4ef', border: 'none', borderRadius: 8, padding: '10px 20px', fontSize: 14, fontFamily: 'Jost, sans-serif', fontWeight: 400, cursor: 'pointer', letterSpacing: '.02em' }}>Start the Growth Agent</button>
               {' '}or email <a href="mailto:info@velyr.io">info@velyr.io</a>.
             </p>
           </div>

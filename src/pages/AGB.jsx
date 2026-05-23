@@ -62,10 +62,8 @@ export default function AGB({ navigate }) {
           {/* § 1 */}
           <div style={block}>
             <h2>§ 1 — Scope & Services</h2>
-            <p style={{ marginBottom: 12 }}>Velyr provides AI-powered business audit and website optimisation services. The following services are offered:</p>
+            <p style={{ marginBottom: 12 }}>Velyr provides an AI-powered Growth Agent service that delivers weekly conversion optimization improvements to subscribers' websites. The following service is offered:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Free Scan</strong> — a free, automated analysis of your website and public social media profiles, providing an overall score and 2 priority issues. No account or payment required.</li>
-              <li><strong style={{ fontWeight: 500 }}>Full Report (€9, one-time)</strong> — a comprehensive audit including all 5 priority actions, deep social media analysis, hook analysis, caption rewrites, brand clarity scoring, and an effort plan.</li>
               <li><strong style={{ fontWeight: 500 }}>Growth Agent (€29/month)</strong> — a semi-autonomous AI agent that analyses your GitHub repository and PostHog analytics weekly, identifies the highest-impact conversion issue, writes a code fix, opens a Pull Request, and notifies you via Telegram (reply YES to deploy or NO to skip). Nothing is deployed without your explicit approval. Additional features include: competitor weekly scanning of up to 2 sites you choose; an optional public timeline page; and a brutally honest monthly roast report summarising progress and gaps.</li>
             </ul>
             <p style={{ marginTop: 12 }}>All services are provided as-is based on publicly available data and automated AI analysis. Results are informational only and do not constitute legal, financial, or professional business advice.</p>
@@ -78,8 +76,6 @@ export default function AGB({ navigate }) {
             <h2>§ 2 — Contract Formation</h2>
             <p style={{ marginBottom: 12 }}>A contract is formed as follows:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Free Scan:</strong> By submitting your website URL in the scan form. No registration required.</li>
-              <li><strong style={{ fontWeight: 500 }}>Full Report:</strong> By completing payment via Stripe. The contract is formed at the moment Stripe confirms your payment.</li>
               <li><strong style={{ fontWeight: 500 }}>Growth Agent:</strong> By completing the onboarding process and confirming your first monthly subscription payment via Stripe. The contract is formed at the moment Stripe confirms your payment.</li>
             </ul>
             <p style={{ marginTop: 12 }}>By using any paid service, you confirm that you are at least 18 years old and legally entitled to enter into this contract.</p>
@@ -92,7 +88,6 @@ export default function AGB({ navigate }) {
             <h2>§ 3 — Prices & Payment</h2>
             <ul>
               <li>Die angegebenen Preise sind Endpreise. Gemäß § 19 UStG erheben wir keine Umsatzsteuer und weisen diese folglich auch nicht aus.</li>
-              <li>The <strong style={{ fontWeight: 500 }}>Full Report</strong> costs €9 as a one-time payment. You are charged once at purchase. No recurring charges.</li>
               <li>The <strong style={{ fontWeight: 500 }}>Growth Agent</strong> costs €29 per month, billed monthly in advance via Stripe. The subscription renews automatically each month until cancelled.</li>
               <li>All payments are processed by Stripe Payments Europe, Ltd. Velyr never stores your card details.</li>
               <li>In case of a failed payment for the Growth Agent, Stripe will retry according to its standard retry schedule. If payment cannot be collected, the subscription will be paused and you will be notified by email.</li>
@@ -106,7 +101,6 @@ export default function AGB({ navigate }) {
             <h2>§ 4 — Right of Withdrawal (Widerrufsrecht)</h2>
             <p style={{ marginBottom: 12 }}>As a consumer within the EU, you generally have a 14-day right of withdrawal from distance contracts. However, please note the following:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Full Report:</strong> By completing payment, you expressly request immediate performance of the service. You acknowledge that your right of withdrawal expires upon delivery of the completed report, in accordance with § 356 Abs. 5 BGB and Art. 16(m) of Directive 2011/83/EU.</li>
               <li><strong style={{ fontWeight: 500 }}>Growth Agent:</strong> You have a 14-day right of withdrawal from the date of contract formation. If you expressly request that the service begin immediately, you acknowledge that your right of withdrawal expires once the service has been fully performed. If you withdraw before the first agent run, you will receive a full refund. If the agent has already run at least once, a proportional fee for the service rendered may be retained.</li>
             </ul>
             <p style={{ marginTop: 12 }}>To exercise your right of withdrawal, contact us at <a href="mailto:info@velyr.io">info@velyr.io</a> within 14 days of contract formation. No specific form is required.</p>
@@ -151,18 +145,6 @@ export default function AGB({ navigate }) {
               Haben Sie verlangt, dass die Dienstleistungen während der Widerrufsfrist beginnen sollen, so haben Sie uns einen angemessenen Betrag zu zahlen, der dem Anteil der bis zu dem Zeitpunkt, zu dem Sie uns von der Ausübung des Widerrufsrechts hinsichtlich dieses Vertrags unterrichten, bereits erbrachten Dienstleistungen im Vergleich zum Gesamtumfang der im Vertrag vorgesehenen Dienstleistungen entspricht.
             </p>
 
-            <p style={{ marginTop: 18, marginBottom: 12, fontWeight: 500, color: '#1c1917' }}>Vorzeitiges Erlöschen des Widerrufsrechts bei digitalen Inhalten</p>
-            <p style={{ marginBottom: 12 }}>
-              Bei einem Vertrag über die Lieferung von nicht auf einem körperlichen Datenträger befindlichen digitalen Inhalten (Full Report, €9) erlischt das Widerrufsrecht auch dann, wenn der Unternehmer mit der Ausführung des Vertrags begonnen hat, nachdem Sie
-            </p>
-            <ul>
-              <li>ausdrücklich zugestimmt haben, dass der Unternehmer mit der Ausführung des Vertrags vor Ablauf der Widerrufsfrist beginnt, und</li>
-              <li>Ihre Kenntnis davon bestätigt haben, dass Sie durch Ihre Zustimmung mit Beginn der Ausführung des Vertrags Ihr Widerrufsrecht verlieren (§ 356 Abs. 5 BGB).</li>
-            </ul>
-            <p style={{ marginTop: 12 }}>
-              Diese Zustimmung und Kenntnisbestätigung holen wir vor jeder kostenpflichtigen Bestellung des Full Reports per Checkbox ausdrücklich ein.
-            </p>
-
             <p style={{ marginTop: 24, marginBottom: 12, fontWeight: 500, color: '#1c1917' }}>Muster-Widerrufsformular (Anlage 2 zu Art. 246a § 1 Abs. 2 Satz 1 Nr. 1 EGBGB)</p>
             <p style={{ marginBottom: 12, fontStyle: 'italic' }}>
               Wenn Sie den Vertrag widerrufen wollen, dann füllen Sie bitte dieses Formular aus und senden Sie es zurück.
@@ -196,7 +178,6 @@ export default function AGB({ navigate }) {
           <div style={block}>
             <h2>§ 5 — Cancellation & Refunds</h2>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Full Report:</strong> No refunds after the report has been delivered, as the service is fully performed at that point.</li>
               <li><strong style={{ fontWeight: 500 }}>Growth Agent:</strong> You can cancel your subscription at any time from your dashboard. Cancellation takes effect at the end of the current billing period. No partial refunds are issued for unused days in the current period. After cancellation, the agent will stop running and your data will be deleted within 30 days.</li>
               <li>If Velyr is unable to perform the service due to a technical error on our side, you are entitled to a full refund for the affected period.</li>
             </ul>
@@ -237,8 +218,7 @@ export default function AGB({ navigate }) {
             <h2>§ 8 — Limitation of Liability</h2>
             <p style={{ marginBottom: 12 }}>Velyr's liability is limited as follows:</p>
             <ul>
-              <li>Velyr is not liable for business decisions made on the basis of the audit reports or Growth Agent recommendations.</li>
-              <li>Velyr is not liable for the accuracy of publicly available social media data retrieved from third-party platforms.</li>
+              <li>Velyr is not liable for business decisions made on the basis of the Growth Agent recommendations.</li>
               <li>Velyr is not liable for indirect, consequential, or incidental damages, including but not limited to loss of revenue, loss of data, or reputational damage.</li>
               <li>Velyr's total liability for any claim related to a paid service is limited to the amount paid by you for that service in the 3 months preceding the claim.</li>
               <li>Nothing in these Terms limits liability for death or personal injury caused by negligence, or for fraud or fraudulent misrepresentation.</li>
@@ -252,7 +232,7 @@ export default function AGB({ navigate }) {
             <h2>§ 9 — Intellectual Property</h2>
             <ul>
               <li>The Velyr platform, its design, and all content produced by Velyr (excluding your own website content and social media data) remain the intellectual property of Florian Rappold.</li>
-              <li>The audit reports and Growth Agent analyses generated for you are licensed to you for personal and commercial use. You may share them freely.</li>
+              <li>The Growth Agent analyses generated for you are licensed to you for personal and commercial use. You may share them freely.</li>
               <li>You may not reverse-engineer, resell, or redistribute the Velyr platform or its outputs as your own product or service.</li>
             </ul>
           </div>
@@ -264,9 +244,8 @@ export default function AGB({ navigate }) {
             <h2>§ 10 — Prohibited Use</h2>
             <p style={{ marginBottom: 12 }}>You may not use Velyr to:</p>
             <ul>
-              <li>Scan websites or social media accounts you do not own or have explicit permission to audit.</li>
+              <li>Use the Growth Agent on repositories or websites you do not own.</li>
               <li>Attempt to circumvent, reverse-engineer, or exploit the platform.</li>
-              <li>Submit false or misleading information in the scan form.</li>
               <li>Use the Growth Agent on a GitHub repository you are not authorised to modify.</li>
               <li>Violate any applicable law or regulation.</li>
             </ul>
