@@ -1504,7 +1504,6 @@ function StripeSubscriptionPanel({ navigate }) {
   const [portalLoading, setPortalLoading] = useState(false)
   const [subscribeLoading, setSubscribeLoading] = useState(false)
   const [subStatus, setSubStatus]         = useState(null)
-  const [hasFullScan, setHasFullScan]     = useState(false)
   const [subLoading, setSubLoading]       = useState(true)
   const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false)
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState(null)
@@ -1531,12 +1530,11 @@ function StripeSubscriptionPanel({ navigate }) {
       if (!session?.user) { setSubLoading(false); return }
       const { data } = await supabase
         .from('agent_subscriptions')
-        .select('subscription_status, full_scan_purchased, cancel_at_period_end, current_period_end')
+        .select('subscription_status, cancel_at_period_end, current_period_end')
         .eq('user_id', session.user.id)
         .single()
       if (data) {
         setSubStatus(data.subscription_status)
-        setHasFullScan(data.full_scan_purchased === true)
         setCancelAtPeriodEnd(data.cancel_at_period_end === true)
         setCurrentPeriodEnd(data.current_period_end || null)
       }
@@ -1618,18 +1616,6 @@ function StripeSubscriptionPanel({ navigate }) {
             </div>
             <button onClick={openPortal} disabled={portalLoading} className="btn" style={{ background:'transparent', border:`1px solid ${C.yellow}`, color:C.yellow, borderRadius:7, padding:'6px 13px', fontSize:12, fontFamily:'DM Sans,sans-serif', fontWeight:400 }}>
               {portalLoading ? '…' : 'Update payment →'}
-            </button>
-          </div>
-        )}
-
-        {hasFullScan && (
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, background:C.accentSoft, border:`1px solid ${C.accentMid}`, borderRadius:9, padding:'10px 14px', flexWrap:'wrap' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ fontSize:14 }}>★</span>
-              <span style={{ fontSize:13, color:C.accent, fontWeight:500 }}>Full Scan unlocked</span>
-            </div>
-            <button onClick={() => navigate('/premium')} className="btn" style={{ background:'transparent', border:`1px solid ${C.accent}`, color:C.accent, borderRadius:7, padding:'6px 13px', fontSize:12, fontFamily:'DM Sans,sans-serif', fontWeight:400 }}>
-              Run your scan →
             </button>
           </div>
         )}
