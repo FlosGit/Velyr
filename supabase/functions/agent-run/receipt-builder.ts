@@ -41,6 +41,14 @@ function list(items: string[]): string {
   return items.length ? items.map(i => `- ${i}`).join('\n') : '_none_'
 }
 
+// The deterministic auto-rollback trigger, in percentage points of site-wide
+// bounce-rate increase within 48h. Receipt-side copy so the PR body states the
+// real trigger value. Keep in sync with the other ROLLBACK_BOUNCE_PP_THRESHOLD
+// declaration (api/agent/run.js — handleRollbackCheck, which owns the actual
+// decision). Format-contract dedup, same reason as encryptSecret: Node and Deno
+// can't share a module cleanly.
+const ROLLBACK_BOUNCE_PP_THRESHOLD = 15
+
 export function buildReceipt(input: ReceiptInput): string {
   const { mapResult, graph, rankerResult, deepContext, fixResult, lintInfo, runId } = input
   const em = fixResult.expected_metric
@@ -82,6 +90,14 @@ export function buildReceipt(input: ReceiptInput): string {
 
   // ── Blind spots ──
   const blindSpots = (fixResult.blind_spots || []).map(b => b)
+
+  // ── Rollback: AI hypothesis line ──
+  // The AI's stated 48h success signal is a LABELLED hypothesis only — it never
+  // gates the rollback (the deterministic +Npp bounce check does). Omitted
+  // entirely when absent so we never render "…hypothesis: undefined".
+  const aiHypothesisLine = fixResult.rollback_signal
+    ? `\n- AI's stated success hypothesis (not used for rollback): ${fixResult.rollback_signal}`
+    : ''
 
   // ── Environment checks ──
   const ext = extOf(fixResult.file_to_edit || '')
@@ -148,7 +164,7 @@ ${list(blindSpots)}
 
 - Revert this PR (GitHub UI: "Revert" button on the merged PR page).
 - If metrics regress, the agent's 48h rollback check will open a revert PR automatically and ping you for approval.
-- Signal we'll watch for: ${fixResult.rollback_signal || '_none specified_'}
+- Auto-rollback trigger: site-wide bounce +${ROLLBACK_BOUNCE_PP_THRESHOLD}pp within 48h (correlation, not attribution)${aiHypothesisLine}
 
 ## Environment checks
 

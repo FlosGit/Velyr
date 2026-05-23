@@ -4,6 +4,7 @@ import { App } from '@octokit/app'
 import { Octokit } from '@octokit/rest'
 import { throttling } from '@octokit/plugin-throttling'
 import crypto from 'node:crypto'
+import { decryptSecret } from '../_lib/secret-crypto.js'
 
 // Stage 5.D: Octokit with automatic GitHub rate-limit / secondary-rate-limit
 // backoff (honors Retry-After). Mirrors the Edge Function.
@@ -75,46 +76,11 @@ async function recordLLMUsage(subscriptionId, inputTokens, outputTokens, callerL
   if (error) console.warn(`[llm-cap] failed to record usage for ${callerLabel}:`, error.message)
 }
 
-// ─── SECRET ENCRYPTION (Stage 4.1) ───────────────────────────────────────────
-// AES-256-GCM with a 12-byte IV and the 16-byte auth tag concatenated as
-// `iv || tag || ciphertext`, all base64'd and prefixed with `enc:v1:` so it's
-// distinguishable from legacy plaintext values. Legacy plaintext is still
-// accepted on read so the migration is forward-only and doesn't strand
-// existing rows. AGENT_TOKEN_ENCRYPTION_KEY must be a 64-char hex string
-// (32 bytes / AES-256). Throws on encrypt/decrypt failure rather than
-// silently returning bad data.
-const ENC_PREFIX = 'enc:v1:'
-
-function getEncryptionKey() {
-  const hex = process.env.AGENT_TOKEN_ENCRYPTION_KEY
-  if (!hex) throw new Error('AGENT_TOKEN_ENCRYPTION_KEY is not configured')
-  if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error('AGENT_TOKEN_ENCRYPTION_KEY must be 64 hex chars (32 bytes)')
-  return Buffer.from(hex, 'hex')
-}
-
-function encryptSecret(plaintext) {
-  if (plaintext == null) return null
-  const key    = getEncryptionKey()
-  const iv     = crypto.randomBytes(12)
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
-  const ct     = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()])
-  const tag    = cipher.getAuthTag()
-  return ENC_PREFIX + Buffer.concat([iv, tag, ct]).toString('base64')
-}
-
-function decryptSecret(stored) {
-  if (stored == null) return null
-  // Legacy plaintext path — accept as-is. Encrypt-on-next-write does the
-  // migration without us needing a backfill job.
-  if (typeof stored !== 'string' || !stored.startsWith(ENC_PREFIX)) return stored
-  const blob = Buffer.from(stored.slice(ENC_PREFIX.length), 'base64')
-  const iv   = blob.subarray(0, 12)
-  const tag  = blob.subarray(12, 28)
-  const ct   = blob.subarray(28)
-  const decipher = crypto.createDecipheriv('aes-256-gcm', getEncryptionKey(), iv)
-  decipher.setAuthTag(tag)
-  return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8')
-}
+// ─── SECRET ENCRYPTION (Stage 4.1; Stage 1D: extracted) ──────────────────────
+// decryptSecret is imported from ../_lib/secret-crypto.js (shared with
+// onboarding.js's encryptSecret writer). The local encryptSecret was dead here
+// — only decryptSecret is read in this file. See the lib for the enc:v1:
+// wire-format contract and the Deno-copy sync note.
 
 // Stage 4.4: fetch the repo's actual default branch instead of hard-coding
 // 'main'. Falls back to 'main' only if the API call fails.
@@ -529,6 +495,14 @@ async function handleEvaluateAB(res) {
 
 // ─── ROLLBACK CHECK ───────────────────────────────────────────────────────────
 async function handleRollbackCheck(res) {
+  // The sole deterministic rollback trigger: site-wide bounce rate rose by at
+  // least this many percentage points in the 48h after a change merged. The
+  // AI's rollback_signal is a labelled hypothesis only — it never gates this.
+  // Keep in sync with the other ROLLBACK_BOUNCE_PP_THRESHOLD declaration
+  // (supabase/functions/agent-run/receipt-builder.ts). Format-contract dedup,
+  // same reason as encryptSecret: Node and Deno can't share a module cleanly.
+  const ROLLBACK_BOUNCE_PP_THRESHOLD = 15
+
   // Promote DNA entries that have stayed deployed for 7+ days to 'success'.
   await promotePendingDNAToSuccess().catch(e => console.error('DNA promote error:', e))
 
@@ -610,7 +584,7 @@ async function handleRollbackCheck(res) {
       }
 
       const bounceDelta    = bounceAfter - bounceBefore
-      const shouldRollback = bounceDelta >= 15
+      const shouldRollback = bounceDelta >= ROLLBACK_BOUNCE_PP_THRESHOLD
 
       // 3a: capture after-screenshot at the same URL targeted by the original run
       const targetUrl = (() => {

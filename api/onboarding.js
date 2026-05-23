@@ -20,7 +20,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { createClient } from '@supabase/supabase-js'
-import crypto from 'crypto'
+import { encryptSecret } from './_lib/secret-crypto.js'
 import { verifySessionCookie } from './github/_oauth-state.js'
 
 export const config = { maxDuration: 60 }
@@ -44,24 +44,9 @@ const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 })
 
-// ─── secret encryption ───────────────────────────────────────────────────────
-// Mirror of api/agent/run.js's encryptSecret: AES-256-GCM, `iv||tag||ct` base64
-// with an `enc:v1:` prefix. The storage format is the contract between this
-// writer and run.js's decryptSecret reader — keep them byte-compatible.
-const ENC_PREFIX = 'enc:v1:'
-function encryptSecret(plaintext) {
-  if (plaintext == null || plaintext === '') return null
-  const hex = process.env.AGENT_TOKEN_ENCRYPTION_KEY
-  if (!hex || !/^[0-9a-fA-F]{64}$/.test(hex)) {
-    throw new Error('AGENT_TOKEN_ENCRYPTION_KEY must be 64 hex chars (32 bytes)')
-  }
-  const key    = Buffer.from(hex, 'hex')
-  const iv     = crypto.randomBytes(12)
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
-  const ct     = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()])
-  const tag    = cipher.getAuthTag()
-  return ENC_PREFIX + Buffer.concat([iv, tag, ct]).toString('base64')
-}
+// secret encryption: encryptSecret is imported from ./_lib/secret-crypto.js
+// (shared with api/agent/run.js's decryptSecret). See that file for the
+// enc:v1: wire-format contract and the Deno-copy sync note.
 
 // Extract + validate the JWT, returning the user or null.
 async function getUser(req) {

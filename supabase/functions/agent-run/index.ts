@@ -3,7 +3,7 @@ import { App } from 'npm:@octokit/app@14'
 import { Octokit } from 'npm:@octokit/rest@20'
 import { throttling } from 'npm:@octokit/plugin-throttling@8'
 import { parse as babelParse } from 'npm:@babel/parser@7.27.0'
-import { discoverFrameworkAndStructure, detectLintInfo, type MapResult, type LintInfo } from './repo-mapper.ts'
+import { discoverFrameworkAndStructure, detectLintInfo, type MapResult, type LintInfo, type TreeEntry } from './repo-mapper.ts'
 import { buildImportGraph, type ImportGraph } from './import-graph.ts'
 import { rankComponentsForConversion, type RankerResult } from './component-ranker.ts'
 import { readDeepContext, type DeepContext } from './deep-reader.ts'
@@ -32,10 +32,6 @@ const LLM_CAPS = {
   // ranker module delegates max_tokens to the injected callAI closure, which
   // applies this value (single source of truth, no duplicated magic number).
   MAX_TOKENS_RANKER:   Number(Deno.env.get('LLM_MAX_TOKENS_RANKER')   || '600'),   // callAI JSON (Pass 1)
-  // Per-file truncation at READ time (analyzeRepo / detectAllPages). 60 KB
-  // covers any reasonable page component while making a 5 MB junk file
-  // harmless. Truncation is loud (warn) so we'd notice an unexpected hit.
-  MAX_FILE_BYTES: Number(Deno.env.get('LLM_MAX_FILE_BYTES') || String(60 * 1024)),
   // Hard ceiling on the JSON body we POST to OpenRouter. 500 KB ≈ 125 K
   // tokens — well under Sonnet 4.5's 200 K context, leaves room for output.
   // If exceeded, abort the run rather than send a giant prompt.
@@ -69,19 +65,6 @@ function slog(level: 'info' | 'warn' | 'error', event: string, fields: Record<st
   if (level === 'error') console.error(line)
   else if (level === 'warn') console.warn(line)
   else console.log(line)
-}
-
-// Truncate large file contents before they enter any prompt. Loud-on-cut so
-// unexpected hits surface in the Edge Function logs.
-function truncateForLLM(content: string, label: string): string {
-  if (typeof content !== 'string') return ''
-  const bytes = byteLength(content)
-  if (bytes <= LLM_CAPS.MAX_FILE_BYTES) return content
-  console.warn(`[llm-cap] truncating ${label}: ${bytes}B → ${LLM_CAPS.MAX_FILE_BYTES}B`)
-  // slice() is by code-unit, not byte — close enough for our ASCII-dominated
-  // source files; the marker below makes the truncation obvious to the model.
-  return content.slice(0, LLM_CAPS.MAX_FILE_BYTES) +
-    `\n/* … truncated by Velyr LLM size cap (${LLM_CAPS.MAX_FILE_BYTES}B / ${bytes}B original) … */`
 }
 
 // Guard every OpenRouter POST: if the serialized request body is larger than
@@ -252,7 +235,7 @@ function validateFindReplaceSafe(content: string, find: string, _replace: string
 // is empty (the agent would otherwise hallucinate a fix from {}).
 const NO_DATA_THRESHOLDS = {
   MIN_UNIQUE_VISITORS_7D: 5,   // fewer than 5 sessions in a week = no signal
-  MIN_REPO_FILES:         2,   // anchor at "at least one file from each scanner"
+  MIN_REPO_FILES:         2,   // min import-graph nodes (entry point + ≥1 import) to ground a fix
 }
 
 function hasRealAnalytics(analytics: any): boolean {
@@ -311,7 +294,11 @@ function isForbiddenEditPath(filePath: string): RegExp | null {
 }
 
 // ─── SECRET ENCRYPTION (Stage 4.1) ───────────────────────────────────────────
-// Mirrors api/agent/run.js encryption format: `enc:v1:` + base64(iv || tag ||
+// FORMAT CONTRACT: must stay byte-compatible with api/_lib/secret-crypto.js.
+// Cross-runtime dedup not viable (Deno vs Node bundle boundary; Web Crypto vs
+// node:crypto). Update both together if the format changes.
+//
+// Mirrors that file's encryption format: `enc:v1:` + base64(iv || tag ||
 // ciphertext), AES-256-GCM. Deno's Web Crypto handles AES-GCM natively.
 // Legacy plaintext is accepted on read so existing rows keep working until
 // they're re-written (which encrypts them).
@@ -507,69 +494,54 @@ async function getOctokit(installationId: number) {
   })
 }
 
-// ─── REPO ANALYSIS ────────────────────────────────────────────────────────────
-async function analyzeRepo(octokit: any, owner: string, repo: string) {
-  const filesToCheck = [
-    'src/App.jsx', 'src/App.tsx', 'index.html',
-    'src/main.jsx', 'src/main.tsx',
-    'src/pages/Home.jsx', 'src/Home.jsx',
-    'src/components/Hero.jsx', 'src/components/Landing.jsx',
-  ]
+// ─── DETECT ALL PAGES (Stage 1B: derived from repoTree, no content reads) ─────
+// Previously analyzeRepo + detectAllPages each fanned out one GitHub getContent
+// per file to pull file BODIES. But the only consumers were the funnel (which
+// reads {path, pageType} only) and two gates (which read a file COUNT only) —
+// the bodies were merged into enrichedRepoContent and then never read, since
+// Pass 2 grounds on RA4's deepContext, not on these. mapResult.repoTree already
+// lists every file (path/type/sha), so we derive the same {path → {pageType,
+// fileName}} map with ZERO extra GitHub reads.
+//
+// Scope matches the old detectAllPages exactly: files DIRECTLY inside one of the
+// six page dirs (one level deep, repo-root-relative), same extension set. We
+// deliberately preserve the root-relative scan (not siteRoot-scoped) so the
+// derived page set stays identical to what detectAllPages produced.
+const PAGE_DIRS = ['src/pages', 'src/views', 'src/screens', 'pages', 'app', 'src/app']
+const PAGE_EXT_RE = /\.(jsx|tsx|js|ts|html|vue|svelte)$/
 
-  const files: Record<string, string> = {}
-  for (const path of filesToCheck) {
-    try {
-      const { data } = await octokit.rest.repos.getContent({ owner, repo, path })
-      files[path] = truncateForLLM(base64Decode(data.content), path)
-    } catch { /* file doesn't exist */ }
-  }
-  return files
+const PAGE_TYPE_MAP: Record<string, string> = {
+  home: 'landing', index: 'landing', landing: 'landing',
+  pricing: 'pricing', price: 'pricing', plans: 'pricing',
+  checkout: 'checkout', payment: 'checkout', cart: 'checkout',
+  blog: 'blog', post: 'blog', article: 'blog',
+  about: 'about', contact: 'about',
+  lead: 'lead_magnet', download: 'lead_magnet', free: 'lead_magnet',
+  login: 'auth', signup: 'auth', register: 'auth',
+  dashboard: 'dashboard', account: 'dashboard',
 }
 
-// ─── DETECT ALL PAGES ────────────────────────────────────────────────────────
-async function detectAllPages(octokit: any, owner: string, repo: string) {
-  const pages: Record<string, { content: string; pageType: string; fileName: string }> = {}
-
-  const dirsToScan = ['src/pages', 'src/views', 'src/screens', 'pages', 'app', 'src/app']
-  const pageTypeMap: Record<string, string> = {
-    home: 'landing', index: 'landing', landing: 'landing',
-    pricing: 'pricing', price: 'pricing', plans: 'pricing',
-    checkout: 'checkout', payment: 'checkout', cart: 'checkout',
-    blog: 'blog', post: 'blog', article: 'blog',
-    about: 'about', contact: 'about',
-    lead: 'lead_magnet', download: 'lead_magnet', free: 'lead_magnet',
-    login: 'auth', signup: 'auth', register: 'auth',
-    dashboard: 'dashboard', account: 'dashboard',
+// Filename-only page-type heuristic — unchanged from the old inline detectType.
+function detectPageType(name: string): string {
+  const lower = name.toLowerCase().replace(PAGE_EXT_RE, '')
+  for (const [keyword, type] of Object.entries(PAGE_TYPE_MAP)) {
+    if (lower.includes(keyword)) return type
   }
+  return 'other'
+}
 
-  const detectType = (name: string) => {
-    const lower = name.toLowerCase().replace(/\.(jsx|tsx|js|ts|html|vue|svelte)$/, '')
-    for (const [keyword, type] of Object.entries(pageTypeMap)) {
-      if (lower.includes(keyword)) return type
-    }
-    return 'other'
+function detectAllPages(repoTree: TreeEntry[]): Record<string, { pageType: string; fileName: string }> {
+  const pages: Record<string, { pageType: string; fileName: string }> = {}
+  for (const entry of repoTree) {
+    if (entry.type !== 'blob') continue
+    // Direct child of a page dir → nothing after the dir prefix may contain '/'.
+    const dir = PAGE_DIRS.find(d =>
+      entry.path.startsWith(d + '/') && !entry.path.slice(d.length + 1).includes('/'))
+    if (!dir) continue
+    const fileName = entry.path.slice(dir.length + 1)
+    if (!PAGE_EXT_RE.test(fileName)) continue
+    pages[entry.path] = { pageType: detectPageType(fileName), fileName }
   }
-
-  for (const dir of dirsToScan) {
-    try {
-      const { data: contents } = await octokit.rest.repos.getContent({ owner, repo, path: dir })
-      if (!Array.isArray(contents)) continue
-
-      for (const item of contents) {
-        if (item.type !== 'file') continue
-        if (!item.name.match(/\.(jsx|tsx|js|ts|html|vue|svelte)$/)) continue
-        try {
-          const { data: fileData } = await octokit.rest.repos.getContent({ owner, repo, path: item.path })
-          pages[item.path] = {
-            content:  truncateForLLM(base64Decode(fileData.content), item.path),
-            pageType: detectType(item.name),
-            fileName: item.name,
-          }
-        } catch { /* skip unreadable */ }
-      }
-    } catch { /* dir doesn't exist */ }
-  }
-
   return pages
 }
 
@@ -1492,9 +1464,9 @@ async function processConnection(conn: any) {
     const trackedCompetitors: string[] = subRow?.competitors || []
 
     // ── Monthly spend cap pre-flight ───────────────────────────────────────
-    // Done BEFORE expensive GitHub fan-out (analyzeRepo / detectAllPages do
-    // many API calls per run). If we're already past the per-subscription
-    // monthly ceiling, mark the run skipped and notify the user once.
+    // Done BEFORE the expensive work (import-graph blob reads + the two LLM
+    // passes). If we're already past the per-subscription monthly ceiling, mark
+    // the run skipped and notify the user once.
     const spendStatus = await getMonthlySpend(conn.subscription_id)
     if (spendStatus.capAvailable && spendStatus.spent >= MONTHLY_SPEND_CAP_EUR) {
       console.warn(`[llm-cap] subscription ${conn.subscription_id} over monthly cap (€${spendStatus.spent.toFixed(4)} / €${MONTHLY_SPEND_CAP_EUR}) — skipping`)
@@ -1580,9 +1552,10 @@ async function processConnection(conn: any) {
     // analytics fetch. The key never appears in process state outside this
     // async scope.
     const posthogApiKey = (await decryptSecret(conn.posthog_api_key)) || Deno.env.get('POSTHOG_API_KEY')!
-    const [repoContent, allPages, analytics, pageSpeed, previousFixes, legacyDna, competitorData, guardrails, businessDna, competitorChanges] = await Promise.all([
-      analyzeRepo(octokit, conn.github_repo_owner, conn.github_repo_name),
-      detectAllPages(octokit, conn.github_repo_owner, conn.github_repo_name),
+    // Stage 1B: pages are derived from the already-fetched repoTree (no GitHub
+    // reads); the old analyzeRepo + detectAllPages content fan-out is gone.
+    const allPages = detectAllPages(mapResult.repoTree)
+    const [analytics, pageSpeed, previousFixes, legacyDna, competitorData, guardrails, businessDna, competitorChanges] = await Promise.all([
       getPostHogAnalytics(
         posthogApiKey,
         conn.posthog_project_id || Deno.env.get('POSTHOG_PROJECT_ID')!,
@@ -1607,34 +1580,26 @@ async function processConnection(conn: any) {
 
     // Step 3: Mapping funnel
     await supabase.from('agent_runs').update({ current_step: 'mapping_funnel' }).eq('id', run.id)
-    const funnelAnalysis      = buildFunnelAnalysis(allPages, analytics)
-    const enrichedRepoContent = { ...repoContent }
-    for (const [path, info] of Object.entries(allPages) as any) {
-      if (!enrichedRepoContent[path]) enrichedRepoContent[path] = info.content
-    }
+    const funnelAnalysis = buildFunnelAnalysis(allPages, analytics)
 
-    // ── Empty-repo gate ────────────────────────────────────────────────────
-    // If neither analyzeRepo nor detectAllPages found any readable files, the
-    // repo shape isn't supported (backend-only, Next.js app router, Remix,
-    // SvelteKit, monorepo, etc.). Do NOT call the AI with `{}` — it will
-    // hallucinate a file_to_edit. Abort cleanly and tell the user.
-    if (Object.keys(enrichedRepoContent).length === 0) {
-      console.warn(`[no-data] empty repo content for subscription ${conn.subscription_id}`)
-      await supabase.from('agent_runs').update({
-        status:        'skipped_unsupported_repo',
-        current_step:  'done',
-        completed_at:  new Date().toISOString(),
-        error_message: 'No readable page files found in the connected repository. Velyr currently scans src/pages, src/views, src/screens, pages, app, src/app for .jsx/.tsx/.js/.ts/.html/.vue/.svelte files.',
-      }).eq('id', run.id)
-      await notifyInsufficientData(subRow?.telegram_chat_id || null, 'your repo structure isn\'t supported yet — no readable page files found in the usual locations')
-      return
-    }
+    // ── Empty-repo gate: removed (Stage 1B) ─────────────────────────────────
+    // It keyed on enrichedRepoContent (analyzeRepo + detectAllPages bodies),
+    // which no longer exists. The shapes it caught (backend-only, app-router,
+    // Remix, SvelteKit, monorepo with no web app) are already rejected earlier
+    // by RA1's `framework === 'unsupported'` early-return; the no-data and
+    // sparse-graph gates below cover the residual "valid framework, but nothing
+    // to analyze" case against the import graph the AI actually grounds on.
 
     // ── No-data gate ───────────────────────────────────────────────────────
     // If EVERY input signal is empty (analytics + DNA + competitors + repo
     // sub-threshold), there is nothing for the model to ground a suggestion
     // in. Better to admit it than to ship a fabricated PR.
-    const repoFileCount     = Object.keys(enrichedRepoContent).length
+    // Stage 1B: the repo-content signal is now graph.nodes.length — the files
+    // reachable from the entry points, which is exactly the set Pass 2 grounds
+    // on (via deepContext). (Was: count of bodies read by analyzeRepo +
+    // detectAllPages, both now deleted.) The sparse-graph gate below stays the
+    // finer-grained backstop on the same graph.
+    const repoFileCount     = graph.nodes.length
     const hasAnalytics      = hasRealAnalytics(analytics)
     const hasAnyDNA         = hasDNA(dna)
     const hasCompetitorRows = Array.isArray(competitorData) && competitorData.length > 0
