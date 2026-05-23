@@ -91,7 +91,8 @@ async function handleSnapshot(req, res) {
   // OA3 stored account as a login string; surface it as { login } for the UI.
   const installations = (c.payload.installations || []).map(i => ({
     installationId: i.installationId,
-    account: { login: i.account },
+    // Stage 3: surface the account type so the picker can badge org installs.
+    account: { login: i.account, type: i.accountType || 'User' },
     repos: i.repos,
   }))
   return res.status(200).json({ githubLogin: c.payload.githubLogin, installations })
@@ -146,6 +147,11 @@ async function handleComplete(req, res) {
     p_github_login:    c.payload.githubLogin,
     p_repo_owner:      repoOwner,
     p_repo_name:       repoName,
+    // Stage 3: installation account identity (personal vs org), from the verified
+    // snapshot. Stored on agent_subscriptions; does not affect the ownership check.
+    p_installation_account_type:  inst.accountType ?? null,
+    p_installation_account_login: inst.account ?? null,
+    p_installation_account_id:    inst.accountId ?? null,
   })
 
   if (rpcError) {
@@ -328,6 +334,30 @@ async function handleVerifyTelegramCode(req, res) {
   const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : ''
   if (!TELEGRAM_CODE_RE.test(code)) {
     return res.status(400).json({ error: 'Invalid code format. It should look like VELYR-XXXXXX.' })
+  }
+
+  // Stage 3C: per-user fixed-window throttle (10/min) before the code-validity
+  // lookup. verify_telegram_code is a 200-vs-400 oracle; this caps brute-force
+  // probing of the ~1B VELYR-XXXXXX space. Keyed on auth_user_id only
+  // (decision 3). FAILS CLOSED on RPC error: this is a security control, not a
+  // cost gate — fail-open would silently disable the exact protection this stage
+  // adds. The only realistic error is a not-yet-applied migration (a deploy →
+  // `supabase db push` window of seconds-to-minutes); a brief 503 there beats a
+  // silently-off limiter. (Contrast getMonthlySpend, which fails open because
+  // it's cost tracking with availability priority.)
+  const { data: rl, error: rlErr } = await serviceClient.rpc('rate_limit_hit', {
+    p_bucket_key:     `verify_telegram_code:${auth.user.id}`,
+    p_limit:          10,
+    p_window_seconds: 60,
+  })
+  if (rlErr) {
+    console.error('onboarding/verify_telegram_code: rate_limit_hit failed (blocking):', rlErr.message)
+    return res.status(503).json({ error: 'rate_limit_check_failed' })
+  }
+  const decision = Array.isArray(rl) ? rl[0] : rl
+  if (decision && decision.allowed === false) {
+    res.setHeader('Retry-After', String(decision.retry_after_seconds ?? 60))
+    return res.status(429).json({ error: 'Too many attempts. Please wait a minute and try again.' })
   }
 
   const { data: row, error } = await serviceClient

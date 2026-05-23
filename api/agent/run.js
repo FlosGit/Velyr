@@ -199,6 +199,16 @@ async function handleEnforceSubscriptions(res) {
     .lt('received_at', dedupeCutoff)
   if (gcError) console.warn('[enforce-subscriptions] dedupe GC failed:', gcError.message)
 
+  // Stage 3C: GC the verify_telegram_code rate-limit buckets. Windows are 60s,
+  // so anything older than a day is long dead; 1-day retention is ample. Same
+  // best-effort, daily-cron piggyback as the dedupe GC above.
+  const rateCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { error: rlGcError } = await supabase
+    .from('rate_limit_hits')
+    .delete()
+    .lt('window_start', rateCutoff)
+  if (rlGcError) console.warn('[enforce-subscriptions] rate-limit GC failed:', rlGcError.message)
+
   return res.json({ ok: true, ran_at: now })
 }
 

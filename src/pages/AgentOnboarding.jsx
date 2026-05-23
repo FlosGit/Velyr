@@ -452,7 +452,7 @@ function Step2({ onNext, onBack, user, subscriptionId, formData }) {
 
         {!hasRepos && (
           <div style={{ background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.2)', borderRadius: 10, padding: '13px 16px', marginBottom: 16 }}>
-            <p style={{ fontSize: 13, color: C.red, fontWeight: 400 }}>No installations match your GitHub account. Install Velyr on your account first.</p>
+            <p style={{ fontSize: 13, color: C.red, fontWeight: 400 }}>No installations found for your GitHub account or organizations. Install Velyr first.</p>
           </div>
         )}
 
@@ -487,9 +487,6 @@ function Step2({ onNext, onBack, user, subscriptionId, formData }) {
         <p style={{ fontSize: 12, color: C.textLight, fontWeight: 300, lineHeight: 1.6, marginTop: 8, marginBottom: 12 }}>
           Don't see the repo you want? Make sure the Velyr Growth Agent is installed on the right repository.{' '}
           <a href="https://github.com/apps/velyr-growth-agent/installations/new" target="_blank" rel="noreferrer" style={{ color: C.accent, textDecoration: 'underline' }}>Manage installation →</a>
-        </p>
-        <p style={{ fontSize: 12, color: C.textLight, fontWeight: 300, lineHeight: 1.6, marginBottom: 16 }}>
-          Installed on a GitHub organization? Org-level onboarding is coming soon — for now, please reinstall on your personal account.
         </p>
 
         {error && <p style={{ fontSize: 13, color: C.red, marginBottom: 12 }}>{error}</p>}

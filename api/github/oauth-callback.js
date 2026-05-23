@@ -193,10 +193,16 @@ export default async function handler(req, res) {
       console.error('oauth-callback: /user/installations failed:', instRes.status)
       return renderError(res, 502, 'Could not read your GitHub installations. Please try again.')
     }
-    // Match account.id to the verified github_user_id — login can be reused
-    // after an account is deleted, the numeric id cannot. (Org installs, whose
-    // account.id differs from the user id, are skipped — see flag OA3-C.)
-    installations = instJson.installations.filter(i => i?.account?.id === githubUserId)
+    // GitHub scopes /user/installations to installations THIS authenticated user
+    // can access, so the list itself is the permission boundary (Stage 3
+    // decision 1: member-level org support, no extra org-admin gate). We keep the
+    // numeric-id identity check for the user's OWN personal install — a login can
+    // be reused after an account is deleted, the numeric id cannot — and also
+    // admit organization installs the user is authorized for (account.type ===
+    // 'Organization'). Unexpected account types are excluded.
+    installations = instJson.installations.filter(
+      i => i?.account?.id === githubUserId || i?.account?.type === 'Organization'
+    )
   } catch (err) {
     console.error('oauth-callback: /user/installations network error:', err.message)
     return renderError(res, 502, 'Could not reach GitHub. Please try again.')
@@ -223,7 +229,13 @@ export default async function handler(req, res) {
         owner: r.owner?.login,
       }))
       if (repos.length === 0) continue // skip installations with no repos
-      snapshot.push({ installationId: inst.id, account: inst.account?.login, repos })
+      snapshot.push({
+        installationId: inst.id,
+        account:        inst.account?.login,
+        accountType:    inst.account?.type,   // 'User' | 'Organization' (Stage 3)
+        accountId:      inst.account?.id,
+        repos,
+      })
     }
   } catch (err) {
     console.error('oauth-callback: repositories network error:', err.message)
