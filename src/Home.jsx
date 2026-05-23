@@ -32,16 +32,6 @@ const CSS = `
   .reveal { opacity:0; transform:translateY(20px); transition: opacity .6s cubic-bezier(.4,0,.2,1), transform .6s cubic-bezier(.4,0,.2,1); }
   .reveal.in { opacity:1; transform:none; }
 
-  .inp {
-    width:100%; background:#fff; border:1px solid rgba(28,25,23,0.12); border-radius:10px;
-    padding:13px 16px 13px 44px; color:#1c1917; font-family:'Jost',sans-serif;
-    font-weight:300; font-size:15px; outline:none;
-    transition: border-color .2s, box-shadow .2s;
-  }
-  .inp::placeholder { color:#b0a89e; font-weight:300; }
-  .inp:focus { border-color:rgba(42,92,69,0.4); box-shadow:0 0 0 3px rgba(42,92,69,0.08); }
-  .inp:disabled { opacity:0.5; cursor:not-allowed; }
-
   .btn-primary {
     background:#1c1917; color:#f7f4ef; border:none; border-radius:10px;
     padding:15px 28px; font-family:'Jost',sans-serif; font-weight:500; font-size:15px;
@@ -60,30 +50,6 @@ const CSS = `
   }
   .btn-ghost:hover { border-color:rgba(28,25,23,0.35); background:rgba(28,25,23,0.03); transform:translateY(-1px); }
 
-  .btn-accent {
-    background:#2a5c45; color:#fff; border:none; border-radius:10px;
-    padding:14px 28px; font-family:'Jost',sans-serif; font-weight:500; font-size:15px;
-    cursor:pointer; width:100%; letter-spacing:.03em;
-    transition: background .2s, transform .15s, box-shadow .2s;
-  }
-  .btn-accent:hover:not(:disabled) { background:#1e4433; transform:translateY(-2px); box-shadow:0 12px 36px rgba(42,92,69,0.28); }
-
-  .social-accordion-toggle {
-    width:100%; background:none; border:1px dashed rgba(28,25,23,0.18); border-radius:10px;
-    padding:11px 16px; font-family:'Jost',sans-serif; font-weight:300; font-size:13px;
-    color:#6b6460; cursor:pointer; display:flex; align-items:center; justify-content:space-between;
-    transition: border-color .2s, background .2s;
-  }
-  .social-accordion-toggle:hover { border-color:rgba(42,92,69,0.35); background:rgba(42,92,69,0.03); color:#2a5c45; }
-
-  .product-pill {
-    font-size:12px; border-radius:20px; padding:6px 14px; font-weight:400;
-    cursor:pointer; border:1px solid transparent;
-    transition: all .2s ease; font-family:'Jost',sans-serif;
-    display:inline-flex; align-items:center; gap:5px;
-  }
-  .product-pill:hover { transform: translateY(-1px); }
-
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -96,30 +62,17 @@ const CSS = `
 
   @media (max-width: 640px) {
     nav { padding: 0 16px !important; }
-    .nav-ctas { gap: 6px !important; }
-    .nav-cta-ghost { display: none !important; }
     .nav-agent-link { display: none !important; }
     .nav-burger { display: flex !important; }
-    .hero-pad { padding: 96px 16px 64px !important; }
-    .scan-form { padding: 20px 16px !important; }
+    .hero-section { padding: 96px 16px 48px !important; }
+    .hero-stats { gap: 28px !important; }
     .section-pad { padding: 64px 16px !important; }
-    .sample-grid { grid-template-columns: 1fr !important; }
     .pricing-grid { grid-template-columns: 1fr !important; }
-    .what-grid { grid-template-columns: 1fr !important; gap: 2px !important; }
-    .what-card:first-child { border-radius: 14px 14px 0 0 !important; }
-    .what-card:last-child  { border-radius: 0 0 14px 14px !important; }
-    .what-card { border-radius: 0 !important; padding: 28px 22px !important; }
     .footer-inner { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
-    .chips-row { flex-wrap: wrap !important; }
-    .tab-row { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
-    .agent-flow { flex-direction: column !important; }
-    .agent-flow-arrow { transform: rotate(90deg) !important; }
     .agent-bottom-grid { grid-template-columns: 1fr !important; }
     .agent-features-grid { grid-template-columns: 1fr !important; }
     .footer { padding: 24px 16px !important; }
     .footer-links { flex-wrap: wrap !important; gap: 10px !important; }
-    .sample-bm-col-hide { display: none !important; }
-    .sample-bm-row { grid-template-columns: 1fr auto !important; gap: 6px !important; }
     .agent-cta-card { padding: 22px 20px !important; }
     .pricing-card { padding: 26px 22px !important; }
     .growth-section { padding: 64px 16px !important; }
@@ -278,6 +231,69 @@ function Nav({ navigate }) {
   )
 }
 
+// ─── Hero ──────────────────────────────────────────────────────────────────────
+function Hero({ navigate }) {
+  const [ref, visible] = useReveal()
+
+  // Stats sourced from demoData.headline (the 10-week demo dataset) — not hardcoded.
+  const h = demoData.headline
+  const convDelta   = `+${(h.conversion_rate_now - h.conversion_rate_before).toFixed(1)}pp`
+  const bounceDelta = `−${h.bounce_rate_before - h.bounce_rate_now}pp`
+  const fixes       = `${h.runs_merged} / ${h.runs_total}`
+  const weeks       = `${h.runs_total}`
+
+  const stats = [
+    { value: convDelta,   label: 'Conversion rate' },
+    { value: bounceDelta, label: 'Bounce rate' },
+    { value: fixes,       label: 'Fixes shipped' },
+    { value: weeks,       label: 'Weeks running' },
+  ]
+
+  const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+
+  return (
+    <section className="hero-section" style={{ paddingTop:120, paddingBottom:64, paddingLeft:24, paddingRight:24, background:C.bg }}>
+      <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ maxWidth:1060, margin:'0 auto' }}>
+
+        {/* Live label + pulsing dot */}
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:18 }}>
+          <div style={{ position:'relative', width:10, height:10 }}>
+            <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:'#22c55e', animation:'agentPing 2s ease-out infinite' }} />
+            <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:'#22c55e' }} />
+          </div>
+          <span style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>Growth Agent</span>
+        </div>
+
+        <h1 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(36px, 6vw, 64px)', lineHeight:1.1, letterSpacing:'-.025em', color:C.text }}>
+          Conversion fixes, <em style={{ fontStyle:'italic', color:C.warm }}>shipped weekly</em>.
+        </h1>
+
+        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 19px)', color:C.textMuted, maxWidth:640, marginTop:24, lineHeight:1.6 }}>
+          Your AI growth agent identifies the #1 conversion problem on your site each week, writes the code fix, opens a Pull Request — and reverts itself if the metric drops.
+        </p>
+
+        <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:40, flexWrap:'wrap' }}>
+          <button className="btn-primary" style={{ width:'auto' }} onClick={() => scrollTo('pricing-section')}>See pricing →</button>
+          <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>How it works</button>
+        </div>
+
+        <div style={{ marginTop:56 }}>
+          <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400, marginBottom:18 }}>10-week demo</p>
+          <div className="hero-stats" style={{ display:'flex', gap:48, flexWrap:'wrap', justifyContent:'flex-start' }}>
+            {stats.map((s, i) => (
+              <div key={i}>
+                <p style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(28px, 3vw, 40px)', color:C.text, lineHeight:1 }}>{s.value}</p>
+                <p style={{ fontFamily:'DM Mono, monospace', fontSize:11, letterSpacing:'.08em', textTransform:'uppercase', color:C.textMuted, marginTop:6 }}>{s.label}</p>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize:11, letterSpacing:'.04em', color:C.textLight, fontWeight:300, marginTop:18 }}>Example data shown — your dashboard after onboarding.</p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ─── Growth Agent Section ─────────────────────────────────────────────────────
 function GrowthAgentSection({ navigate }) {
   const [ref, visible] = useReveal()
@@ -288,7 +304,7 @@ function GrowthAgentSection({ navigate }) {
   ]
 
   const featuresExtra = [
-    { icon:'🔍', title:'Competitor weekly scan', desc:"Track up to 5 competitors. Every Monday the agent checks for hero, CTA, and pricing changes — and tells you what they shipped that you didn't." },
+    { icon:'🔍', title:'Competitor weekly scan', desc:"Track up to 2 competitors. Every Monday the agent checks for hero, CTA, and pricing changes — and tells you what they shipped that you didn't." },
     { icon:'🔥', title:'Monthly roast report', desc:"Once a month, brutal honesty: what improved, what is still embarrassingly bad versus competitors, and what you keep ignoring that the agent can't fix for you." },
     { icon:'🌐', title:'Public impact timeline', desc:'Optional public page at velyr.io/agent/your-slug showing every run and its results. Use it as social proof or share with your team.' },
   ]
@@ -1010,8 +1026,8 @@ function Pricing({ navigate }) {
   const [ref, visible] = useReveal()
   const [allFeaturesOpen, setAllFeaturesOpen] = useState(false)
 
-  const agentFeaturesTop = ['AI analyses your repo + analytics weekly','Writes the code fix automatically','Reply YES or NO via Telegram','Auto-rollback if metrics drop','Competitor weekly scan','A/B testing automation']
-  const agentFeaturesExtra = ['Identifies #1 conversion problem','Opens a GitHub Pull Request','Brand Guardrails — your rules enforced','Full funnel analysis (all pages)','Multi-page sprint when root cause is shared','Weekly email summary','Monthly roast report — brutal honesty','Business DNA — learns over time','Public impact timeline (shareable)']
+  const agentFeaturesTop = ['AI analyses your repo + analytics weekly','Writes the code fix automatically','Reply YES or NO via Telegram','Auto-rollback if metrics drop','Competitor weekly scan']
+  const agentFeaturesExtra = ['Identifies #1 conversion problem','Opens a GitHub Pull Request','Brand Guardrails — your rules enforced','Full funnel analysis (all pages)','Weekly summary on Telegram','Monthly roast report — brutal honesty','Business DNA — learns over time','Public impact timeline (shareable)']
 
   return (
     <section id="pricing-section" className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, padding:'96px 24px' }}>
@@ -1020,13 +1036,14 @@ function Pricing({ navigate }) {
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Pricing</p>
           <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em' }}>Simple. No surprises.</h2>
         </div>
-        <div className="pricing-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:16, alignItems:'start' }}>
+        <div className="pricing-grid" style={{ display:'flex', justifyContent:'center', gap:16 }}>
 
           {/* Growth Agent card */}
           <div className="pricing-card" style={{
             background:C.accent, border:'none', borderRadius:18, padding:32, position:'relative',
             opacity:visible?1:0, transform:visible?'none':'translateY(20px)', transition:'all .55s ease .24s',
             boxShadow:'0 8px 40px rgba(42,92,69,0.25)',
+            maxWidth:420, width:'100%',
           }}>
             <div style={{ position:'absolute', top:18, right:18, background:'rgba(247,244,239,0.2)', color:'#fff', borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:500, letterSpacing:'.05em', display:'flex', alignItems:'center', gap:5 }}>
               <span style={{ width:5, height:5, borderRadius:'50%', background:'#22c55e', display:'inline-block' }} />
@@ -1172,21 +1189,15 @@ export default function Home({ navigate, scrollToPricing }) {
     <>
       <style>{CSS}</style>
       <Nav navigate={navigate} />
-      <GrowthAgentSection navigate={navigate} />
-      <AgentRequirements />
-      {/* Agent dashboard preview — standalone section (was the 'agent' tab of the removed SampleReport).
-          Placeholder framing; S0b will repurpose with proper landing copy. */}
-      <section className="section-pad" style={{ padding:'96px 24px', background:C.bg }}>
+      <Hero navigate={navigate} />
+      {/* Dashboard mock rendered directly under the Hero as immediate proof. */}
+      <section className="section-pad" style={{ padding:'80px 24px', background:C.bg }}>
         <div style={{ maxWidth:1060, margin:'0 auto' }}>
-          <div style={{ marginBottom:40 }}>
-            <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Growth Agent dashboard</p>
-            <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em', lineHeight:1.12 }}>A live look at the agent at work.</h2>
-            <p style={{ color:C.textMuted, marginTop:12, fontSize:15, fontWeight:300 }}>Example data shown — this is your dashboard after connecting your website, PostHog analytics, and GitHub.</p>
-          </div>
           <AgentDashboardPreview navigate={navigate} />
-          <p style={{ fontSize:12, color:C.textLight, marginTop:14, textAlign:'center', fontWeight:300 }}>Set up in 5 minutes · Cancel anytime · Nothing ships without your OK</p>
         </div>
       </section>
+      <GrowthAgentSection navigate={navigate} />
+      <AgentRequirements />
       <Pricing navigate={navigate} />
       <FAQ />
       <Footer navigate={navigate} />
