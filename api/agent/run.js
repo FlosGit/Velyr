@@ -493,6 +493,44 @@ async function handleEvaluateAB(res) {
   return res.json({ success: true, evaluated: tests.length })
 }
 
+// ─── FILE → URL ROUTE MAPPING (Stage 2) ──────────────────────────────────────
+// Byte-compatible twin of fileToRoutePath in
+// supabase/functions/agent-run/route-map.ts (used there by the funnel +
+// before-screenshot). Keep in sync — same Node/Deno bundle boundary as
+// encryptSecret / ROLLBACK_BOUNCE_PP_THRESHOLD; update both together if the
+// mapping rules change. See route-map.ts for the full rule documentation.
+function toRouteSegment(seg) {
+  if (/^\[\[?\.\.\..+\]\]?$/.test(seg)) return seg          // [...slug] / [[...slug]] kept
+  const dyn = seg.match(/^\[(.+)\]$/)
+  return dyn ? `:${dyn[1]}` : seg                            // [param] → :param
+}
+function normalizeRoute(route) {
+  let r = route.replace(/\/{2,}/g, '/')
+  if (r.length > 1) r = r.replace(/\/$/, '')
+  return r.toLowerCase()
+}
+function fileToRoutePath(filePath) {
+  const p = (filePath || '').replace(/\\/g, '/')
+  const appMatch = p.match(/^(?:src\/)?app\/(.+)$/)
+  if (appMatch) {
+    const parts = appMatch[1].split('/')
+    const file = parts.pop() || ''
+    if (!/^(page|layout)\.(tsx|jsx|ts|js)$/.test(file)) return null
+    const segs = []
+    for (const s of parts) {
+      if (s.startsWith('_') || s.startsWith('@')) return null   // private / parallel slot
+      if (/^\(.*\)$/.test(s)) continue                          // route group — dropped
+      segs.push(toRouteSegment(s))
+    }
+    return normalizeRoute('/' + segs.join('/'))
+  }
+  return p
+    .replace(/^(src\/pages|pages|src\/views|src\/screens)\//, '/')
+    .replace(/\.(jsx|tsx|js|ts)$/, '')
+    .replace(/\/index$/, '/')
+    .toLowerCase()
+}
+
 // ─── ROLLBACK CHECK ───────────────────────────────────────────────────────────
 async function handleRollbackCheck(res) {
   // The sole deterministic rollback trigger: site-wide bounce rate rose by at
@@ -592,7 +630,7 @@ async function handleRollbackCheck(res) {
         const editPath = run.analysis_result?.is_multi_page
           ? run.analysis_result?.multi_file_changes?.[0]?.file_to_edit
           : run.analysis_result?.file_to_edit
-        const route = (editPath || '').replace(/^(src\/pages|pages|src\/views|src\/screens)\//, '/').replace(/\.(jsx|tsx|js|ts)$/, '').replace(/\/index$/, '/').toLowerCase()
+        const route = fileToRoutePath(editPath || '')   // Stage 2: App-Router-aware
         const base  = conn.website_url.replace(/\/$/, '')
         return route && route !== '/' ? `${base}${route}` : base
       })()

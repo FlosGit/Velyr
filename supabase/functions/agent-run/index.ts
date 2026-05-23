@@ -8,6 +8,7 @@ import { buildImportGraph, type ImportGraph } from './import-graph.ts'
 import { rankComponentsForConversion, type RankerResult } from './component-ranker.ts'
 import { readDeepContext, type DeepContext } from './deep-reader.ts'
 import { buildReceipt } from './receipt-builder.ts'
+import { fileToRoutePath } from './route-map.ts'
 
 // Stage 5.D: Octokit with automatic rate-limit + secondary-rate-limit
 // handling. Honors GitHub's Retry-After header and retries a bounded number
@@ -494,20 +495,19 @@ async function getOctokit(installationId: number) {
   })
 }
 
-// ─── DETECT ALL PAGES (Stage 1B: derived from repoTree, no content reads) ─────
-// Previously analyzeRepo + detectAllPages each fanned out one GitHub getContent
-// per file to pull file BODIES. But the only consumers were the funnel (which
-// reads {path, pageType} only) and two gates (which read a file COUNT only) —
-// the bodies were merged into enrichedRepoContent and then never read, since
-// Pass 2 grounds on RA4's deepContext, not on these. mapResult.repoTree already
-// lists every file (path/type/sha), so we derive the same {path → {pageType,
-// fileName}} map with ZERO extra GitHub reads.
-//
-// Scope matches the old detectAllPages exactly: files DIRECTLY inside one of the
-// six page dirs (one level deep, repo-root-relative), same extension set. We
-// deliberately preserve the root-relative scan (not siteRoot-scoped) so the
-// derived page set stays identical to what detectAllPages produced.
-const PAGE_DIRS = ['src/pages', 'src/views', 'src/screens', 'pages', 'app', 'src/app']
+// ─── DETECT ALL PAGES (Stage 1B: derived from repoTree; Stage 2: App Router) ──
+// Derived from mapResult.repoTree with ZERO extra GitHub reads. The only
+// consumers are the funnel ({path, pageType}) and the no-data gate (a count).
+// Two passes:
+//   A. App Router (nextjs-app only): recurse app/**/page.* — each is a route,
+//      typed from its route DIRECTORY (the filename is always "page").
+//   B. Pages Router / Vite: direct children of the page dirs (Stage 1B
+//      behavior, unchanged), with hybrid dedup — a pages route an app route
+//      already owns is dropped (app wins, decision 1).
+// Root-relative scan is preserved: single-project repos are correct; the
+// monorepo funnel keeps its pre-existing root-relative limitation.
+const PAGES_ROUTER_DIRS = ['src/pages', 'src/views', 'src/screens', 'pages']
+const APP_PAGE_RE = /^(?:src\/)?app\/(?:.+\/)?page\.(tsx|jsx|ts|js)$/
 const PAGE_EXT_RE = /\.(jsx|tsx|js|ts|html|vue|svelte)$/
 
 const PAGE_TYPE_MAP: Record<string, string> = {
@@ -530,18 +530,47 @@ function detectPageType(name: string): string {
   return 'other'
 }
 
-function detectAllPages(repoTree: TreeEntry[]): Record<string, { pageType: string; fileName: string }> {
+// Last route segment (dir name) → a name detectPageType can keyword-match.
+// '/' (root page) → 'index'; '/pricing' → 'pricing'; ':slug' → 'slug'.
+function routeToName(route: string): string {
+  if (route === '/') return 'index'
+  return (route.split('/').filter(Boolean).pop() || 'index').replace(/^:/, '')
+}
+
+function detectAllPages(repoTree: TreeEntry[], framework: string): Record<string, { pageType: string; fileName: string }> {
   const pages: Record<string, { pageType: string; fileName: string }> = {}
+  const appRoutes = new Set<string>()   // route paths owned by App Router (app wins)
+
+  // Pass A — App Router pages (nextjs-app only).
+  if (framework === 'nextjs-app') {
+    for (const entry of repoTree) {
+      if (entry.type !== 'blob' || !APP_PAGE_RE.test(entry.path)) continue
+      const route = fileToRoutePath(entry.path)
+      if (route == null) continue          // _private / @slot
+      appRoutes.add(route)
+      pages[entry.path] = {
+        pageType: detectPageType(routeToName(route)),
+        fileName: entry.path.split('/').pop() || '',
+      }
+    }
+  }
+
+  // Pass B — Pages Router / Vite (direct children only; Stage 1B behavior).
   for (const entry of repoTree) {
     if (entry.type !== 'blob') continue
-    // Direct child of a page dir → nothing after the dir prefix may contain '/'.
-    const dir = PAGE_DIRS.find(d =>
+    const dir = PAGES_ROUTER_DIRS.find(d =>
       entry.path.startsWith(d + '/') && !entry.path.slice(d.length + 1).includes('/'))
     if (!dir) continue
     const fileName = entry.path.slice(dir.length + 1)
     if (!PAGE_EXT_RE.test(fileName)) continue
+    // Pages Router specials are wrappers, not routes (aligns with the entry-
+    // discovery exclusion; surfaced by the Stage 2D dry-run as funnel noise).
+    if (/^_(app|document|error)\.(jsx|tsx|js|ts)$/.test(fileName)) continue
+    const route = fileToRoutePath(entry.path)
+    if (route != null && appRoutes.has(route)) continue   // hybrid dedup — app wins
     pages[entry.path] = { pageType: detectPageType(fileName), fileName }
   }
+
   return pages
 }
 
@@ -567,11 +596,8 @@ function buildFunnelAnalysis(allPages: any, analytics: any) {
 
   for (const type of funnelOrder) {
     for (const path of (pagesByType[type] || [])) {
-      const routePath = '/' + path
-        .replace(/^(src\/pages|pages|src\/views|src\/screens)\//, '')
-        .replace(/\.(jsx|tsx|js|ts)$/, '')
-        .replace(/\/index$/, '')
-        .toLowerCase()
+      // Stage 2: shared App-Router-aware mapping (Pages/Vite output unchanged).
+      const routePath = fileToRoutePath(path) || '/'
 
       const views        = topPathViews[routePath] || topPathViews[routePath + '/'] || 0
       const dropOffScore = prevViews && views > 0 ? Math.round((1 - views / prevViews) * 100) : null
@@ -1553,8 +1579,8 @@ async function processConnection(conn: any) {
     // async scope.
     const posthogApiKey = (await decryptSecret(conn.posthog_api_key)) || Deno.env.get('POSTHOG_API_KEY')!
     // Stage 1B: pages are derived from the already-fetched repoTree (no GitHub
-    // reads); the old analyzeRepo + detectAllPages content fan-out is gone.
-    const allPages = detectAllPages(mapResult.repoTree)
+    // reads). Stage 2: detectAllPages is App-Router-aware (needs the framework).
+    const allPages = detectAllPages(mapResult.repoTree, mapResult.framework)
     const [analytics, pageSpeed, previousFixes, legacyDna, competitorData, guardrails, businessDna, competitorChanges] = await Promise.all([
       getPostHogAnalytics(
         posthogApiKey,
@@ -1716,7 +1742,7 @@ async function processConnection(conn: any) {
     // 3a: capture before-screenshot of the edited page.
     const targetUrl = (() => {
       if (!conn.website_url) return null
-      const route = (fixResult.file_to_edit || '').replace(/^(src\/pages|pages|src\/views|src\/screens)\//, '/').replace(/\.(jsx|tsx|js|ts)$/, '').replace(/\/index$/, '/').toLowerCase()
+      const route = fileToRoutePath(fixResult.file_to_edit || '')   // Stage 2: App-Router-aware
       const base  = conn.website_url.replace(/\/$/, '')
       return route && route !== '/' ? `${base}${route}` : base
     })()

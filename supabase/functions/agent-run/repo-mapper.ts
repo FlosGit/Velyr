@@ -28,6 +28,8 @@
 // plus one listCommits per web-app candidate only when a recency tie-break is
 // actually required.
 
+import { fileToRoutePath } from './route-map.ts'
+
 export type Framework =
   | 'vite-react' | 'cra' | 'nextjs-app' | 'nextjs-pages' | 'remix'
   | 'astro' | 'sveltekit' | 'vue-vite' | 'nuxt' | 'plain-html' | 'unsupported'
@@ -172,13 +174,29 @@ function expandWorkspaceGlobs(globs: string[], tree: TreeEntry[]): string[] {
 // Framework classification from a parsed package.json + the tree (for app/pages
 // dir probing), scoped to a workspace root. Returns the framework string only;
 // hasWebApp / build-script checks are the caller's job.
+// Stage 2: extensions a layout/page may use, in detection order.
+const APP_ROUTE_EXTS = ['tsx', 'jsx', 'ts', 'js']
+
+// Stage 2: returns the App Router dir ('app' | 'src/app', relative to wsRoot)
+// that contains a ROOT layout — the mandatory App Router marker — or null. A
+// bare `app/` dir without a root layout is NOT treated as App Router (guards a
+// stray non-router folder from being misclassified). Used both to classify
+// nextjs-app and to seed App Router entry-point discovery.
+function findAppRouterDir(wsRoot: string, tree: TreeEntry[]): string | null {
+  for (const d of ['app', 'src/app']) {
+    const full = joinPath(wsRoot, d)
+    if (APP_ROUTE_EXTS.some(ext => treeHasFile(tree, `${full}/layout.${ext}`))) return d
+  }
+  return null
+}
+
 function classifyFramework(pkg: any, wsRoot: string, tree: TreeEntry[]): Framework {
   const deps = { ...(pkg?.dependencies || {}), ...(pkg?.devDependencies || {}) }
-  const hasDir = (p: string) => treeHasDir(tree, joinPath(wsRoot, p))
 
   if (deps['next']) {
-    if (hasDir('app') || hasDir('src/app')) return 'nextjs-app'
-    return 'nextjs-pages' // pages-router fallback; entry-point filter self-corrects
+    // Stage 2: require an App Router root layout, not just an `app/` dir.
+    if (findAppRouterDir(wsRoot, tree)) return 'nextjs-app'
+    return 'nextjs-pages' // pages-router fallback; entry-point discovery self-corrects
   }
   if (deps['@remix-run/react'] || deps['@remix-run/node']) return 'remix'
   if (deps['astro']) return 'astro'
@@ -200,7 +218,9 @@ function classifyFramework(pkg: any, wsRoot: string, tree: TreeEntry[]): Framewo
 const ENTRY_CANDIDATES: Record<Framework, string[]> = {
   'vite-react':   ['src/main.tsx', 'src/main.jsx', 'src/index.tsx', 'src/index.jsx', 'src/App.tsx', 'src/App.jsx'],
   'cra':          ['src/main.tsx', 'src/main.jsx', 'src/index.tsx', 'src/index.jsx', 'src/App.tsx', 'src/App.jsx'],
-  'nextjs-app':   ['app/page.tsx', 'app/page.jsx', 'app/layout.tsx', 'app/layout.jsx', 'src/app/page.tsx', 'src/app/page.jsx', 'src/app/layout.tsx', 'src/app/layout.jsx'],
+  // Stage 2: nextjs-app entries are discovered dynamically (discoverAppRouterEntries);
+  // this entry is retained empty only to satisfy the Record<Framework, …> type.
+  'nextjs-app':   [],
   'nextjs-pages': ['pages/index.tsx', 'pages/index.jsx', 'pages/_app.tsx', 'pages/_app.jsx', 'src/pages/index.tsx', 'src/pages/index.jsx', 'src/pages/_app.tsx', 'src/pages/_app.jsx'],
   'remix':        ['app/root.tsx', 'app/routes/_index.tsx', 'app/routes/index.tsx'],
   'astro':        ['src/pages/index.astro'],
@@ -213,6 +233,71 @@ const ENTRY_CANDIDATES: Record<Framework, string[]> = {
 
 function resolveEntryPoints(framework: Framework, siteRoot: string, tree: TreeEntry[]): string[] {
   return (ENTRY_CANDIDATES[framework] || []).filter(rel => treeHasFile(tree, joinPath(siteRoot, rel)))
+}
+
+// Stage 2: App Router entry-point discovery. Filesystem routing means routes
+// aren't import-reachable from one root, so we SEED the graph with every
+// app/**/{page,layout}.{tsx,jsx,ts,js}. Skips route handlers (route.*),
+// _private folders, and @slot (parallel-route) folders. For hybrid repos that
+// also have pages/, non-conflicting pages/** routes are added (app wins on a
+// route collision — decision 1). Shallow-first ordering + a cap leave the
+// graph's file budget for each route's imported components. Returns
+// siteRoot-relative paths (what the import graph expects).
+function discoverAppRouterEntries(siteRoot: string, tree: TreeEntry[]): string[] {
+  const entries = new Set<string>()
+  const appDir = findAppRouterDir(siteRoot, tree)
+  if (appDir) {
+    const prefix = joinPath(siteRoot, appDir) + '/'
+    for (const e of tree) {
+      if (e.type !== 'blob' || !e.path.startsWith(prefix)) continue
+      const within = e.path.slice(prefix.length)            // e.g. 'pricing/page.tsx'
+      const segs = within.split('/')
+      const file = segs[segs.length - 1]
+      const dirs = segs.slice(0, -1)
+      if (dirs.some(s => s.startsWith('_') || s.startsWith('@'))) continue   // private / slot
+      if (!/^(page|layout)\.(tsx|jsx|ts|js)$/.test(file)) continue           // skip route.*, loading, etc.
+      entries.add(joinPath(appDir, within))                 // siteRoot-relative
+    }
+  }
+
+  // Hybrid: index pages/ routes that don't collide with an app route (app wins).
+  const appRoutePaths = new Set<string>()
+  for (const ep of entries) { const r = fileToRoutePath(ep); if (r != null) appRoutePaths.add(r) }
+  for (const pe of discoverPagesRouterEntries(siteRoot, tree)) {
+    const r = fileToRoutePath(pe)
+    if (r != null && appRoutePaths.has(r)) continue
+    entries.add(pe)
+  }
+
+  // Shallow-first (fewer path segments), then alphabetical; cap so imported
+  // components still fit under the graph's file budget.
+  const sorted = [...entries].sort((a, b) => {
+    const da = a.split('/').length, db = b.split('/').length
+    return da !== db ? da - db : (a < b ? -1 : a > b ? 1 : 0)
+  })
+  const cap = Number(Deno.env.get('AGENT_APP_ROUTER_MAX_ENTRIES') ?? '25')
+  return sorted.slice(0, cap)
+}
+
+// Pages Router route files under pages/ | src/pages/ (siteRoot-relative),
+// excluding API routes and the _app/_document/_error/middleware specials. Used
+// ONLY for hybrid App-Router repos; the pure nextjs-pages path keeps the static
+// ENTRY_CANDIDATES filter and is untouched.
+function discoverPagesRouterEntries(siteRoot: string, tree: TreeEntry[]): string[] {
+  const out: string[] = []
+  for (const d of ['pages', 'src/pages']) {
+    const prefix = joinPath(siteRoot, d) + '/'
+    for (const e of tree) {
+      if (e.type !== 'blob' || !e.path.startsWith(prefix)) continue
+      const within = e.path.slice(prefix.length)
+      if (within.startsWith('api/')) continue
+      const file = within.split('/').pop() || ''
+      if (/^(_app|_document|_error|middleware)\.(tsx|jsx|ts|js)$/.test(file)) continue
+      if (!/\.(tsx|jsx|ts|js)$/.test(file)) continue
+      out.push(joinPath(d, within))
+    }
+  }
+  return out
 }
 
 // Parse compilerOptions.baseUrl + paths from a tsconfig, resolving each target
@@ -425,7 +510,12 @@ async function finalizeMap(
   repoTree: TreeEntry[],
   readText: (path: string) => Promise<string | null>,
 ): Promise<MapResult> {
-  const entryPoints = resolveEntryPoints(framework, siteRoot, repoTree)
+  // Stage 2: App Router needs filesystem-route discovery (routes aren't import-
+  // reachable from one root); every other framework keeps the static candidate
+  // filter unchanged.
+  const entryPoints = framework === 'nextjs-app'
+    ? discoverAppRouterEntries(siteRoot, repoTree)
+    : resolveEntryPoints(framework, siteRoot, repoTree)
   if (entryPoints.length === 0) {
     return {
       framework: 'unsupported', isMonorepo, workspaces,
