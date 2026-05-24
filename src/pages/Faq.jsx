@@ -135,6 +135,9 @@ export default function Faq({ navigate }) {
         <div className="faq-page-pad" style={{ maxWidth: 760, margin: '0 auto', padding: '72px 24px 96px' }}>
           <p style={{ fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: '#2a5c45', marginBottom: 16, fontWeight: 400 }}>Help</p>
           <h1 style={{ marginBottom: 16 }}>Frequently Asked Questions</h1>
+          {/* "AI business audits" here is generic SEO/positioning copy for the
+              Growth Agent's weekly analysis — NOT the removed free-scan/€9-report
+              product (S0a). Kept intentionally; reviewed in the cleanup bundle. */}
           <p style={{ marginBottom: 56, color: '#a09890', fontSize: 15 }}>Common questions about AI business audits, the Velyr Growth Agent, and how automated business intelligence compares to traditional consulting.</p>
 
           {FAQS.map((f, i) => (

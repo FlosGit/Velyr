@@ -31,6 +31,21 @@ const supabase = createClient(
 // with self-invocation. Flagged in the Stage 5 summary.
 export const config = { maxDuration: 60 }
 
+// ─── TELEGRAM HTML ESCAPING ──────────────────────────────────────────────────
+// Cross-runtime twin of escapeHtml() in supabase/functions/agent-run/index.ts
+// and api/webhooks/telegram.js. Node (api/) and Deno (supabase/functions/)
+// can't share a module — same boundary as the ROLLBACK_BOUNCE_PP_THRESHOLD /
+// fileToRoutePath twins. Keep in sync. Telegram messages that interpolate
+// uncontrolled values (LLM `problem` text, page paths, error strings) are sent
+// as parse_mode: 'HTML' with every interpolated value run through this; legacy
+// Markdown has no reliable escape for a stray * _ [ or ` and breaks the send.
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 // Constant-time string equality for shared-secret comparisons.
 function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false
@@ -497,6 +512,11 @@ async function handleEvaluateAB(res) {
         ? `✅ *A/B Test Winner: Treatment*\n📈 +${delta}% conversion lift confirmed.\nSaved to your Business DNA.`
         : `📊 *A/B Result: Control Won*\n📉 Change did not improve conversions (${delta}%).\nLearning saved — agent will avoid similar patterns.${revertedPrUrl ? `\n🔄 Revert PR opened (awaiting your approval): ${revertedPrUrl}\nReply *YES* to merge, *NO* to keep the treatment live.` : ''}`
 
+      // Telegram HTML migration intentionally SKIPPED here: handleEvaluateAB is
+      // vestigial (the agent no longer creates A/B tests; this mode has no cron
+      // entry in vercel.json and is never invoked). Left on legacy Markdown
+      // as-is rather than migrated, to avoid touching dead code. If A/B ever
+      // returns, migrate this to parse_mode: 'HTML' + escapeHtml(test.summary).
       await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -517,7 +537,7 @@ async function handleEvaluateAB(res) {
 // Byte-compatible twin of fileToRoutePath in
 // supabase/functions/agent-run/route-map.ts (used there by the funnel +
 // before-screenshot). Keep in sync — same Node/Deno bundle boundary as
-// encryptSecret / ROLLBACK_BOUNCE_PP_THRESHOLD; update both together if the
+// decryptSecret / ROLLBACK_BOUNCE_PP_THRESHOLD; update both together if the
 // mapping rules change. See route-map.ts for the full rule documentation.
 function toRouteSegment(seg) {
   if (/^\[\[?\.\.\..+\]\]?$/.test(seg)) return seg          // [...slug] / [[...slug]] kept
@@ -784,8 +804,8 @@ async function handleRollbackCheck(res) {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     chat_id: subRow.telegram_chat_id,
-                    text: `⚠️ *Velyr Rollback Recommended*\n\n*Change:* ${run.analysis_result?.problem}\n\n📉 Site-wide bounce rate: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n_(correlation, not proven causation)_\n\n🔍 Review PR: ${pr.html_url}\n\nReply *YES* to merge the rollback, or *NO* to keep the change live.`,
-                    parse_mode: 'Markdown',
+                    text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Site-wide bounce rate: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\n🔍 Review PR: ${escapeHtml(pr.html_url)}\n\nReply <b>YES</b> to merge the rollback, or <b>NO</b> to keep the change live.`,
+                    parse_mode: 'HTML',
                   }),
                 })
               }
@@ -797,8 +817,8 @@ async function handleRollbackCheck(res) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: process.env.TELEGRAM_CHAT_ID,
-              text: `⚠️ *Velyr Rollback Alert*\n\n*Change:* ${run.analysis_result?.problem}\n\n📉 Bounce rate +${bounceDelta}% — ❌ auto-rollback failed, please revert manually.`,
-              parse_mode: 'Markdown',
+              text: `⚠️ <b>Velyr Rollback Alert</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Bounce rate +${bounceDelta}% — ❌ auto-rollback failed, please revert manually.`,
+              parse_mode: 'HTML',
             }),
           })
         }
@@ -807,8 +827,8 @@ async function handleRollbackCheck(res) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: process.env.TELEGRAM_CHAT_ID,
-            text: `📈 *Velyr Impact Check — Positive*\n\n*Change:* ${run.analysis_result?.problem}\n\n✅ Bounce rate: ${bounceBefore}% → ${bounceAfter}% (${bounceDelta}%)`,
-            parse_mode: 'Markdown',
+            text: `📈 <b>Velyr Impact Check — Positive</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n✅ Bounce rate: ${bounceBefore}% → ${bounceAfter}% (${bounceDelta}%)`,
+            parse_mode: 'HTML',
           }),
         })
       }
@@ -903,7 +923,7 @@ async function handleWeeklySummary(res) {
       let abSummary = ''
       if (completedABTests.length > 0) {
         const winners  = completedABTests.filter(t => t.winner === 'treatment')
-        abSummary      = `\n🔬 *A/B Tests:* ${completedABTests.length} completed · ${winners.length} won`
+        abSummary      = `\n🔬 <b>A/B Tests:</b> ${completedABTests.length} completed · ${winners.length} won`
         if (winners.length > 0) {
           const avgLift = Math.round(winners.reduce((sum, t) => sum + (t.delta_pct || 0), 0) / winners.length)
           abSummary    += ` · avg +${avgLift}% lift`
@@ -911,31 +931,31 @@ async function handleWeeklySummary(res) {
       }
 
       const dnaSummary       = totalLearnings > 0
-        ? `\n🧬 *Business DNA:* ${totalLearnings} learnings${avgPositiveDelta ? ` · avg +${avgPositiveDelta}% on wins` : ''}`
+        ? `\n🧬 <b>Business DNA:</b> ${totalLearnings} learnings${avgPositiveDelta ? ` · avg +${avgPositiveDelta}% on wins` : ''}`
         : ''
-      const deployedChanges  = weekRuns.filter(r => r.status === 'deployed').map(r => `  ✅ ${r.analysis_result?.problem?.slice(0, 60) || 'Change deployed'}`).join('\n') || ''
-      const rolledBackChanges = weekRuns.filter(r => r.status === 'rolled_back').map(r => `  🔄 ${r.analysis_result?.problem?.slice(0, 60) || 'Rolled back'}`).join('\n') || ''
+      const deployedChanges  = weekRuns.filter(r => r.status === 'deployed').map(r => `  ✅ ${escapeHtml(r.analysis_result?.problem?.slice(0, 60) || 'Change deployed')}`).join('\n') || ''
+      const rolledBackChanges = weekRuns.filter(r => r.status === 'rolled_back').map(r => `  🔄 ${escapeHtml(r.analysis_result?.problem?.slice(0, 60) || 'Rolled back')}`).join('\n') || ''
 
-      const message = `📋 *Velyr — Weekly Executive Summary*
-_Week of ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}_
+      const message = `📋 <b>Velyr — Weekly Executive Summary</b>
+<i>Week of ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</i>
 
-${trendEmoji} *Traffic*
+${trendEmoji} <b>Traffic</b>
 ${a ? `${a.uniqueVisitors} visitors · ${a.totalPageviews} pageviews` : 'No data'}
 ${trendText}
 Bounce rate: ${bounceText}${bestMetricLine}
 
-🤖 *Agent Activity This Week*
+🤖 <b>Agent Activity This Week</b>
 • Deployed: ${deployed} change${deployed !== 1 ? 's' : ''}
 • Rolled back: ${rolledBack}
 • Rejected: ${rejected}
 • Awaiting approval: ${pending}
-${deployedChanges ? `\n*Deployed changes:*\n${deployedChanges}` : ''}${rolledBackChanges ? `\n*Rolled back:*\n${rolledBackChanges}` : ''}${abSummary}${dnaSummary}
+${deployedChanges ? `\n<b>Deployed changes:</b>\n${deployedChanges}` : ''}${rolledBackChanges ? `\n<b>Rolled back:</b>\n${rolledBackChanges}` : ''}${abSummary}${dnaSummary}
 
-_Next run: Monday · Reply *status* for details_`
+<i>Next run: Monday · Reply <b>status</b> for details</i>`
 
       await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' }),
+        body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
       })
     } catch (err) {
       console.error('Weekly summary error for subscription', conn.subscription_id, err)
@@ -981,34 +1001,34 @@ async function handleMidweek(res) {
       .filter(([, v]) => v > 0).sort(([, a], [, b]) => b - a)
       .map(([platform, visits]) => {
         const emoji = { tiktok: '🎵', instagram: '📸', youtube: '▶️', twitter: '𝕏', google: '🔍', facebook: '📘' }[platform] || '🌐'
-        return `  ${emoji} ${platform}: ${visits} visits`
+        return `  ${emoji} ${escapeHtml(platform)}: ${visits} visits`
       }).join('\n')
 
-    const pagesLines     = a.topPages.slice(0, 3).map(p => `  • ${p.path} — ${p.views} views`).join('\n')
+    const pagesLines     = a.topPages.slice(0, 3).map(p => `  • ${escapeHtml(p.path)} — ${p.views} views`).join('\n')
     const bounceAssessment = a.bounceRate > 70
       ? `⚠️ High bounce rate (${a.bounceRate}%) — agent will prioritize this Monday`
       : a.bounceRate > 50 ? `🟡 Bounce rate ${a.bounceRate}% — room to improve`
       : a.bounceRate === 0 ? `📊 No bounce data yet`
       : `✅ Bounce rate ${a.bounceRate}% — looking good`
 
-    const message = `📊 *Velyr — Mid-Week Update*
-_${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}_
+    const message = `📊 <b>Velyr — Mid-Week Update</b>
+<i>${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}</i>
 
-${trendEmoji} *Traffic this week*
+${trendEmoji} <b>Traffic this week</b>
 ${a.uniqueVisitors} visitors · ${a.totalPageviews} pageviews
 ${trendText}
 
 ${bounceAssessment}
 
-${socialLines ? `*Top traffic sources:*\n${socialLines}` : '*No social traffic yet this week*'}
+${socialLines ? `<b>Top traffic sources:</b>\n${socialLines}` : '<b>No social traffic yet this week</b>'}
 
-${pagesLines ? `*Most visited:*\n${pagesLines}` : ''}
+${pagesLines ? `<b>Most visited:</b>\n${pagesLines}` : ''}
 
-🤖 _Watching 24/7. Every Monday the agent sends the next fix for your approval._`
+🤖 <i>Watching 24/7. Every Monday the agent sends the next fix for your approval.</i>`
 
     await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' }),
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
     })
   }
 

@@ -18,6 +18,26 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(aBuf, bBuf)
 }
 
+// ─── TELEGRAM HTML ESCAPING ──────────────────────────────────────────────────
+// Cross-runtime twin of escapeHtml() in supabase/functions/agent-run/index.ts.
+// The Node (api/) and Deno (supabase/functions/) bundles can't share a module
+// (different crypto/resolver), so this is duplicated — same pattern as the
+// ROLLBACK_BOUNCE_PP_THRESHOLD / fileToRoutePath twins. Keep in sync.
+//
+// Every message in this file is sent as parse_mode: 'HTML' (the sendMessage
+// default below). Telegram's legacy v1 Markdown has NO reliable escape for a
+// stray *, _, [ or ` in an interpolated value (LLM output, file paths, error
+// strings, competitor URLs, user note text), which used to break sends with
+// "can't parse entities". HTML escaping of <, >, & is reliable, so every
+// interpolated user/LLM/error value below is wrapped in escapeHtml(), and any
+// literal placeholder like <url> is written as &lt;url&gt;.
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 async function getOctokit(installationId) {
   const app = new App({
     appId: process.env.GITHUB_APP_ID,
@@ -44,7 +64,7 @@ async function sendMessage(chatId, text, extra = {}) {
     const res = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown', ...extra })
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', ...extra })
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
@@ -210,12 +230,12 @@ async function handleStart(message, startPayload) {
 
   await sendMessage(
     chatId,
-    `👋 *Hi ${firstName}!*\n\n` +
-    `Welcome to *Velyr Growth Agent*.\n\n` +
+    `👋 <b>Hi ${escapeHtml(firstName)}!</b>\n\n` +
+    `Welcome to <b>Velyr Growth Agent</b>.\n\n` +
     `Your verification code is:\n\n` +
-    `\`${code}\`\n\n` +
+    `<code>${escapeHtml(code)}</code>\n\n` +
     `Copy this code and paste it into the setup wizard on velyr.io to connect your Telegram.\n\n` +
-    `_This code expires in 30 minutes._`
+    `<i>This code expires in 30 minutes.</i>`
   )
 }
 
@@ -276,7 +296,7 @@ async function handleApprove(runId, chatId) {
     })
     prInfo = data
   } catch (err) {
-    return sendMessage(chatId, `❌ Could not fetch PR #${run.pr_number}: ${err?.message || 'GitHub error'}`)
+    return sendMessage(chatId, `❌ Could not fetch PR #${run.pr_number}: ${escapeHtml(err?.message || 'GitHub error')}`)
   }
 
   if (prInfo.merged) {
@@ -288,7 +308,7 @@ async function handleApprove(runId, chatId) {
       outcome: 'pending',
       notes: `Approved (YES, already merged): ${(run.analysis_result?.problem || '').slice(0, 400)}`,
     })
-    return sendMessage(chatId, `✅ *Already merged.* (Reconciled — the PR was merged out-of-band, status updated.)`)
+    return sendMessage(chatId, `✅ <b>Already merged.</b> (Reconciled — the PR was merged out-of-band, status updated.)`)
   }
   if (prInfo.state === 'closed') {
     return sendMessage(chatId, `⚠️ PR #${run.pr_number} is closed (not merged). Cannot approve a closed PR — open a new one.`)
@@ -300,7 +320,7 @@ async function handleApprove(runId, chatId) {
   // surface the exact reason now instead of letting the merge fail mid-way
   // and leaving the run stuck in 'waiting_approval'.
   if (prInfo.mergeable === false) {
-    return sendMessage(chatId, `⚠️ PR #${run.pr_number} is not mergeable right now (likely a conflict with the base branch). Resolve on github.com, then reply *YES* again.`)
+    return sendMessage(chatId, `⚠️ PR #${run.pr_number} is not mergeable right now (likely a conflict with the base branch). Resolve on github.com, then reply <b>YES</b> again.`)
   }
   // `mergeable_state` is one of: clean, dirty, blocked, behind, unstable,
   // has_hooks, draft, unknown. Anything other than 'clean' / 'unstable' /
@@ -313,7 +333,7 @@ async function handleApprove(runId, chatId) {
       behind:  'PR is behind the base branch — update it on github.com',
       draft:   'PR is still in draft — mark it ready for review on github.com',
     }[prInfo.mergeable_state] || prInfo.mergeable_state
-    return sendMessage(chatId, `⚠️ Cannot merge PR #${run.pr_number}: ${stateExplain}.\n\nFix on github.com, then reply *YES* again.`)
+    return sendMessage(chatId, `⚠️ Cannot merge PR #${run.pr_number}: ${escapeHtml(stateExplain)}.\n\nFix on github.com, then reply <b>YES</b> again.`)
   }
 
   let mergeSha = null
@@ -332,7 +352,7 @@ async function handleApprove(runId, chatId) {
     // GitHub merge errors include 405 (not mergeable), 409 (HEAD changed),
     // 422 (validation, e.g. required status checks). Surface the message
     // verbatim rather than leaving the user wondering what went wrong.
-    return sendMessage(chatId, `❌ Merge failed: ${err?.message || 'GitHub error'}.\n\nThe run stays in *waiting_approval* — fix the issue and reply *YES* again, or *NO* to skip.`)
+    return sendMessage(chatId, `❌ Merge failed: ${escapeHtml(err?.message || 'GitHub error')}.\n\nThe run stays in <b>waiting_approval</b> — fix the issue and reply <b>YES</b> again, or <b>NO</b> to skip.`)
   }
 
   await supabase.from('agent_runs').update({ status: 'deployed', completed_at: new Date().toISOString(), merge_commit_sha: mergeSha }).eq('id', runId)
@@ -347,7 +367,7 @@ async function handleApprove(runId, chatId) {
 
   await sendMessage(
     chatId,
-    `✅ *PR merged!* Vercel is deploying the change now.\n\n_The agent will check impact after 48h and recommend a rollback (waiting on your approval) if metrics drop._`
+    `✅ <b>PR merged!</b> Vercel is deploying the change now.\n\n<i>The agent will check impact after 48h and recommend a rollback (waiting on your approval) if metrics drop.</i>`
   )
 }
 
@@ -427,7 +447,7 @@ async function handleReject(runId, chatId) {
 
   await sendMessage(
     chatId,
-    `❌ *PR skipped.* The agent will analyze again on the next scheduled run.\n\n_Optionally add context: *note ${runId} <reason>*_`
+    `❌ <b>PR skipped.</b> The agent will analyze again on the next scheduled run.\n\n<i>Optionally add context: <b>note ${escapeHtml(runId)} &lt;reason&gt;</b></i>`
   )
 }
 
@@ -446,7 +466,7 @@ async function handleDNA(chatId) {
   if (!learnings || learnings.length === 0) {
     return sendMessage(
       chatId,
-      `🧬 *Business DNA*\n\nNo learnings yet. DNA builds up after approved changes and A/B test results.`
+      `🧬 <b>Business DNA</b>\n\nNo learnings yet. DNA builds up after approved changes and A/B test results.`
     )
   }
 
@@ -455,16 +475,16 @@ async function handleDNA(chatId) {
   const fmtDelta = d => (d > 0 ? `+${d}%` : `${d}%`)
 
   const winsText = wins.length
-    ? wins.map(l => `✅ ${l.change_type}: ${l.summary} (${fmtDelta(l.delta)} ${l.metric_type})`).join('\n')
-    : '_None yet_'
+    ? wins.map(l => `✅ ${escapeHtml(l.change_type)}: ${escapeHtml(l.summary)} (${fmtDelta(l.delta)} ${escapeHtml(l.metric_type)})`).join('\n')
+    : '<i>None yet</i>'
 
   const lossesText = losses.length
-    ? losses.map(l => `❌ ${l.change_type}: ${l.summary} (${fmtDelta(l.delta)} ${l.metric_type})`).join('\n')
-    : '_None yet_'
+    ? losses.map(l => `❌ ${escapeHtml(l.change_type)}: ${escapeHtml(l.summary)} (${fmtDelta(l.delta)} ${escapeHtml(l.metric_type)})`).join('\n')
+    : '<i>None yet</i>'
 
   await sendMessage(
     chatId,
-    `🧬 *Business DNA* (${learnings.length} learnings)\n\n*What worked:*\n${winsText}\n\n*What didn't work:*\n${lossesText}`
+    `🧬 <b>Business DNA</b> (${learnings.length} learnings)\n\n<b>What worked:</b>\n${winsText}\n\n<b>What didn't work:</b>\n${lossesText}`
   )
 }
 
@@ -488,8 +508,8 @@ async function handleStatus(chatId) {
   const lines = runs?.map(r => {
     const emoji = statusEmoji[r.status] ?? '❓'
     const date = new Date(r.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-    const prLink = r.pr_url ? ` — [PR](${r.pr_url})` : ''
-    return `${emoji} \`${r.id.slice(0, 8)}\` ${r.status.replace('_', ' ')} (${date})${prLink}`
+    const prLink = r.pr_url ? ` — <a href="${escapeHtml(r.pr_url)}">PR</a>` : ''
+    return `${emoji} <code>${escapeHtml(r.id.slice(0, 8))}</code> ${escapeHtml(r.status.replace('_', ' '))} (${date})${prLink}`
   }) ?? []
 
   const { data: abTests } = await supabase
@@ -502,9 +522,9 @@ async function handleStatus(chatId) {
   const abLines = abTests?.map(t => {
     const evalDate = new Date(t.evaluate_after).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
     if (t.status === 'completed') {
-      return `📊 ${t.summary} → ${t.winner === 'treatment' ? `✅ +${t.delta_pct}%` : `❌ ${t.delta_pct}%`}`
+      return `📊 ${escapeHtml(t.summary)} → ${t.winner === 'treatment' ? `✅ +${t.delta_pct}%` : `❌ ${t.delta_pct}%`}`
     }
-    return `🔬 ${t.summary} — results on ${evalDate}`
+    return `🔬 ${escapeHtml(t.summary)} — results on ${evalDate}`
   }) ?? []
 
   const { data: competitors } = await supabase
@@ -514,12 +534,12 @@ async function handleStatus(chatId) {
     .limit(5)
 
   const competitorLines = competitors?.map(c =>
-    `${c.active ? '🟢' : '⚫'} ${c.url}`
+    `${c.active ? '🟢' : '⚫'} ${escapeHtml(c.url)}`
   ) ?? []
 
-  let msg = `📊 *Velyr Agent Status*\n\n*Last 5 runs:*\n${lines.join('\n') || '_No runs yet_'}`
-  if (abLines.length) msg += `\n\n*A/B Tests:*\n${abLines.join('\n')}`
-  if (competitorLines.length) msg += `\n\n*Tracked Competitors:*\n${competitorLines.join('\n')}`
+  let msg = `📊 <b>Velyr Agent Status</b>\n\n<b>Last 5 runs:</b>\n${lines.join('\n') || '<i>No runs yet</i>'}`
+  if (abLines.length) msg += `\n\n<b>A/B Tests:</b>\n${abLines.join('\n')}`
+  if (competitorLines.length) msg += `\n\n<b>Tracked Competitors:</b>\n${competitorLines.join('\n')}`
 
   await sendMessage(chatId, msg)
 }
@@ -549,7 +569,7 @@ async function handleNote(runId, reason, chatId) {
     confidence: 'low'
   })
 
-  await sendMessage(chatId, `🧬 *Note saved to Business DNA.*\n_"${reason}"_\n\nThe agent will factor this in on the next run.`)
+  await sendMessage(chatId, `🧬 <b>Note saved to Business DNA.</b>\n<i>"${escapeHtml(reason)}"</i>\n\nThe agent will factor this in on the next run.`)
 }
 
 // ─── COMPETITOR ───────────────────────────────────────────────────────────────
@@ -558,7 +578,7 @@ async function handleAddCompetitor(url, chatId) {
   if (!subId) return notifyInactive(chatId)
 
   try { new URL(url) } catch {
-    return sendMessage(chatId, `❌ Invalid URL: \`${url}\`\n\nUsage: *competitor add https://example.com*`)
+    return sendMessage(chatId, `❌ Invalid URL: <code>${escapeHtml(url)}</code>\n\nUsage: <b>competitor add https://example.com</b>`)
   }
 
   const { data: existing } = await supabase
@@ -568,7 +588,7 @@ async function handleAddCompetitor(url, chatId) {
     .eq('active', true)
 
   if (existing && existing.length >= 2) {
-    return sendMessage(chatId, `⚠️ You already have 2 competitors tracked (maximum).\n\nRemove one first: *competitor remove <url>*`)
+    return sendMessage(chatId, `⚠️ You already have 2 competitors tracked (maximum).\n\nRemove one first: <b>competitor remove &lt;url&gt;</b>`)
   }
 
   await supabase.from('agent_competitor_urls').upsert({
@@ -577,7 +597,7 @@ async function handleAddCompetitor(url, chatId) {
     active: true,
   }, { onConflict: 'subscription_id,url' })
 
-  await sendMessage(chatId, `✅ *Competitor added:* \`${url}\`\n\nThe agent will scan this site on every Monday run and suggest differentiation opportunities.`)
+  await sendMessage(chatId, `✅ <b>Competitor added:</b> <code>${escapeHtml(url)}</code>\n\nThe agent will scan this site on every Monday run and suggest differentiation opportunities.`)
 }
 
 async function handleRemoveCompetitor(url, chatId) {
@@ -590,7 +610,7 @@ async function handleRemoveCompetitor(url, chatId) {
     .eq('subscription_id', subId)
     .ilike('url', `%${url}%`)
 
-  await sendMessage(chatId, `🗑️ *Competitor removed.* The agent will no longer scan that URL.`)
+  await sendMessage(chatId, `🗑️ <b>Competitor removed.</b> The agent will no longer scan that URL.`)
 }
 
 // ─── MAIN HANDLER ─────────────────────────────────────────────────────────────
@@ -690,23 +710,23 @@ export default async function handler(req, res) {
       } else if (subCmd === 'remove') {
         await handleRemoveCompetitor(url, chatId)
       } else {
-        await sendMessage(chatId, `❓ Unknown competitor command.\n\n*competitor add <url>* — track a competitor\n*competitor remove <url>* — stop tracking`)
+        await sendMessage(chatId, `❓ Unknown competitor command.\n\n<b>competitor add &lt;url&gt;</b> — track a competitor\n<b>competitor remove &lt;url&gt;</b> — stop tracking`)
       }
 
     } else {
       await sendMessage(
         chatId,
-        `🤖 *Velyr Growth Agent*\n\n` +
-        `*Commands:*\n` +
-        `*YES* — deploy the pending PR\n` +
-        `*NO* — skip the pending PR\n` +
-        `*approve <run-id>* — deploy a specific run (power users)\n` +
-        `*reject <run-id>* — skip a specific run (power users)\n` +
-        `*note <run-id> <reason>* — add a manual learning\n` +
-        `*dna* — view your Business DNA\n` +
-        `*status* — last runs, A/B tests & competitors\n` +
-        `*competitor add <url>* — track a competitor site\n` +
-        `*competitor remove <url>* — stop tracking`
+        `🤖 <b>Velyr Growth Agent</b>\n\n` +
+        `<b>Commands:</b>\n` +
+        `<b>YES</b> — deploy the pending PR\n` +
+        `<b>NO</b> — skip the pending PR\n` +
+        `<b>approve &lt;run-id&gt;</b> — deploy a specific run (power users)\n` +
+        `<b>reject &lt;run-id&gt;</b> — skip a specific run (power users)\n` +
+        `<b>note &lt;run-id&gt; &lt;reason&gt;</b> — add a manual learning\n` +
+        `<b>dna</b> — view your Business DNA\n` +
+        `<b>status</b> — last runs, A/B tests &amp; competitors\n` +
+        `<b>competitor add &lt;url&gt;</b> — track a competitor site\n` +
+        `<b>competitor remove &lt;url&gt;</b> — stop tracking`
       )
     }
 

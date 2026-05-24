@@ -552,7 +552,6 @@ function Step3({ onNext, onBack }) {
         <p style={{ fontSize: 13, fontWeight: 500, color: C.text, marginBottom: 6 }}>✅ What Velyr sets up for you:</p>
         <ul style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.9, paddingLeft: 16 }}>
           <li>Built-in analytics — pageviews, bounce rate, traffic sources</li>
-          <li>Pageview tracking, bounce rate, traffic sources</li>
           <li>Weekly data fed directly into the Growth Agent</li>
         </ul>
       </div>

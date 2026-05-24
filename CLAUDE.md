@@ -100,7 +100,7 @@ GitHub is connected via the Velyr GitHub App through a server-driven OAuth flow 
 
 Vercel Node functions (`api/`) and the Supabase Deno Edge Function (`supabase/functions/agent-run/`) are separate deploy bundles and **cannot import a shared module** (`node:crypto` vs Web Crypto, different resolvers). Where logic must match across the boundary, we keep **format-locked twins** — each carries a "keep in sync with the other declaration" comment:
 - `fileToRoutePath` — `supabase/functions/agent-run/route-map.ts` ↔ `api/agent/run.js`
-- `encryptSecret` / `decryptSecret` (the `enc:v1:` AES-256-GCM wire format) — `api/_lib/secret-crypto.js` ↔ `supabase/functions/agent-run/index.ts`
+- `decryptSecret` (the `enc:v1:` AES-256-GCM wire format) — `api/_lib/secret-crypto.js` ↔ `supabase/functions/agent-run/index.ts`. Only the **read side** is twinned: the edge function decrypts legacy PostHog credentials but no longer encrypts (the matching `encryptSecret` was deleted there after the shared-project PostHog switch), so encryption is Node-only and needs no cross-runtime parity.
 - `ROLLBACK_BOUNCE_PP_THRESHOLD` — `api/agent/run.js` ↔ `supabase/functions/agent-run/receipt-builder.ts`
 
 Within a single runtime, do share: the two Node onboarding/agent files import `encryptSecret`/`decryptSecret` from `api/_lib/secret-crypto.js` (underscore prefix ⇒ not a Vercel route, doesn't count toward the 12-function cap).
@@ -140,7 +140,7 @@ ES modules (`"type": "module"`). Database access is `@supabase/supabase-js` with
 
 `vercel.json` includes a SPA rewrite (`/(.*)` → `/index.html`) and security headers (HSTS, X-Frame-Options DENY, etc.). Don't add a route to `vercel.json` — frontend routes are handled by `App.jsx`.
 
-> Note: `package.json` still lists `playwright-core`, `@sparticuz/chromium`, and `posthog-node` as dependencies, but **nothing imports them anymore** (they were scan-only / used by the deleted `api/posthog.js`). Flagged for removal in a separate dependency-cleanup PR.
+> Note: `playwright-core`, `@sparticuz/chromium`, and `posthog-node` (scan-only / used by the deleted `api/posthog.js`) have been **removed** from `package.json` — nothing imported them anymore.
 
 ### Analytics
 

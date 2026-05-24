@@ -294,15 +294,21 @@ function isForbiddenEditPath(filePath: string): RegExp | null {
   return null
 }
 
-// ─── SECRET ENCRYPTION (Stage 4.1) ───────────────────────────────────────────
-// FORMAT CONTRACT: must stay byte-compatible with api/_lib/secret-crypto.js.
-// Cross-runtime dedup not viable (Deno vs Node bundle boundary; Web Crypto vs
-// node:crypto). Update both together if the format changes.
+// ─── SECRET DECRYPTION (Stage 4.1) ───────────────────────────────────────────
+// FORMAT CONTRACT: decryptSecret must stay byte-compatible with the `enc:v1:`
+// wire format produced by api/_lib/secret-crypto.js. Cross-runtime dedup is not
+// viable (Deno vs Node bundle boundary; Web Crypto vs node:crypto), so this is
+// the read-side twin of that file — update both together if the format changes.
 //
-// Mirrors that file's encryption format: `enc:v1:` + base64(iv || tag ||
-// ciphertext), AES-256-GCM. Deno's Web Crypto handles AES-GCM natively.
-// Legacy plaintext is accepted on read so existing rows keep working until
-// they're re-written (which encrypts them).
+// Only decryptSecret remains here: the Edge Function reads PostHog credentials
+// (legacy encrypted rows) but no longer ENCRYPTS anything. The matching
+// encryptSecret was removed once per-customer PostHog keys went away with the
+// shared-project switch (encryption now happens only on the Node/api side, so
+// it needs no cross-runtime parity in this file).
+//
+// Format: `enc:v1:` + base64(iv || tag || ciphertext), AES-256-GCM. Deno's Web
+// Crypto handles AES-GCM natively. Legacy plaintext is accepted on read so
+// existing rows keep working.
 const ENC_PREFIX = 'enc:v1:'
 
 async function getEncryptionKey(): Promise<CryptoKey> {
@@ -311,25 +317,6 @@ async function getEncryptionKey(): Promise<CryptoKey> {
   if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error('AGENT_TOKEN_ENCRYPTION_KEY must be 64 hex chars (32 bytes)')
   const bytes = new Uint8Array(hex.match(/.{2}/g)!.map(b => parseInt(b, 16)))
   return await crypto.subtle.importKey('raw', bytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
-}
-
-async function encryptSecret(plaintext: string | null | undefined): Promise<string | null> {
-  if (plaintext == null) return null
-  const key = await getEncryptionKey()
-  const iv  = crypto.getRandomValues(new Uint8Array(12))
-  const pt  = new TextEncoder().encode(String(plaintext))
-  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, pt))
-  // Web Crypto produces ct || tag (last 16 bytes); we store iv || tag || ct
-  // to match the Node-side format used in api/agent/run.js.
-  const ct  = sealed.subarray(0, sealed.length - 16)
-  const tag = sealed.subarray(sealed.length - 16)
-  const blob = new Uint8Array(iv.length + tag.length + ct.length)
-  blob.set(iv, 0)
-  blob.set(tag, iv.length)
-  blob.set(ct,  iv.length + tag.length)
-  let bin = ''
-  for (const b of blob) bin += String.fromCharCode(b)
-  return ENC_PREFIX + btoa(bin)
 }
 
 async function decryptSecret(stored: string | null | undefined): Promise<string | null> {
@@ -885,6 +872,13 @@ async function setupPostHogForConnection(conn: any) {
     const chatId = sub?.telegram_chat_id
     if (!chatId) return { posthogProjectId: sharedProjectId, hostFilter }
 
+    // NOTE: still on legacy Markdown — deliberately NOT migrated in the HTML
+    // cleanup bundle. This message relies on a ```javascript fenced code block
+    // (Telegram Markdown), which has no clean 1:1 HTML equivalent (would need
+    // <pre><code>…</code></pre> with the snippet body escapeHtml'd). The only
+    // interpolated value is `hostFilter`, a hostname derived+validated from
+    // website_url, so the Markdown-injection risk is low. Flagged for a
+    // separate follow-up that converts the code block to <pre> properly.
     await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
