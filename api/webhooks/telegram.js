@@ -120,10 +120,57 @@ function generateCode() {
 }
 
 // ─── /start — Onboarding verification ────────────────────────────────────────
-async function handleStart(message) {
+// B3: /start must carry a start token minted by the authenticated onboarding
+// UI (deep link t.me/VelyrBot?start=<token>). The token resolves to the
+// auth_user_id that initiated setup, which we stamp onto the verification code
+// so a leaked code is non-transferable across accounts. A bare /start (no
+// token, or a bad/used/expired one) is refused — there's no trustworthy
+// identity to bind, so we point the user back to the web onboarding.
+const REFUSE_START_MSG =
+  'To connect Telegram, please start onboarding from velyr.io/agent/onboarding — ' +
+  'it will give you a personal setup link to open the bot. (Opening the bot directly ' +
+  "can't be linked to your account.)"
+
+async function handleStart(message, startPayload) {
   const chatId = message.chat.id
   const username = message.from?.username || null
   const firstName = message.from?.first_name || 'there'
+
+  // B3: require a start token and atomically consume it BEFORE minting a code.
+  if (!startPayload) {
+    return sendMessage(chatId, REFUSE_START_MSG)
+  }
+
+  const { data: tokenRow, error: tokenErr } = await supabase
+    .from('telegram_start_tokens')
+    .select('token, auth_user_id, used, expires_at')
+    .eq('token', startPayload)
+    .maybeSingle()
+  if (tokenErr) {
+    console.error('[telegram] start token lookup failed:', tokenErr.message)
+    return sendMessage(chatId, REFUSE_START_MSG)
+  }
+  if (!tokenRow || tokenRow.used ||
+      (tokenRow.expires_at && new Date(tokenRow.expires_at) < new Date())) {
+    return sendMessage(chatId, REFUSE_START_MSG)
+  }
+
+  // Atomic single-use consume: the `.eq('used', false)` guard means only one
+  // request can flip it. 0 rows back ⇒ another /start consumed it first → refuse.
+  const { data: consumed, error: consumeErr } = await supabase
+    .from('telegram_start_tokens')
+    .update({ used: true })
+    .eq('token', startPayload)
+    .eq('used', false)
+    .select('token')
+  if (consumeErr) {
+    console.error('[telegram] start token consume failed:', consumeErr.message)
+    return sendMessage(chatId, REFUSE_START_MSG)
+  }
+  if (!consumed || consumed.length === 0) {
+    return sendMessage(chatId, REFUSE_START_MSG)
+  }
+  const authUserId = tokenRow.auth_user_id
 
   // Delete any old unused codes for this chat_id
   await supabase
@@ -150,11 +197,14 @@ async function handleStart(message) {
     return sendMessage(chatId, '❌ Something went wrong generating your code. Please try again.')
   }
 
-  // Save code to DB — include expires_at so the frontend query works
+  // Save code to DB — include expires_at so the frontend query works.
+  // B3: auth_user_id comes from the consumed start token; verify + finalize
+  // enforce it matches the caller's JWT.
   await supabase.from('telegram_verification_codes').insert({
     code,
     chat_id: chatId,
     telegram_username: username,
+    auth_user_id: authUserId,
     expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // ✅ 30 min TTL
   })
 
@@ -602,9 +652,10 @@ export default async function handler(req, res) {
     const parts = text.split(' ')
     const cmd = parts[0].toLowerCase()
 
-    // /start — always respond, no auth needed
+    // /start — always respond, no auth needed. B3: parts[1] is the deep-link
+    // start token (t.me/VelyrBot?start=<token>); handleStart requires it.
     if (cmd === '/start' || cmd === 'start') {
-      await handleStart(message)
+      await handleStart(message, parts[1] || null)
 
     } else if ((cmd === 'yes' || cmd === 'y' || cmd === '✅') && parts.length === 1) {
       const runId = await findPendingRunForChat(chatId)

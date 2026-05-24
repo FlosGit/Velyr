@@ -577,6 +577,40 @@ function Step4({ onNext, onBack, loading }) {
   const [error, setError]         = useState('')
   const [verifying, setVerifying] = useState(false)
   const [botOpened, setBotOpened] = useState(false)
+  // B3: the bot deep link must carry a per-user start token so /start can bind
+  // the verification code to this account. Without it the bot refuses /start.
+  const [startToken, setStartToken]       = useState(null)
+  const [tokenError, setTokenError]       = useState('')
+  const [tokenLoading, setTokenLoading]   = useState(false)
+
+  const fetchStartToken = async () => {
+    setTokenLoading(true)
+    setTokenError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/onboarding?action=telegram_start_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json.token) {
+        setTokenError(json.error || 'Could not prepare your Telegram setup link. Please retry.')
+        setStartToken(null)
+      } else {
+        setStartToken(json.token)
+      }
+    } catch {
+      setTokenError('Could not prepare your Telegram setup link. Please retry.')
+      setStartToken(null)
+    } finally {
+      setTokenLoading(false)
+    }
+  }
+
+  // Mint a fresh start token when the step mounts.
+  useEffect(() => { fetchStartToken() }, [])
+
+  const botLink = startToken ? `https://t.me/VelyrBot?start=${startToken}` : null
 
   const handleNext = async () => {
     const trimmed = code.trim().toUpperCase()
@@ -636,10 +670,21 @@ function Step4({ onNext, onBack, loading }) {
           The bot will send you a 6-character verification code. You'll need it in step 2.
         </p>
         <div style={{ paddingLeft: 32 }}>
-          <a href="https://t.me/VelyrBot" target="_blank" rel="noreferrer" className="tg-open-btn" style={{ display: 'inline-flex', width: 'auto', padding: '9px 18px' }} onClick={() => setTimeout(() => setBotOpened(true), 2000)}>
-            <TelegramIcon size={16} />
-            Open @VelyrBot
-          </a>
+          {botLink ? (
+            <a href={botLink} target="_blank" rel="noreferrer" className="tg-open-btn" style={{ display: 'inline-flex', width: 'auto', padding: '9px 18px' }} onClick={() => setTimeout(() => setBotOpened(true), 2000)}>
+              <TelegramIcon size={16} />
+              Open @VelyrBot
+            </a>
+          ) : tokenLoading ? (
+            <p style={{ fontSize: 13, color: C.textLight, fontWeight: 300 }}>Preparing your setup link…</p>
+          ) : (
+            <div>
+              {tokenError && <p style={{ fontSize: 13, color: C.red, marginBottom: 8 }}>{tokenError}</p>}
+              <button onClick={fetchStartToken} className="tg-open-btn" style={{ display: 'inline-flex', width: 'auto', padding: '9px 18px', cursor: 'pointer', border: 'none' }}>
+                Retry
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

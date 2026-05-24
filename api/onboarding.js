@@ -20,6 +20,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { createClient } from '@supabase/supabase-js'
+import crypto from 'node:crypto'
 import { encryptSecret } from './_lib/secret-crypto.js'
 import { verifySessionCookie } from './github/_oauth-state.js'
 
@@ -236,7 +237,7 @@ async function handleFinalize(req, res) {
   }
   const { data: codeRow, error: codeErr } = await serviceClient
     .from('telegram_verification_codes')
-    .select('id, chat_id, used, expires_at')
+    .select('id, chat_id, used, expires_at, auth_user_id')
     .eq('id', verificationCodeId)
     .maybeSingle()
   if (codeErr) {
@@ -247,6 +248,15 @@ async function handleFinalize(req, res) {
   if (codeRow.used) return res.status(400).json({ error: 'This code has already been used.' })
   if (codeRow.expires_at && new Date(codeRow.expires_at) < new Date()) {
     return res.status(400).json({ error: 'This code has expired.' })
+  }
+  // B3: the code must belong to the caller. auth_user_id is stamped by the
+  // bot's /start (from the deep-link token). A NULL value is a legacy/deploy-
+  // window code minted before /start started stamping it — allowed through once;
+  // these all drain within the 30-min code TTL (removing the null-allow is a
+  // parked 24h follow-up). A non-null mismatch is the B3 attack (someone trying
+  // to finalize a code that was started under a different account) → reject.
+  if (codeRow.auth_user_id !== null && codeRow.auth_user_id !== auth.user.id) {
+    return res.status(403).json({ error: 'This code belongs to a different account.' })
   }
   if (String(codeRow.chat_id) !== String(telegramChatId)) {
     return res.status(400).json({ error: 'Code/chat mismatch.' })
@@ -309,6 +319,46 @@ async function handleFinalize(req, res) {
   return res.status(200).json({ ok: true })
 }
 
+// ─── action=telegram_start_token (POST) ──────────────────────────────────────
+// B3: mint a single-use start token tied to the AUTHENTICATED caller. The
+// onboarding UI embeds it in the bot deep link (t.me/VelyrBot?start=<token>);
+// the bot's /start consumes it and stamps auth_user_id onto the verification
+// code. This is the only point where we have a trustworthy user identity an
+// attacker can't substitute — it's what makes a leaked code non-transferable
+// across accounts.
+async function handleTelegramStartToken(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+  if (!SERVICE_ROLE_KEY) {
+    console.error('onboarding/telegram_start_token: SUPABASE_SERVICE_ROLE_KEY not configured')
+    return res.status(500).json({ error: 'Onboarding is not configured. Contact support.' })
+  }
+
+  const auth = await getUser(req)
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' })
+
+  // 24 random bytes → 32-char base64url. Well under Telegram's 64-char start
+  // payload limit, and base64url is deep-link safe (no +, /, or =).
+  const token = crypto.randomBytes(24).toString('base64url')
+
+  const { error } = await serviceClient
+    .from('telegram_start_tokens')
+    .insert({
+      token,
+      auth_user_id: auth.user.id,
+      used: false,
+      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 min TTL
+    })
+  if (error) {
+    console.error('onboarding/telegram_start_token: insert failed:', error.message)
+    return res.status(500).json({ error: 'Could not start Telegram setup. Try again.' })
+  }
+
+  return res.status(200).json({ token })
+}
+
 // ─── action=verify_telegram_code (POST) ──────────────────────────────────────
 // Lightweight, read-only Step-4 affordance: tells the UI whether a pasted code
 // is currently valid (exists, unused, unexpired) so it can show "connected to
@@ -362,7 +412,7 @@ async function handleVerifyTelegramCode(req, res) {
 
   const { data: row, error } = await serviceClient
     .from('telegram_verification_codes')
-    .select('id, chat_id, expires_at, used, telegram_username')
+    .select('id, chat_id, expires_at, used, telegram_username, auth_user_id')
     .eq('code', code)
     .maybeSingle()
   if (error) {
@@ -370,6 +420,15 @@ async function handleVerifyTelegramCode(req, res) {
     return res.status(500).json({ error: 'Could not verify code. Try again.' })
   }
   if (!row) {
+    return res.status(400).json({ error: 'Invalid code. Make sure you sent /start to the Velyr bot first.' })
+  }
+  // B3: this endpoint is a chat_id/username oracle — it must not reveal another
+  // user's code (or even that it exists). If the code is bound to a different
+  // account, return the SAME response as not-found (400 "Invalid code") rather
+  // than a distinguishable 403, so a caller can't probe which codes are live
+  // for other users. NULL auth_user_id = legacy/deploy-window code, allowed
+  // through (drains within the 30-min TTL).
+  if (row.auth_user_id !== null && row.auth_user_id !== auth.user.id) {
     return res.status(400).json({ error: 'Invalid code. Make sure you sent /start to the Velyr bot first.' })
   }
   if (row.used) {
@@ -395,6 +454,7 @@ export default async function handler(req, res) {
   if (action === 'snapshot')             return handleSnapshot(req, res)
   if (action === 'complete')             return handleComplete(req, res)
   if (action === 'finalize')             return handleFinalize(req, res)
+  if (action === 'telegram_start_token') return handleTelegramStartToken(req, res)
   if (action === 'verify_telegram_code') return handleVerifyTelegramCode(req, res)
   return res.status(400).json({ error: 'Unknown action' })
 }

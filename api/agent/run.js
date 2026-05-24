@@ -209,6 +209,16 @@ async function handleEnforceSubscriptions(res) {
     .lt('window_start', rateCutoff)
   if (rlGcError) console.warn('[enforce-subscriptions] rate-limit GC failed:', rlGcError.message)
 
+  // B3: GC consumed/expired Telegram start tokens. They carry a 15-min TTL and
+  // are single-use, so a 1-day retention floor is ample. Same best-effort,
+  // daily-cron piggyback as the GCs above.
+  const startTokenCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { error: stGcError } = await supabase
+    .from('telegram_start_tokens')
+    .delete()
+    .lt('created_at', startTokenCutoff)
+  if (stGcError) console.warn('[enforce-subscriptions] start-token GC failed:', stGcError.message)
+
   return res.json({ ok: true, ran_at: now })
 }
 
