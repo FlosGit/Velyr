@@ -61,6 +61,10 @@ Auth: cron requests must carry either Vercel's `x-vercel-cron` header or `x-cron
 
 **Approval flow**: the agent posts to Telegram via `@octokit/rest` + bot token; the user replies `YES` or `NO`. The `YES`/`NO` flow finds the most recent `waiting_approval` run for the chat's subscription via `findPendingRunForChat()`. `/api/webhooks/telegram` ingests replies and merges or closes the PR.
 
+**Email notifications removed — Telegram is the sole customer notification channel.** The former Mailjet weekly-summary + monthly-roast emails were deleted; the weekly run notifies only via the Telegram approval message, and the monthly roast goes to Telegram only. (Supabase Auth's own SMTP for signup/reset/magic-link emails is separate, configured in the Supabase dashboard, and untouched.)
+
+**Telegram parse mode**: messages that interpolate uncontrolled values (LLM output, file paths like `Hero_Section.jsx`, error strings, repo-derived reasons) are sent as `parse_mode: 'HTML'` with every interpolated value run through an `escapeHtml()` helper. Legacy `Markdown` (v1) has no reliable escape mechanism, so a stray `*`/`_`/`[`/`` ` `` in an interpolated value used to break sends with "can't parse entities". Static or numbers-only messages may still use Markdown.
+
 Telegram bot commands (handled in `api/webhooks/telegram.js`):
 - `YES` / `NO` — approve or reject the latest pending PR
 - `approve <run-id>` / `reject <run-id>` — power-user override by run ID

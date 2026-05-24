@@ -402,8 +402,25 @@ async function repoPreflight(octokit: any, owner: string, repo: string): Promise
 // entry points + CSS approach + repo tree). The old gate is removed; the new
 // mapper is the framework gate in processConnection.
 
+// ─── TELEGRAM PARSE-MODE SAFETY ──────────────────────────────────────────────
+// Messages that interpolate uncontrolled values — LLM output, file paths (e.g.
+// Hero_Section.jsx), error strings, repo-derived reasons — are sent as HTML, not
+// legacy `Markdown`. Telegram's v1 Markdown has NO reliable escape mechanism, so
+// a stray *, _, [ or ` in an interpolated value breaks parsing with
+// "Bad Request: can't parse entities: Can't find end of the entity…". HTML
+// escaping of <, >, & is reliable, so every interpolated value in an HTML
+// message below is wrapped in escapeHtml(). Static, no-interpolation (or
+// numbers-only) messages stay on Markdown intentionally.
+function escapeHtml(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 // Telegram failure-mode notification used when we cap a subscription out.
 // Kept inline (not refactored) — it's the only place we need this exact text.
+// Numbers/period only (no uncontrolled interpolation) → stays on Markdown.
 async function notifyCapExceeded(chatId: string | null, spent: number, period: string) {
   if (!chatId) return
   await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
@@ -425,8 +442,8 @@ async function notifyInsufficientData(chatId: string | null, reason: string) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `🤖 *Velyr Agent — No fix this week*\n\nNot enough data to make a confident recommendation: _${reason}_\n\nThe agent will try again next run. To help it learn faster, you can:\n• Connect PostHog so it sees real visitor data\n• Add a competitor with *competitor add <url>*\n• Reply *YES*/*NO* on past PRs to build Business DNA`,
-      parse_mode: 'Markdown',
+      text: `🤖 <b>Velyr Agent — No fix this week</b>\n\nNot enough data to make a confident recommendation: <i>${escapeHtml(reason)}</i>\n\nThe agent will try again next run. To help it learn faster, you can:\n• Connect PostHog so it sees real visitor data\n• Add a competitor with <b>competitor add &lt;url&gt;</b>\n• Reply <b>YES</b>/<b>NO</b> on past PRs to build Business DNA`,
+      parse_mode: 'HTML',
     }),
   }).catch(err => console.error('[no-data] notifyInsufficientData send failed:', err))
 }
@@ -884,19 +901,9 @@ async function setupPostHogForConnection(conn: any) {
   }
 }
 
-// ─── SUBSCRIPTION EMAIL ───────────────────────────────────────────────────────
-async function fetchSubscriptionEmail(subscriptionId: string): Promise<string | null> {
-  const { data: sub } = await supabase
-    .from('agent_subscriptions').select('auth_user_id').eq('id', subscriptionId).single()
-  if (!sub?.auth_user_id) return null
-  try {
-    const { data: u } = await supabase.auth.admin.getUserById(sub.auth_user_id)
-    return u?.user?.email || null
-  } catch (err: any) {
-    slog('warn', 'fetch_subscription_email_failed', { subscriptionId, error: err?.message || String(err) })
-    return null
-  }
-}
+// (fetchSubscriptionEmail removed — it existed only to address the weekly /
+// roast Mailjet emails, which are gone. Telegram is the sole notification
+// channel and identifies the recipient by telegram_chat_id.)
 
 // ─── SCREENSHOTS (3a) ─────────────────────────────────────────────────────────
 async function captureScreenshot(url: string): Promise<string | null> {
@@ -1030,69 +1037,11 @@ async function recordDNA(subscriptionId: string, runId: string | null, fixType: 
   })
 }
 
-// ─── WEEKLY EMAIL (3g) ────────────────────────────────────────────────────────
-async function sendWeeklyEmail(opts: {
-  toEmail: string; websiteUrl: string; problem: string; prUrl: string;
-  bounceBefore: number | null; bounceAfter: number | null;
-  screenshotBefore: string | null; competitorChanges: any[] | null;
-}) {
-  const apiKey    = Deno.env.get('MAILJET_API_KEY')
-  const apiSecret = Deno.env.get('MAILJET_SECRET_KEY')
-  if (!apiKey || !apiSecret || !opts.toEmail) {
-    console.warn('Skipping weekly email — missing Mailjet creds or recipient'); return
-  }
-  const baseUrl      = Deno.env.get('VITE_APP_URL')
-  const dashboardUrl = `${baseUrl}/agent/dashboard`
-
-  const bounceBlock = (opts.bounceBefore != null && opts.bounceAfter != null)
-    ? `<p style="font-size:13px;color:#6b6460;margin:0 0 12px;">Bounce rate: <strong style="color:#1c1917;">${opts.bounceBefore}% → ${opts.bounceAfter}%</strong></p>`
-    : ''
-  const screenshotBlock = opts.screenshotBefore
-    ? `<img src="${opts.screenshotBefore}" alt="Page snapshot" style="width:100%;border:1px solid rgba(28,25,23,0.08);border-radius:10px;margin:12px 0;display:block;">`
-    : ''
-  const competitorBlock = opts.competitorChanges?.length
-    ? `<div style="background:#fff8ec;border:1px solid rgba(214,137,16,0.2);border-radius:10px;padding:14px 16px;margin:16px 0;">
-        <p style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#d68910;font-weight:500;margin:0 0 6px;">⚠️ Competitor Update</p>
-        ${opts.competitorChanges.map(c => `<p style="font-size:12px;color:#6b6460;margin:0 0 4px;"><strong style="color:#1c1917;">${c.url}</strong>: ${c.diffs.join(' · ')}</p>`).join('')}
-      </div>` : ''
-
-  const html = `<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#f7f4ef;font-family:'Helvetica Neue',Arial,sans-serif;font-weight:300;color:#1c1917;">
-  <div style="max-width:560px;margin:0 auto;padding:48px 24px;">
-    <p style="font-size:22px;font-weight:500;letter-spacing:-.01em;color:#1c1917;margin:0 0 32px;">Velyr</p>
-    <div style="background:#ffffff;border:1px solid rgba(28,25,23,0.08);border-radius:16px;padding:36px;margin-bottom:24px;">
-      <p style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#a09890;margin:0 0 10px;">Your agent ran this morning</p>
-      <p style="font-family:'Cormorant Garant',serif;font-size:26px;font-weight:300;color:#1c1917;margin:0 0 18px;line-height:1.3;letter-spacing:-.01em;">${opts.problem}</p>
-      ${bounceBlock}
-      <p style="font-size:13px;color:#6b6460;margin:0 0 20px;">${opts.websiteUrl}</p>
-      ${screenshotBlock}
-      ${competitorBlock}
-      <a href="${opts.prUrl}" style="display:inline-block;background:#1c1917;color:#f7f4ef;text-decoration:none;border-radius:10px;padding:12px 22px;font-size:13px;font-weight:500;margin-right:8px;">View pull request →</a>
-      <a href="${dashboardUrl}" style="display:inline-block;background:transparent;color:#2a5c45;text-decoration:none;border:1px solid #2a5c45;border-radius:10px;padding:12px 22px;font-size:13px;font-weight:500;">View your full dashboard →</a>
-    </div>
-    <p style="font-size:11px;color:#a09890;margin:0;line-height:1.6;">© Velyr · You receive this because you subscribed to the Growth Agent.</p>
-  </div>
-</body></html>`
-
-  try {
-    const res = await fetch('https://api.mailjet.com/v3.1/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa(`${apiKey}:${apiSecret}`) },
-      body: JSON.stringify({
-        Messages: [{
-          From: { Email: 'info@velyr.io', Name: 'Velyr' },
-          To:   [{ Email: opts.toEmail }],
-          Subject: "Your Velyr Agent ran this morning — here's what it found",
-          HTMLPart: html,
-          TextPart: `Your Velyr Agent ran this morning.\n\n${opts.problem}\n\nView the pull request: ${opts.prUrl}\nView your dashboard: ${dashboardUrl}`,
-        }],
-      }),
-    })
-    if (!res.ok) console.error('Mailjet weekly email error:', await res.text())
-  } catch (err: any) {
-    console.error('Weekly email send failed:', err.message)
-  }
-}
+// Email notifications removed — Telegram is the sole customer notification
+// channel. The former sendWeeklyEmail (Mailjet) lived here; the weekly run now
+// notifies only via the Telegram approval message (sendTelegramNotification).
+// (Supabase Auth's own SMTP for signup/reset emails is unaffected — that's
+// configured in the Supabase dashboard, not in this codebase.)
 
 // ─── MONTHLY ROAST REPORT (3h) ────────────────────────────────────────────────
 function isFirstMondayOfMonth(date: Date = new Date()): boolean {
@@ -1100,7 +1049,7 @@ function isFirstMondayOfMonth(date: Date = new Date()): boolean {
 }
 
 async function generateMonthlyRoast(opts: {
-  subscriptionId: string; websiteUrl: string; toEmail: string | null; chatId: string | null;
+  subscriptionId: string; websiteUrl: string; chatId: string | null;
   recentRuns: any[]; competitorData: any; dna: any;
 }) {
   try {
@@ -1146,37 +1095,18 @@ Make it sound like a smart friend being honest. Direct second person. No headers
       last_roast_report: roast, last_roast_at: new Date().toISOString(),
     }).eq('id', opts.subscriptionId)
 
+    // Telegram is the sole customer notification channel (email removed). HTML
+    // mode: the roast is free-form LLM prose, full of em-dashes, asterisks and
+    // the occasional underscore — must not be parsed as Markdown.
     if (opts.chatId) {
       await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: opts.chatId,
-          text: `🔥 *Monthly Roast — ${opts.websiteUrl}*\n\n${roast.slice(0, 3500)}`,
-          parse_mode: 'Markdown',
+          text: `🔥 <b>Monthly Roast — ${escapeHtml(opts.websiteUrl)}</b>\n\n${escapeHtml(roast.slice(0, 3500))}`,
+          parse_mode: 'HTML',
         }),
       })
-    }
-    if (opts.toEmail) {
-      const apiKey    = Deno.env.get('MAILJET_API_KEY')
-      const apiSecret = Deno.env.get('MAILJET_SECRET_KEY')
-      if (apiKey && apiSecret) {
-        await fetch('https://api.mailjet.com/v3.1/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Basic ' + btoa(`${apiKey}:${apiSecret}`) },
-          body: JSON.stringify({
-            Messages: [{
-              From: { Email: 'info@velyr.io', Name: 'Velyr' },
-              To:   [{ Email: opts.toEmail }],
-              Subject: `🔥 Your Velyr monthly roast — ${opts.websiteUrl}`,
-              HTMLPart: `<div style="font-family:'Helvetica Neue',Arial,sans-serif;max-width:560px;margin:48px auto;padding:24px;color:#1c1917;line-height:1.7;">
-                <p style="font-size:22px;font-weight:500;margin:0 0 24px;">Velyr · Monthly Roast</p>
-                <div style="background:#fff;border:1px solid rgba(28,25,23,0.08);border-radius:16px;padding:32px;font-size:14px;color:#1c1917;white-space:pre-wrap;">${roast.replace(/</g, '&lt;')}</div>
-              </div>`,
-              TextPart: roast,
-            }],
-          }),
-        })
-      }
     }
   } catch (err: any) {
     console.error('Monthly roast generation failed:', err.message)
@@ -1350,7 +1280,16 @@ CONSTRAINTS:
 
   let parsed: FixResult
   try {
-    parsed = JSON.parse(text.replace(/```json|```/g, '').trim())
+    // Strip a leading/trailing markdown code fence ONLY (the LLM commonly wraps
+    // its JSON in ```json … ```). The old global replace(/```json|```/g) also
+    // stripped any ``` inside the JSON body (e.g. a code_change.replace string
+    // that itself contains a fence), which produced invalid JSON and killed the
+    // run with "Pass 2 returned invalid JSON".
+    let cleaned = text.trim()
+    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7).trim()
+    else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3).trim()
+    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3).trim()
+    parsed = JSON.parse(cleaned)
   } catch {
     throw new Error(`Pass 2 returned invalid JSON: ${text.slice(0, 200)}`)
   }
@@ -1459,20 +1398,23 @@ async function sendTelegramNotification(fixResult: FixResult, pr: any, _runId: s
     : `(${fixResult.confidence || 'unknown'} confidence)`
   const blindSpot = fixResult.blind_spots?.[0] || 'none flagged'
 
-  const message = `🤖 *Velyr Growth Agent*
+  // HTML mode: problem / file_to_edit (file paths routinely contain '_') /
+  // blindSpot are uncontrolled LLM-or-path values — this is the message that
+  // was failing with "can't find end of the entity" on an underscore.
+  const message = `🤖 <b>Velyr Growth Agent</b>
 
-📊 *Hypothesis:* ${fixResult.problem}
-🎯 *Expected:* ${expected}
-📁 *File:* ${fixResult.file_to_edit}
-⚠️ *Blind spots:* ${blindSpot}
+📊 <b>Hypothesis:</b> ${escapeHtml(fixResult.problem)}
+🎯 <b>Expected:</b> ${escapeHtml(expected)}
+📁 <b>File:</b> ${escapeHtml(fixResult.file_to_edit)}
+⚠️ <b>Blind spots:</b> ${escapeHtml(blindSpot)}
 
-🔗 [View PR](${pr.html_url})
+🔗 <a href="${escapeHtml(pr.html_url)}">View PR</a>
 
-Reply *YES* to merge / *NO* to reject. Full receipt in the PR.`
+Reply <b>YES</b> to merge / <b>NO</b> to reject. Full receipt in the PR.`
 
   const response = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown', disable_web_page_preview: false }),
+    body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML', disable_web_page_preview: false }),
   })
   const data = await response.json()
   if (!data.ok) console.error('Telegram error:', data.description)
@@ -1491,13 +1433,15 @@ async function notifyFindProblem(
   const title  = status === 'find_mismatch'
     ? 'I couldn\'t locate the exact snippet to change'
     : 'the snippet to change appeared in several places'
+  // HTML mode: aiFind / candidates / snippets are verbatim source lines that can
+  // contain backticks, asterisks, underscores — anything.
   const found  = status === 'find_mismatch'
-    ? (detail.closestCandidates?.length ? `Closest lines I found:\n${detail.closestCandidates.map(s => `• \`${s}\``).join('\n')}` : 'No similar lines found.')
-    : `It matched ${detail.snippets?.length || 0} places:\n${(detail.snippets || []).map(s => `• \`${s}\``).join('\n')}`
-  const text = `🤖 *Velyr Agent — No PR this week*\n\nI proposed a fix but ${title}, so I did NOT open a PR (better than editing the wrong thing).\n\n*Intended change target:*\n\`${aiFind}\`\n\n${found}\n\nI'll retry next run — or you can apply it manually.`
+    ? (detail.closestCandidates?.length ? `Closest lines I found:\n${detail.closestCandidates.map(s => `• <code>${escapeHtml(s)}</code>`).join('\n')}` : 'No similar lines found.')
+    : `It matched ${detail.snippets?.length || 0} places:\n${(detail.snippets || []).map(s => `• <code>${escapeHtml(s)}</code>`).join('\n')}`
+  const text = `🤖 <b>Velyr Agent — No PR this week</b>\n\nI proposed a fix but ${title}, so I did NOT open a PR (better than editing the wrong thing).\n\n<b>Intended change target:</b>\n<code>${escapeHtml(aiFind)}</code>\n\n${found}\n\nI'll retry next run — or you can apply it manually.`
   await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
   }).catch(err => console.error('[find-problem] notify send failed:', err))
 }
 
@@ -1527,7 +1471,6 @@ async function processConnection(conn: any) {
     const { data: subRow } = await supabase.from('agent_subscriptions')
       .select('telegram_chat_id, stripe_revenue_connected, stripe_account_id, competitors, public_slug, is_public')
       .eq('id', conn.subscription_id).single()
-    const subEmail   = await fetchSubscriptionEmail(conn.subscription_id)
     const trackedCompetitors: string[] = subRow?.competitors || []
 
     // ── Monthly spend cap pre-flight ───────────────────────────────────────
@@ -1821,14 +1764,8 @@ async function processConnection(conn: any) {
 
     await saveFunnelPages(conn.subscription_id, run.id, funnelAnalysis)
 
-    // 3g: Weekly email summary
-    if (subEmail) {
-      await sendWeeklyEmail({
-        toEmail: subEmail, websiteUrl: conn.website_url || '', problem: fixResult.problem || '',
-        prUrl: pr.html_url, bounceBefore, bounceAfter: null,
-        screenshotBefore, competitorChanges,
-      })
-    }
+    // (Weekly email summary removed — Telegram approval message is the only
+    // customer notification for a weekly run.)
 
     // 3h: Monthly roast — only on the first Monday
     if (isFirstMondayOfMonth()) {
@@ -1839,7 +1776,7 @@ async function processConnection(conn: any) {
         .order('created_at', { ascending: false }).limit(20)
       await generateMonthlyRoast({
         subscriptionId: conn.subscription_id, websiteUrl: conn.website_url || '',
-        toEmail: subEmail, chatId, recentRuns: recentRuns || [], competitorData, dna,
+        chatId, recentRuns: recentRuns || [], competitorData, dna,
       })
     }
 
@@ -1868,8 +1805,10 @@ async function processConnection(conn: any) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: `⚠️ *Velyr Agent — Run Failed*\n\n_${err.message || 'Unknown error'}_\n\nThe agent will retry next run.`,
-          parse_mode: 'Markdown',
+          // HTML mode: err.message can carry the raw Pass-2 JSON snippet / LLM
+          // text, which often contains _ * ` [ — exactly what breaks v1 Markdown.
+          text: `⚠️ <b>Velyr Agent — Run Failed</b>\n\n<i>${escapeHtml(err.message || 'Unknown error')}</i>\n\nThe agent will retry next run.`,
+          parse_mode: 'HTML',
         }),
       })
     } catch (notifyErr: any) {

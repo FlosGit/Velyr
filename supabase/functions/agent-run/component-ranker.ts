@@ -112,7 +112,14 @@ function buildGraphSummary(nodes: GraphNode[]): { text: string; included: GraphN
 
 function parseRankerJson(text: string): any | null {
   try {
-    return JSON.parse(text.replace(/```json|```/g, '').trim())
+    // Strip a leading/trailing markdown code fence ONLY. The old global
+    // replace(/```json|```/g) also nuked any ``` *inside* the JSON body (e.g. a
+    // code_change string containing a fence), corrupting otherwise-valid output.
+    let cleaned = text.trim()
+    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7).trim()
+    else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3).trim()
+    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3).trim()
+    return JSON.parse(cleaned)
   } catch {
     return null
   }
