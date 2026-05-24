@@ -58,7 +58,7 @@ const AGENT_STEPS = [
   { id:'map_funnel',  label:'Mapping funnel',          desc:'Detecting pages and conversion flow' },
   { id:'analyze',     label:'Finding biggest issue',   desc:'Claude analyzing drop-off & opportunities' },
   { id:'screenshot',  label:'Taking before screenshot',desc:'Capturing the page before any changes' },
-  { id:'write_fix',   label:'Writing fix',             desc:'Editing file and generating patch (or A/B variants)' },
+  { id:'write_fix',   label:'Writing fix',             desc:'Editing file and generating patch' },
   { id:'open_pr',     label:'Opening pull request',    desc:'Pushing branch and creating PR on GitHub' },
   { id:'notify',      label:'Sending notification',    desc:'Telegram message — reply YES or NO' },
 ]
@@ -1035,6 +1035,8 @@ function RunsPage({runs, loading, onSelect}) {
             const s=STATUS[run.status]||STATUS.pending
             const bounceDelta = (run.bounce_rate_before != null && run.bounce_rate_after != null)
               ? run.bounce_rate_after - run.bounce_rate_before : null
+            // A/B testing is vestigial (no cron creates A/B runs); kept only so
+            // historical run_type='ab_test' rows still render. No badge is shown.
             const hasAB        = !!run.ab_test_variants
             const hasCompetitor= Array.isArray(run.competitor_changes) && run.competitor_changes.length > 0
             return (
@@ -1067,11 +1069,6 @@ function RunsPage({runs, loading, onSelect}) {
                     <StatusBadge status={run.status} small/>
                   </div>
                   <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:5}}>
-                    {hasAB && (
-                      <span style={{fontSize:10,color:C.accent,background:C.accentSoft,border:`1px solid ${C.accentMid}`,padding:'1px 7px',borderRadius:4,fontWeight:500,letterSpacing:'.04em',textTransform:'uppercase'}}>
-                        🧪 A/B
-                      </span>
-                    )}
                     {hasCompetitor && (
                       <span style={{fontSize:10,color:C.yellow,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,padding:'1px 7px',borderRadius:4,fontWeight:500,letterSpacing:'.04em',textTransform:'uppercase'}}>
                         ⚠ Competitor change

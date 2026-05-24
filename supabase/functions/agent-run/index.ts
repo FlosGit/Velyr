@@ -872,19 +872,16 @@ async function setupPostHogForConnection(conn: any) {
     const chatId = sub?.telegram_chat_id
     if (!chatId) return { posthogProjectId: sharedProjectId, hostFilter }
 
-    // NOTE: still on legacy Markdown — deliberately NOT migrated in the HTML
-    // cleanup bundle. This message relies on a ```javascript fenced code block
-    // (Telegram Markdown), which has no clean 1:1 HTML equivalent (would need
-    // <pre><code>…</code></pre> with the snippet body escapeHtml'd). The only
-    // interpolated value is `hostFilter`, a hostname derived+validated from
-    // website_url, so the Markdown-injection risk is low. Flagged for a
-    // separate follow-up that converts the code block to <pre> properly.
+    // Sent as HTML: the snippet body goes in <pre><code>…</code></pre> with the
+    // whole snippetCode run through escapeHtml() (covers the &/</> chars AND the
+    // interpolated snippetToken/hostFilter baked into it). Inline file names use
+    // <code>, the trailing note uses <i>, and the domain mention is escaped too.
     await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        text: `📊 *Analytics setup — one paste*\n\nAdd this to your app's entry file (\`main.jsx\`, \`_app.jsx\`, or \`app/layout.tsx\`) once:\n\n\`\`\`javascript\n${snippetCode}\n\`\`\`\n\nFirst install the package:\n\`npm install posthog-js\`\n\n_Your visitor data is processed by Velyr's analytics infrastructure, scoped to your domain (\`${hostFilter}\`). Once added, the agent uses real visitor data for smarter recommendations._`,
-        parse_mode: 'Markdown',
+        text: `📊 <b>Analytics setup — one paste</b>\n\nAdd this to your app's entry file (<code>main.jsx</code>, <code>_app.jsx</code>, or <code>app/layout.tsx</code>) once:\n\n<pre><code>${escapeHtml(snippetCode)}</code></pre>\n\nFirst install the package:\n<code>npm install posthog-js</code>\n\n<i>Your visitor data is processed by Velyr's analytics infrastructure, scoped to your domain (<code>${escapeHtml(hostFilter)}</code>). Once added, the agent uses real visitor data for smarter recommendations.</i>`,
+        parse_mode: 'HTML',
       }),
     })
 
