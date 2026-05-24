@@ -648,16 +648,30 @@ async function fetchBrandGuardrails(subscriptionId: string) {
 }
 
 // ─── POSTHOG ANALYTICS ───────────────────────────────────────────────────────
-async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: string, posthogHost = 'https://us.i.posthog.com') {
+// Shared-project architecture: every customer's site emits to Velyr's single
+// PostHog project; the customer's domain is the partition key carried on each
+// event as properties.$host. Every query below MUST filter by that host or it
+// reads ALL sites' data (including velyr.io's own marketing pageviews) and
+// mis-attributes it to this customer. `hostFilter` is the hostname stored on
+// agent_connections.posthog_host_filter. If it's null/empty we cannot scope the
+// data, so we skip the queries and return null (the run continues with funnel
+// discovery only). Keep the $host filter logic in sync with the twin in
+// api/agent/run.js (getPostHogAnalytics + handleRollbackCheck).
+async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: string, posthogHost = 'https://us.i.posthog.com', hostFilter?: string | null) {
+  if (!hostFilter) {
+    console.warn('PostHog analytics skipped: no posthog_host_filter (domain) for this connection')
+    return null
+  }
   try {
     const headers         = { 'Authorization': `Bearer ${posthogApiKey}`, 'Content-Type': 'application/json' }
     const sevenDaysAgo    = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     const today           = new Date().toISOString().split('T')[0]
+    const hostWhere       = [`properties.$host = '${hostFilter.replace(/'/g, "''")}'`]
 
     const query = (body: any) =>
       fetch(`${posthogHost}/api/projects/${posthogProjectId}/query/`, {
-        method: 'POST', headers, body: JSON.stringify({ query: body }),
+        method: 'POST', headers, body: JSON.stringify({ query: { ...body, where: hostWhere } }),
       })
 
     const [pageviewsRes, sessionsRes, lastWeekRes, referrersRes, utmRes, deviceRes] = await Promise.all([
@@ -788,59 +802,84 @@ async function fetchCompetitorData(competitorUrls: string[]) {
   return results.length > 0 ? results : null
 }
 
-// ─── POSTHOG AUTO-SETUP ──────────────────────────────────────────────────────
-// FIX: removed 'continue' outside loop — now returns early with null instead
+// ─── POSTHOG SETUP (shared project) ──────────────────────────────────────────
+// Architecture: there is ONE shared PostHog project (POSTHOG_PROJECT_ID) for all
+// customers. We no longer create a per-customer project — the PostHog Free plan
+// caps an org at one project, and per-customer creation always failed with
+// "maximum limit of allowed projects". Instead, every customer's site emits to
+// the shared project's public write token, and the customer's domain is the
+// partition key carried on each event as properties.$host. Reads filter by
+// $host (see getPostHogAnalytics) to scope data to the right customer.
+//
+// This "setup" is therefore just a no-op DB write (record the domain) + a
+// Telegram message with the paste-once snippet. It runs once per connection,
+// gated on posthog_host_filter being null (NOT posthog_project_id — that column
+// may be backfilled to the shared id and is no longer the trigger).
+function hostnameFromUrl(rawUrl: string | null | undefined): string | null {
+  if (!rawUrl) return null
+  try {
+    const withProto = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`
+    const h = new URL(withProto).hostname.toLowerCase()
+    return h || null
+  } catch {
+    return null
+  }
+}
+
 async function setupPostHogForConnection(conn: any) {
   try {
-    const host  = Deno.env.get('POSTHOG_HOST') || 'https://us.i.posthog.com'
-    const orgId = Deno.env.get('POSTHOG_ORG_ID')
-    if (!orgId) { console.error('POSTHOG_ORG_ID not set'); return null }
+    const sharedProjectId = Deno.env.get('POSTHOG_PROJECT_ID')
+    if (!sharedProjectId) { console.error('POSTHOG_PROJECT_ID (shared project) not set — cannot set up analytics'); return null }
 
-    const phRes = await fetch(`${host}/api/organizations/${orgId}/projects/`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${Deno.env.get('POSTHOG_API_KEY')}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: `velyr_${conn.subscription_id.slice(0, 8)}_${conn.github_repo_name}` }),
-    })
-    if (!phRes.ok) { console.error('PostHog project creation failed:', await phRes.text()); return null }
+    // Derive the partition key (hostname only, e.g. "precision-training.io")
+    // from the connection's website_url.
+    const hostFilter = hostnameFromUrl(conn.website_url)
+    if (!hostFilter) {
+      console.warn(`PostHog setup: no usable website_url for connection ${conn.id} — cannot derive $host partition key`)
+      return null
+    }
 
-    const project          = await phRes.json()
-    const posthogProjectId = String(project.id)
-    const snippetToken     = project.api_token
+    // Public write token for the SHARED project (safe to ship to the browser —
+    // it's a write-only ingestion token, same one velyr.io uses in index.html).
+    const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || 'phc_qmLvjZawzLuEnR5ns5eFKXSFiSD5AX4y87LvELP9nqB5'
 
+    // Record the domain so every read filters by it. Also stamp the shared
+    // project id into posthog_project_id for clarity (the column is no longer
+    // the trigger and reads fall back to env, but a non-null value documents
+    // which project this connection points at).
     await supabase.from('agent_connections').update({
-      posthog_project_id:    posthogProjectId,
-      // Stage 4.1: encrypt the PostHog key at rest. The plaintext is only in
-      // process memory during this call (read from env above).
-      posthog_api_key:       await encryptSecret(Deno.env.get('POSTHOG_API_KEY')),
+      posthog_host_filter:   hostFilter,
+      posthog_project_id:    sharedProjectId,
       posthog_snippet_token: snippetToken,
     }).eq('id', conn.id)
 
-    const isNext      = conn.github_repo_name?.toLowerCase().includes('next')
-    const framework   = isNext ? 'Next.js' : 'React/Vite'
+    const isNext = conn.github_repo_name?.toLowerCase().includes('next')
+    // The snippet registers $host explicitly so every event is tagged with the
+    // partition key on emission (we don't rely on PostHog's auto-capture default
+    // to set $host). This keeps reads/writes keyed on the exact same hostname.
     const snippetCode = isNext
-      ? `// pages/_app.jsx  OR  app/layout.tsx\nimport posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n}`
-      : `// src/main.jsx\nimport posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })`
+      ? `// pages/_app.jsx  OR  app/layout.tsx\nimport posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n  posthog.register({ $host: '${hostFilter}' })\n}`
+      : `// src/main.jsx  (or app/layout.tsx)\nimport posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\nposthog.register({ $host: '${hostFilter}' })`
 
     const { data: sub } = await supabase
       .from('agent_subscriptions').select('telegram_chat_id')
       .eq('id', conn.subscription_id).single()
 
-    // FIX: was 'continue' (invalid outside loop) — now returns null early
     const chatId = sub?.telegram_chat_id
-    if (!chatId) return null
+    if (!chatId) return { posthogProjectId: sharedProjectId, hostFilter }
 
     await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        text: `📊 *Analytics ready!*\n\nAdd this to your ${framework} project once:\n\n\`\`\`javascript\n${snippetCode}\n\`\`\`\n\nFirst install the package:\n\`npm install posthog-js\`\n\n_Once added, the agent will use real visitor data for smarter recommendations._`,
+        text: `📊 *Analytics setup — one paste*\n\nAdd this to your app's entry file (\`main.jsx\`, \`_app.jsx\`, or \`app/layout.tsx\`) once:\n\n\`\`\`javascript\n${snippetCode}\n\`\`\`\n\nFirst install the package:\n\`npm install posthog-js\`\n\n_Your visitor data is processed by Velyr's analytics infrastructure, scoped to your domain (\`${hostFilter}\`). Once added, the agent uses real visitor data for smarter recommendations._`,
         parse_mode: 'Markdown',
       }),
     })
 
-    return { posthogProjectId, snippetToken }
+    return { posthogProjectId: sharedProjectId, hostFilter }
   } catch (err) {
-    console.error('PostHog auto-setup failed:', err)
+    console.error('PostHog setup failed:', err)
     return null
   }
 }
@@ -1468,12 +1507,14 @@ async function processConnection(conn: any) {
   let run: any = null
 
   try {
-    // PostHog auto-setup on first run
-    if (!conn.posthog_project_id) {
+    // PostHog setup on first run (shared project). Gated on the domain partition
+    // key being absent — once posthog_host_filter is set, the snippet has been
+    // sent and reads are scoped, so we never re-run it.
+    if (!conn.posthog_host_filter) {
       const phSetup = await setupPostHogForConnection(conn)
       if (phSetup) {
-        conn.posthog_project_id = phSetup.posthogProjectId
-        conn.posthog_api_key    = Deno.env.get('POSTHOG_API_KEY')
+        conn.posthog_host_filter = phSetup.hostFilter
+        conn.posthog_project_id  = phSetup.posthogProjectId
       }
     }
 
@@ -1586,6 +1627,7 @@ async function processConnection(conn: any) {
         posthogApiKey,
         conn.posthog_project_id || Deno.env.get('POSTHOG_PROJECT_ID')!,
         conn.posthog_host       || Deno.env.get('POSTHOG_HOST')!,
+        conn.posthog_host_filter,
       ),
       conn.website_url ? getPageSpeedScore(conn.website_url) : Promise.resolve(null),
       getPreviousRuns(conn.subscription_id),

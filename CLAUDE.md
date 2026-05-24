@@ -105,7 +105,7 @@ Within a single runtime, do share: the two Node onboarding/agent files import `e
 
 Key tables used by the backend (all accessed via the service-role key, which bypasses RLS; RLS only constrains the browser client):
 - `agent_subscriptions` — one row per subscriber; holds `status`, `telegram_chat_id`, `public_slug`, `is_public`, `competitors[]`; billing columns `user_id`, `auth_user_id`, `subscription_status`, `stripe_customer_id`, `subscription_id`, `current_period_end`, `cancel_at_period_end`, `canceled_at`; onboarding/identity columns `github_oauth_user_id`, `github_oauth_login`, `github_installation_verified_at`, `onboarding_completed_at`, and the installation account identity `installation_account_type` / `installation_account_login` / `installation_account_id`. Note the column split: the Stripe webhook keys on `user_id`, the agent system keys on `auth_user_id`; both hold a Supabase auth UUID.
-- `agent_connections` — GitHub + PostHog credentials per subscription (PostHog key encrypted at rest); also `verification_code_id` + `verified_at` for the Telegram binding.
+- `agent_connections` — GitHub + PostHog credentials per subscription (PostHog key encrypted at rest); `posthog_project_id` (the shared project id), `posthog_host_filter` (the customer's domain — the `$host` partition key, set on first run), `posthog_snippet_token`; also `verification_code_id` + `verified_at` for the Telegram binding.
 - `agent_runs` — one row per agent run; status lifecycle (`running` → `waiting_approval` → `deployed` / `rejected` / `rolled_back`, plus honest skip statuses).
 - `agent_learnings` — per-run outcome records used to guide future analysis.
 - `agent_business_dna` — persistent outcome log (`pending` → `success` after 7d, or `rollback`).
@@ -142,6 +142,12 @@ ES modules (`"type": "module"`). Database access is `@supabase/supabase-js` with
 
 PostHog is loaded inline in `index.html` (US host). Server-side, the agent reads PostHog via the project API for its `midweek` / `weekly_summary` / `rollback_check` analytics.
 
+**Shared-project architecture (single PostHog project for all customers).** Velyr does **not** create a per-customer PostHog project — the PostHog Free plan caps an org at one project, so the old per-customer `POST /api/organizations/{ORG_ID}/projects/` provisioning always failed with "maximum limit of allowed projects". Instead there is **one shared project** (`POSTHOG_PROJECT_ID`, currently `412701`), and every customer's site emits to it using the shared public write token (`POSTHOG_PROJECT_TOKEN`, the same `phc_…` token `index.html` uses). The **partition key is the customer's domain**, carried on each event as `properties.$host`:
+
+- **Setup (first run):** `setupPostHogForConnection` (in `supabase/functions/agent-run/index.ts`) is now a no-op DB write + Telegram message. It derives the hostname from `agent_connections.website_url`, stores it in `agent_connections.posthog_host_filter`, stamps the shared id into `posthog_project_id` (for clarity only), and Telegrams the customer a paste-once snippet. The snippet calls `posthog.register({ $host: '<domain>' })` so events are tagged with the partition key on emission (not relying on auto-capture). It is gated on `posthog_host_filter` being null, so it runs exactly once per connection.
+- **Reads:** every PostHog query filters by `properties.$host = '<domain>'`. This lives in **format-locked twins**: `getPostHogAnalytics` in both `supabase/functions/agent-run/index.ts` and `api/agent/run.js`, plus the before/after bounce comparison in `handleRollbackCheck` (`api/agent/run.js`). Without the filter these read the whole shared project (including velyr.io's own pageviews) and mis-attribute it. If `posthog_host_filter` is null/empty the queries are **skipped** (warn + null metrics) and the run continues with funnel discovery only.
+- `POSTHOG_ORG_ID` is **no longer read at runtime** (per-customer project creation is gone). It can be removed from Supabase secrets.
+
 ## Environment Variables
 
 See `.env.example`. Note the **inconsistent prefixes** — Supabase uses `NEXT_PUBLIC_*` (legacy from a Next.js scaffold) even though this is Vite, so the frontend reads `import.meta.env.NEXT_PUBLIC_SUPABASE_URL`.
@@ -156,4 +162,4 @@ Required:
 - `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` / `STRIPE_PRICE_GROWTH` (€29/mo subscription)
 - `AGENT_TOKEN_ENCRYPTION_KEY` (AES-256, 64 hex), `AGENT_APPROVAL_TOKEN_SECRET` (HMAC, 32 hex), `AGENT_CRON_SECRET` (32 hex)
 - `SCREENSHOTONE_API_KEY` — screenshot capture for rollback comparison (optional; rollback skips screenshots if absent)
-- `POSTHOG_API_KEY` / `POSTHOG_PROJECT_ID` / `POSTHOG_HOST` — server-side analytics used by the agent's midweek/weekly/rollback modes (falls back to these if not set per-subscription in `agent_connections`)
+- `POSTHOG_API_KEY` / `POSTHOG_PROJECT_ID` / `POSTHOG_HOST` — server-side analytics used by the agent's midweek/weekly/rollback modes (falls back to these if not set per-subscription in `agent_connections`). `POSTHOG_PROJECT_ID` is the **shared** project (all customers); reads are partitioned by `$host`. `POSTHOG_PROJECT_TOKEN` (optional) is the shared public write token handed to customers in the analytics snippet — defaults to the `phc_…` token in `index.html` if unset. `POSTHOG_ORG_ID` is **no longer used** (per-customer project creation was removed).

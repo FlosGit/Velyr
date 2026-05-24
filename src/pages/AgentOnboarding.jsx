@@ -544,14 +544,14 @@ function Step3({ onNext, onBack }) {
         Analytics — zero setup
       </h2>
       <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
-        Velyr automatically sets up analytics tracking for your site. No PostHog account needed.
-        After onboarding, you'll receive a small code snippet to add once — or we can auto-add it via PR.
+        Velyr handles analytics tracking for your site — you don't need your own PostHog account.
+        Your visitor data is processed by Velyr's analytics infrastructure.
       </p>
 
       <div style={{ background: 'rgba(42,92,69,0.06)', border: '1px solid rgba(42,92,69,0.2)', borderRadius: 12, padding: '16px 18px', marginBottom: 20 }}>
         <p style={{ fontSize: 13, fontWeight: 500, color: C.text, marginBottom: 6 }}>✅ What Velyr sets up for you:</p>
         <ul style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.9, paddingLeft: 16 }}>
-          <li>A dedicated analytics project for your site</li>
+          <li>Built-in analytics — pageviews, bounce rate, traffic sources</li>
           <li>Pageview tracking, bounce rate, traffic sources</li>
           <li>Weekly data fed directly into the Growth Agent</li>
         </ul>
@@ -559,8 +559,7 @@ function Step3({ onNext, onBack }) {
 
       <div style={{ background: 'rgba(28,25,23,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', marginBottom: 24 }}>
         <p style={{ fontSize: 12, color: C.textLight, fontWeight: 300, lineHeight: 1.7 }}>
-          After setup, you'll get a one-line snippet to paste in your <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>index.html</code> or <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>main.jsx</code>.
-          Alternatively the agent can open a PR and add it for you automatically.
+          After your first run, you'll receive a snippet via Telegram to paste into your app's entry file (<code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>main.jsx</code>, <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>_app.jsx</code>, or <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>app/layout.tsx</code>).
         </p>
       </div>
 

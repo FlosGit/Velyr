@@ -578,6 +578,18 @@ async function handleRollbackCheck(res) {
       const host      = conn?.posthog_host       || process.env.POSTHOG_HOST || 'https://us.i.posthog.com'
       if (!apiKey || !projectId) continue
 
+      // Shared-project architecture: scope the before/after bounce comparison to
+      // THIS customer's domain via properties.$host, or the rollback check reads
+      // the whole shared project (incl. velyr.io) and fabricates a bounce delta.
+      // No host → we can't measure this customer's bounce rate, so skip the
+      // rollback decision rather than act on the wrong site's data.
+      const hostFilter = conn?.posthog_host_filter
+      if (!hostFilter) {
+        console.warn(`[rollback_check] run=${run.id} sub=${run.subscription_id}: no posthog_host_filter — skipping bounce comparison`)
+        continue
+      }
+      const hostWhere     = [`properties.$host = '${String(hostFilter).replace(/'/g, "''")}'`]
+
       const deployedAt    = new Date(run.completed_at)
       const twoDaysBefore = new Date(deployedAt - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       const deployedDate  = deployedAt.toISOString().split('T')[0]
@@ -587,11 +599,11 @@ async function handleRollbackCheck(res) {
       const [beforeRes, afterRes] = await Promise.all([
         fetch(`${host}/api/projects/${projectId}/query/`, {
           method: 'POST', headers,
-          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'count()'], event: '$pageview', after: twoDaysBefore, before: deployedDate, limit: 2000 } }),
+          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'count()'], event: '$pageview', after: twoDaysBefore, before: deployedDate, limit: 2000, where: hostWhere } }),
         }),
         fetch(`${host}/api/projects/${projectId}/query/`, {
           method: 'POST', headers,
-          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'count()'], event: '$pageview', after: deployedDate, before: twoDaysAfter, limit: 2000 } }),
+          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'count()'], event: '$pageview', after: deployedDate, before: twoDaysAfter, limit: 2000, where: hostWhere } }),
         }),
       ])
       const [before, after] = await Promise.all([beforeRes.json(), afterRes.json()])
@@ -818,7 +830,8 @@ async function handleWeeklySummary(res) {
         getPostHogAnalytics(
           decryptSecret(conn.posthog_api_key)    || process.env.POSTHOG_API_KEY,
           conn.posthog_project_id || process.env.POSTHOG_PROJECT_ID,
-          conn.posthog_host       || process.env.POSTHOG_HOST
+          conn.posthog_host       || process.env.POSTHOG_HOST,
+          conn.posthog_host_filter
         ),
         supabase.from('agent_runs').select('*').eq('subscription_id', subscriptionId).gte('created_at', oneWeekAgo).order('created_at', { ascending: false }),
         supabase.from('agent_ab_tests').select('*').eq('subscription_id', subscriptionId).eq('status', 'completed').gte('created_at', oneWeekAgo),
@@ -937,7 +950,8 @@ async function handleMidweek(res) {
     const analytics = await getPostHogAnalytics(
       decryptSecret(conn.posthog_api_key)    || process.env.POSTHOG_API_KEY,
       conn.posthog_project_id || process.env.POSTHOG_PROJECT_ID,
-      conn.posthog_host       || process.env.POSTHOG_HOST
+      conn.posthog_host       || process.env.POSTHOG_HOST,
+      conn.posthog_host_filter
     )
 
     const { data: sub } = await supabase
@@ -992,14 +1006,26 @@ ${pagesLines ? `*Most visited:*\n${pagesLines}` : ''}
 }
 
 // ─── POSTHOG ANALYTICS (needed by weekly_summary + midweek) ──────────────────
-async function getPostHogAnalytics(posthogApiKey, posthogProjectId, posthogHost = 'https://us.i.posthog.com') {
+// Shared-project architecture: all customers emit to Velyr's single PostHog
+// project, partitioned by the customer's domain on properties.$host. Every
+// query MUST filter by that host or it reads ALL sites' data (incl. velyr.io's
+// own pageviews) and mis-attributes it. `hostFilter` is
+// agent_connections.posthog_host_filter; if null/empty we skip the queries and
+// return null. Keep this $host logic in sync with the twin in
+// supabase/functions/agent-run/index.ts (getPostHogAnalytics).
+async function getPostHogAnalytics(posthogApiKey, posthogProjectId, posthogHost = 'https://us.i.posthog.com', hostFilter = null) {
+  if (!hostFilter) {
+    console.warn('PostHog analytics skipped: no posthog_host_filter (domain) for this connection')
+    return null
+  }
   try {
     const headers       = { 'Authorization': `Bearer ${posthogApiKey}`, 'Content-Type': 'application/json' }
     const sevenDaysAgo  = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     const today         = new Date().toISOString().split('T')[0]
+    const hostWhere     = [`properties.$host = '${String(hostFilter).replace(/'/g, "''")}'`]
 
-    const query = (body) => fetch(`${posthogHost}/api/projects/${posthogProjectId}/query/`, { method: 'POST', headers, body: JSON.stringify({ query: body }) })
+    const query = (body) => fetch(`${posthogHost}/api/projects/${posthogProjectId}/query/`, { method: 'POST', headers, body: JSON.stringify({ query: { ...body, where: hostWhere } }) })
 
     const [pageviewsRes, sessionsRes, lastWeekRes, referrersRes, utmRes, deviceRes] = await Promise.all([
       query({ kind: 'EventsQuery', select: ['properties.$pathname', 'count()'], event: '$pageview', after: sevenDaysAgo,    before: today, limit: 10,   orderBy: ['count() DESC'] }),
