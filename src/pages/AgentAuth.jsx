@@ -135,7 +135,7 @@ export default function AgentAuth({ navigate, mode = 'login' }) {
       // Resume a pending Stripe checkout — check localStorage first (survives
       // tab restarts), then sessionStorage as a fallback.
       const pending = readPendingIntent()
-      if (pending === 'full_scan' || pending === 'subscription') {
+      if (pending === 'subscription') {
         clearPendingIntent()
         const result = await startCheckout(pending, data?.user?.id, data?.user?.email)
         if (result?.redirected) return

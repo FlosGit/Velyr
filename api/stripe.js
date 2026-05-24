@@ -29,9 +29,15 @@ async function handleCheckout(req, res) {
       mode: 'subscription',
       line_items: [{ price: process.env.STRIPE_PRICE_GROWTH, quantity: 1 }],
       allow_promotion_codes: true,
-      // Paid subscribers go straight to onboarding so they can connect GitHub
-      // and Telegram. The onboarding mount gate will accept them once the
-      // webhook has flipped subscription_status to 'active'.
+      // 14-day free trial. payment_method_collection:'always' forces the card to
+      // be captured at signup (no trial-without-card), so the trial converts to
+      // a paid subscription automatically at trial end with no extra step.
+      subscription_data: { trial_period_days: 14 },
+      payment_method_collection: 'always',
+      // Subscribers (incl. those in trial) go straight to onboarding so they can
+      // connect GitHub and Telegram. The onboarding mount gate accepts them once
+      // the webhook has written the row (status 'active', subscription_status
+      // 'active' or 'trialing').
       success_url: `${APP_URL}/agent/onboarding?checkout=success&session_id={CHECKOUT_SESSION_ID}&type=subscription`,
       cancel_url:  `${APP_URL}/agent/dashboard?checkout=cancelled`,
       client_reference_id: userId,
@@ -95,6 +101,9 @@ async function handleVerifySession(req, res) {
       return res.status(400).json({ error: 'unsupported session type' })
     }
 
+    // For a 14-day trial, the Checkout session completes with payment_status
+    // 'no_payment_required' (card captured, nothing charged yet). Consumers
+    // treat both 'paid' and 'no_payment_required' as a valid started subscription.
     return res.status(200).json({
       type,
       paymentStatus: session.payment_status,

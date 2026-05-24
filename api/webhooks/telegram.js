@@ -724,7 +724,7 @@ export default async function handler(req, res) {
         `<b>reject &lt;run-id&gt;</b> — skip a specific run (power users)\n` +
         `<b>note &lt;run-id&gt; &lt;reason&gt;</b> — add a manual learning\n` +
         `<b>dna</b> — view your Business DNA\n` +
-        `<b>status</b> — last runs, A/B tests &amp; competitors\n` +
+        `<b>status</b> — last runs &amp; tracked competitors\n` +
         `<b>competitor add &lt;url&gt;</b> — track a competitor site\n` +
         `<b>competitor remove &lt;url&gt;</b> — stop tracking`
       )

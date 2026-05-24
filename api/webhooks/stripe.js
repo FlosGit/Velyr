@@ -14,13 +14,37 @@ export const config = { api: { bodyParser: false } }
 
 const STATE_MAP = {
   active:             'active',
-  trialing:           'active',
+  // 'trialing' is a first-class status as of the 14-day-trial stage (no longer
+  // collapsed into 'active'). The cron run-eligibility queries accept both
+  // 'active' and 'trialing', so trial customers get full feature access while
+  // the dashboard can still surface a distinct trial banner.
+  trialing:           'trialing',
   past_due:           'past_due',
   unpaid:             'past_due',
   canceled:           'cancelled',
   incomplete:         'incomplete',
   incomplete_expired: 'cancelled',
   paused:             'paused',
+}
+
+function trialEndIso(sub) {
+  return sub?.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null
+}
+
+// Minimal Telegram send for webhook-driven alerts (e.g. trial_will_end). The
+// full bot lives in api/webhooks/telegram.js; here we only need a one-shot
+// HTML message, so we hit the Bot API directly. Best-effort — never throws.
+async function sendTelegram(chatId, text) {
+  if (!chatId || !process.env.TELEGRAM_BOT_TOKEN) return
+  try {
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    })
+  } catch (err) {
+    console.warn('[webhook] sendTelegram failed:', err?.message || String(err))
+  }
 }
 
 async function getRawBody(req) {
@@ -106,11 +130,17 @@ export default async function handler(req, res) {
               auth_user_id: userId,
               email: session.customer_email || session.customer_details?.email,
               plan: 'growth',
+              // `status` is the agent lifecycle column (the onboarding gate reads
+              // it); a started subscription — trial or paid — is 'active' here.
               status: 'active',
               stripe_customer_id: customerId,
               subscription_id: subscription.id,
-              subscription_status: 'active',
+              // `subscription_status` carries the true Stripe state, so a trial
+              // checkout lands as 'trialing' (→ trial banner) while still being
+              // run-eligible.
+              subscription_status: STATE_MAP[subscription.status] ?? subscription.status,
               current_period_end: periodEndIso(subscription),
+              trial_end: trialEndIso(subscription),
               cancel_at_period_end: subscription.cancel_at_period_end === true,
             }
             console.log('[webhook/checkout] subscription upsert payload:', payload)
@@ -138,6 +168,7 @@ export default async function handler(req, res) {
           subscription_status:  STATE_MAP[s.status] ?? s.status,
           subscription_id:      s.id,
           current_period_end:   periodEndIso(s),
+          trial_end:            trialEndIso(s),
           cancel_at_period_end: s.cancel_at_period_end === true,
         }).eq('stripe_customer_id', s.customer)
         break
@@ -145,15 +176,38 @@ export default async function handler(req, res) {
 
       case 'customer.subscription.updated': {
         const s = event.data.object
+        // Handles trial→active transition: when Stripe ends the trial and the
+        // first invoice is paid, s.status flips to 'active' and STATE_MAP carries
+        // it through, clearing the trial banner.
         await supabase.from('agent_subscriptions').update({
           subscription_status:  STATE_MAP[s.status] ?? s.status,
           subscription_id:      s.id,
           current_period_end:   periodEndIso(s),
+          trial_end:            trialEndIso(s),
           cancel_at_period_end: s.cancel_at_period_end === true,
           canceled_at:          s.canceled_at
             ? new Date(s.canceled_at * 1000).toISOString()
             : null,
         }).eq('stripe_customer_id', s.customer)
+        break
+      }
+
+      case 'customer.subscription.trial_will_end': {
+        // Fires ~3 days before trial_end. Nudge the customer on Telegram.
+        const s = event.data.object
+        const { data: sub } = await supabase
+          .from('agent_subscriptions')
+          .select('telegram_chat_id')
+          .eq('stripe_customer_id', s.customer)
+          .single()
+        if (sub?.telegram_chat_id) {
+          await sendTelegram(
+            sub.telegram_chat_id,
+            '⏳ <b>Your Velyr trial ends in 3 days.</b>\n\n' +
+            "You'll be automatically charged €29 and your Growth Agent keeps running — no action needed.\n\n" +
+            'Want to stop? Cancel anytime before the trial ends from your dashboard and you won\'t be charged.'
+          )
+        }
         break
       }
 

@@ -87,10 +87,11 @@ export default function AGB({ navigate }) {
           <div style={block}>
             <h2>§ 3 — Prices & Payment</h2>
             <ul>
-              <li>Die angegebenen Preise sind Endpreise. Gemäß § 19 UStG erheben wir keine Umsatzsteuer und weisen diese folglich auch nicht aus.</li>
+              <li>All prices are final. As a small business under § 19 UStG (German VAT exemption), we don't charge VAT and therefore do not show it separately.</li>
               <li>The <strong style={{ fontWeight: 500 }}>Growth Agent</strong> costs €29 per month, billed monthly in advance via Stripe. The subscription renews automatically each month until cancelled.</li>
+              <li><strong style={{ fontWeight: 500 }}>Free trial:</strong> New subscribers receive a 14-day free trial. A valid payment method is required at signup. The trial ends automatically and the subscription continues at €29/month unless cancelled before the trial ends. Cancellation during the trial: no charge. Cancellation after trial start: the subscription ends at the end of the current billing period.</li>
               <li>All payments are processed by Stripe Payments Europe, Ltd. Velyr never stores your card details.</li>
-              <li>In case of a failed payment for the Growth Agent, Stripe will retry according to its standard retry schedule. If payment cannot be collected, the subscription will be paused and you will be notified by email.</li>
+              <li>In case of a failed payment for the Growth Agent, Stripe will retry according to its standard retry schedule. If payment cannot be collected, the subscription will be paused and you will be notified via email and/or Telegram.</li>
             </ul>
           </div>
 
@@ -232,7 +233,7 @@ export default function AGB({ navigate }) {
             <h2>§ 9 — Intellectual Property</h2>
             <ul>
               <li>The Velyr platform, its design, and all content produced by Velyr (excluding your own website content and social media data) remain the intellectual property of Florian Rappold.</li>
-              <li>The Growth Agent analyses generated for you are licensed to you for personal and commercial use. You may share them freely.</li>
+              <li>The Pull Requests and recommendations generated for you are licensed to you for personal and commercial use. You may share them freely.</li>
               <li>You may not reverse-engineer, resell, or redistribute the Velyr platform or its outputs as your own product or service.</li>
             </ul>
           </div>
@@ -257,7 +258,7 @@ export default function AGB({ navigate }) {
           {/* § 11 */}
           <div style={block}>
             <h2>§ 11 — Changes to These Terms</h2>
-            <p>Velyr reserves the right to update these Terms at any time. For material changes, active subscribers will be notified by email at least 30 days in advance. Continued use of the service after the effective date constitutes acceptance of the updated Terms. If you do not agree with the changes, you may cancel your subscription before the effective date and receive a prorated refund for the remaining period.</p>
+            <p>Velyr reserves the right to update these Terms at any time. For material changes, active subscribers will be notified via email and/or Telegram at least 30 days in advance. Continued use of the service after the effective date constitutes acceptance of the updated Terms. If you do not agree with the changes, you may cancel your subscription before the effective date and receive a prorated refund for the remaining period.</p>
           </div>
 
           <hr style={{ border: 'none', borderTop: '1px solid rgba(28,25,23,0.09)', margin: '8px 0 36px' }} />

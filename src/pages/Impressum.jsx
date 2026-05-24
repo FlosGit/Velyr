@@ -147,7 +147,7 @@ export default function Impressum({ navigate }) {
 
           <div style={block}>
             <span style={label}>KI-generierte Inhalte</span>
-            <p>Die in den Berichten enthaltenen Analysen und Empfehlungen werden teilweise durch KI-Systeme (Anthropic Claude) generiert. Diese stellen automatisierte Auswertungen dar und ersetzen keine fachkundige Beratung. Velyr übernimmt keine Haftung für Entscheidungen, die auf Basis dieser Analysen getroffen werden.</p>
+            <p>Die vom Growth Agent generierten Analysen und Code-Vorschläge (Pull Requests) werden teilweise durch KI-Systeme (Anthropic Claude) erstellt. Diese stellen automatisierte Auswertungen dar und ersetzen keine fachkundige Beratung. Velyr übernimmt keine Haftung für Entscheidungen, die auf Basis dieser Analysen getroffen werden.</p>
           </div>
 
           <div style={block}>
@@ -167,11 +167,6 @@ export default function Impressum({ navigate }) {
           <div style={block}>
             <span style={label}>Verantwortlicher</span>
             <p>Verantwortlicher im Sinne der DSGVO ist Florian Rappold, Maikäferstraße 3f, 85551 Kirchheim bei München. Kontakt: <a href="mailto:info@velyr.io">info@velyr.io</a></p>
-          </div>
-
-          <div style={block}>
-            <span style={label}>Soziale Medien — öffentliche Daten</span>
-            <p>Velyr greift ausschließlich auf öffentlich zugängliche Daten sozialer Netzwerke zu (z. B. Follower-Zahlen, öffentliche Beiträge). Es werden keine privaten Konten analysiert und keine Zugangsdaten gespeichert. Die Verarbeitung dieser Daten erfolgt auf Grundlage von Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse).</p>
           </div>
 
           <div style={block}>

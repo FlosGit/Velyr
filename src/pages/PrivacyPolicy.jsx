@@ -106,7 +106,7 @@ export default function PrivacyPolicy({ navigate }) {
             <h2>What data we collect</h2>
             <p style={{ marginBottom: 12 }}>When you use Velyr, we may collect the following information:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Your email address</strong>, which we use to send Growth Agent notifications including weekly summaries and monthly reports.</li>
+              <li><strong style={{ fontWeight: 500 }}>Your email address</strong>, used for account authentication (login, password reset) and essential service/billing notices.</li>
               <li><strong style={{ fontWeight: 500 }}>Payment information</strong>, when you subscribe to the Growth Agent (€29/month). Payment data is processed exclusively by Stripe — we never see or store your card details.</li>
               <li><strong style={{ fontWeight: 500 }}>GitHub repository access</strong>, if you connect the Growth Agent. We access only the repositories you explicitly authorise, solely to read page code and open Pull Requests on your behalf.</li>
               <li><strong style={{ fontWeight: 500 }}>PostHog analytics data</strong>, if you connect the Growth Agent. We read your site's analytics (bounce rates, traffic sources, page views) solely to identify conversion improvements. We do not store this data beyond what is needed for each weekly run.</li>
@@ -134,10 +134,9 @@ export default function PrivacyPolicy({ navigate }) {
           <div style={block}>
             <h2>How we use your data</h2>
             <ul>
-              <li>To send you Growth Agent notifications (weekly summaries, monthly reports, and alerts about pull requests we open).</li>
+              <li>To operate your account and send essential service and billing notices. Weekly summaries, PR approvals, and rollback alerts are delivered via Telegram.</li>
               <li>To process your payment for the Growth Agent subscription via Stripe.</li>
               <li>To operate the Growth Agent: reading your GitHub repo and PostHog analytics weekly, writing code fixes, opening Pull Requests, and sending you Telegram notifications.</li>
-              <li>To notify you when new features become available, if you signed up for the waitlist.</li>
             </ul>
             <p style={{ marginTop: 12 }}>The legal basis for processing is your consent (Art. 6(1)(a) GDPR) where you have actively provided data, performance of a contract (Art. 6(1)(b) GDPR) for paid services, and our legitimate interest (Art. 6(1)(f) GDPR) for technical infrastructure data.</p>
           </div>
@@ -187,7 +186,6 @@ export default function PrivacyPolicy({ navigate }) {
               <li><strong style={{ fontWeight: 500 }}>Email addresses</strong> associated with Growth Agent subscriptions are kept for the duration of the active subscription plus 12 months for compliance purposes.</li>
               <li><strong style={{ fontWeight: 500 }}>Growth Agent account data</strong> (GitHub token, PostHog token, Telegram chat ID, Brand Guardrails) is stored for the duration of your active subscription and deleted within 30 days of cancellation.</li>
               <li><strong style={{ fontWeight: 500 }}>Payment records</strong> are retained for 10 years as required by German tax law (§ 147 AO). These records are held by Stripe.</li>
-              <li><strong style={{ fontWeight: 500 }}>Waitlist emails</strong> are stored until the feature launches or until you request removal.</li>
             </ul>
             <p style={{ marginTop: 12 }}>You can request deletion of your data at any time by contacting us at <a href="mailto:info@velyr.io">info@velyr.io</a>. Note that payment records required by law cannot be deleted early.</p>
           </div>
@@ -213,7 +211,7 @@ export default function PrivacyPolicy({ navigate }) {
 
           <div style={block}>
             <h2>Changes to this policy</h2>
-            <p>We will update the date at the top of this page when significant changes are made. For material changes, we will notify active Growth Agent subscribers by email.</p>
+            <p>We will update the date at the top of this page when significant changes are made. For material changes, we will notify active Growth Agent subscribers via email and/or Telegram.</p>
           </div>
         </div>
 

@@ -9,47 +9,35 @@ Disallow: /api/
 Disallow: /settings/
 Disallow: /onboarding/
 Disallow: /admin/
-Disallow: /report/
-Disallow: /premium/
 
 User-agent: GPTBot
 Allow: /
 Disallow: /agent/
 Disallow: /dashboard/
 Disallow: /api/
-Disallow: /report/
-Disallow: /premium/
 
 User-agent: ClaudeBot
 Allow: /
 Disallow: /agent/
 Disallow: /dashboard/
 Disallow: /api/
-Disallow: /report/
-Disallow: /premium/
 
 User-agent: PerplexityBot
 Allow: /
 Disallow: /agent/
 Disallow: /dashboard/
 Disallow: /api/
-Disallow: /report/
-Disallow: /premium/
 
 User-agent: Google-Extended
 Allow: /
 Disallow: /agent/
 Disallow: /dashboard/
 Disallow: /api/
-Disallow: /report/
-Disallow: /premium/
 
 User-agent: OAI-SearchBot
 Allow: /
 Disallow: /agent/
 Disallow: /dashboard/
 Disallow: /api/
-Disallow: /report/
-Disallow: /premium/
 
 Sitemap: https://www.velyr.io/sitemap.xml

@@ -60,7 +60,7 @@ const AGENT_STEPS = [
   { id:'screenshot',  label:'Taking before screenshot',desc:'Capturing the page before any changes' },
   { id:'write_fix',   label:'Writing fix',             desc:'Editing file and generating patch (or A/B variants)' },
   { id:'open_pr',     label:'Opening pull request',    desc:'Pushing branch and creating PR on GitHub' },
-  { id:'notify',      label:'Sending notification',    desc:'Telegram message + email — reply YES or NO' },
+  { id:'notify',      label:'Sending notification',    desc:'Telegram message — reply YES or NO' },
 ]
 
 const NAV_ITEMS = [
@@ -1507,6 +1507,7 @@ function StripeSubscriptionPanel({ navigate }) {
   const [subLoading, setSubLoading]       = useState(true)
   const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false)
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState(null)
+  const [trialEnd, setTrialEnd] = useState(null)
   // Pre-checkout consent modal (§312j BGB pre-purchase summary + recurring acknowledgment)
   const [subConfirmOpen, setSubConfirmOpen] = useState(false)
 
@@ -1530,13 +1531,14 @@ function StripeSubscriptionPanel({ navigate }) {
       if (!session?.user) { setSubLoading(false); return }
       const { data } = await supabase
         .from('agent_subscriptions')
-        .select('subscription_status, cancel_at_period_end, current_period_end')
+        .select('subscription_status, cancel_at_period_end, current_period_end, trial_end')
         .eq('user_id', session.user.id)
         .single()
       if (data) {
         setSubStatus(data.subscription_status)
         setCancelAtPeriodEnd(data.cancel_at_period_end === true)
         setCurrentPeriodEnd(data.current_period_end || null)
+        setTrialEnd(data.trial_end || null)
       }
       setSubLoading(false)
     }
@@ -1562,7 +1564,12 @@ function StripeSubscriptionPanel({ navigate }) {
   if (subLoading) return null
 
   const isActive = subStatus === 'active'
+  const isTrialing = subStatus === 'trialing'
   const isPastDue = subStatus === 'past_due'
+  const isCancelled = subStatus === 'cancelled' || subStatus === 'canceled'
+  const trialDaysLeft = trialEnd
+    ? Math.max(0, Math.ceil((new Date(trialEnd).getTime() - Date.now()) / 86400000))
+    : null
 
   return (
     <div style={{ padding:'18px 20px', borderBottom:`1px solid ${C.border}` }}>
@@ -1570,6 +1577,21 @@ function StripeSubscriptionPanel({ navigate }) {
       <p style={{ fontSize:11, color:C.textMuted, fontWeight:300, marginBottom:14 }}>Manage your Velyr plan and billing.</p>
 
       <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+        {isTrialing && (
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:C.accentSoft, border:`1px solid ${C.accentMid}`, borderRadius:9, padding:'10px 14px', flexWrap:'wrap', gap:10 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, display:'inline-block' }} />
+              <span style={{ fontSize:13, color:C.accent, fontWeight:500 }}>
+                Free trial{trialDaysLeft != null ? ` — ${trialDaysLeft} day${trialDaysLeft === 1 ? '' : 's'} left` : ''}
+                {cancelAtPeriodEnd ? ' · ends, won’t renew' : ' · then €29/mo'}
+              </span>
+            </div>
+            <button onClick={openPortal} disabled={portalLoading} className="btn" style={{ background:'transparent', border:`1px solid ${C.accent}`, color:C.accent, borderRadius:7, padding:'6px 13px', fontSize:12, fontFamily:'DM Sans,sans-serif', fontWeight:400 }}>
+              {portalLoading ? '…' : (cancelAtPeriodEnd ? 'Manage →' : 'Cancel trial')}
+            </button>
+          </div>
+        )}
+
         {isActive && (
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:C.accentSoft, border:`1px solid ${C.accentMid}`, borderRadius:9, padding:'10px 14px', flexWrap:'wrap', gap:10 }}>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -1612,7 +1634,7 @@ function StripeSubscriptionPanel({ navigate }) {
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:C.yellowSoft, border:`1px solid ${C.yellowMid}`, borderRadius:9, padding:'10px 14px', flexWrap:'wrap', gap:10 }}>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
               <span style={{ width:7, height:7, borderRadius:'50%', background:C.yellow, display:'inline-block' }} />
-              <span style={{ fontSize:13, color:C.yellow, fontWeight:500 }}>Payment past due — action required</span>
+              <span style={{ fontSize:13, color:C.yellow, fontWeight:500 }}>Payment failed — update your card to resume the agent</span>
             </div>
             <button onClick={openPortal} disabled={portalLoading} className="btn" style={{ background:'transparent', border:`1px solid ${C.yellow}`, color:C.yellow, borderRadius:7, padding:'6px 13px', fontSize:12, fontFamily:'DM Sans,sans-serif', fontWeight:400 }}>
               {portalLoading ? '…' : 'Update payment →'}
@@ -1620,12 +1642,22 @@ function StripeSubscriptionPanel({ navigate }) {
           </div>
         )}
 
-        {!isActive && !isPastDue && (
+        {isCancelled && (
+          <div style={{ background:'rgba(26,25,22,0.03)', border:`1px solid ${C.border}`, borderRadius:9, padding:'14px', textAlign:'center' }}>
+            <p style={{ fontSize:13, color:C.textMuted, fontWeight:500, marginBottom:4 }}>Subscription ended</p>
+            <p style={{ fontSize:12, color:C.textMuted, fontWeight:300, marginBottom:12 }}>Your agent is paused. Start a new subscription to resume weekly improvements.</p>
+            <button onClick={subscribeNow} disabled={subscribeLoading} className="btn" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, opacity: subscribeLoading ? 0.7 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer' }}>
+              {subscribeLoading ? 'Opening Stripe…' : 'Restart subscription →'}
+            </button>
+          </div>
+        )}
+
+        {!isActive && !isTrialing && !isPastDue && !isCancelled && (
           <div style={{ background:'rgba(26,25,22,0.03)', border:`1px solid ${C.border}`, borderRadius:9, padding:'14px', textAlign:'center' }}>
             <p style={{ fontSize:13, color:C.textMuted, fontWeight:300, marginBottom:12 }}>No active subscription. Unlock the Growth Agent to start getting weekly improvements.</p>
             <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
               <button onClick={subscribeNow} disabled={subscribeLoading} className="btn" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, opacity: subscribeLoading ? 0.7 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer' }}>
-                {subscribeLoading ? 'Opening Stripe…' : 'Subscribe — €29/mo →'}
+                {subscribeLoading ? 'Opening Stripe…' : 'Start free trial — €29/mo after →'}
               </button>
             </div>
           </div>
@@ -2018,7 +2050,8 @@ export default function AgentDashboard({ navigate }) {
         const json = await res.json()
         if (cancelled) return
         clearTimeout(timeoutId)
-        const paid = json.paymentStatus === 'paid' && json.type === 'subscription'
+        // 'no_payment_required' = trial checkout (card captured, nothing charged yet).
+        const paid = (json.paymentStatus === 'paid' || json.paymentStatus === 'no_payment_required') && json.type === 'subscription'
         setStripeVerified(paid)
         setVerifyDone(true)
         if (paid) {

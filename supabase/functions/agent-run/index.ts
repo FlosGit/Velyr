@@ -1866,7 +1866,7 @@ async function handleFullRun() {
   const { data: connections } = await supabase
     .from('agent_connections').select('*, agent_subscriptions!inner(*)')
     .eq('agent_subscriptions.status', 'active')
-    .eq('agent_subscriptions.subscription_status', 'active')
+    .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
 
   if (!connections || connections.length === 0) {
     return { success: true, message: 'No active connections' }

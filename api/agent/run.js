@@ -277,7 +277,7 @@ export default async function handler(req, res) {
         .from('agent_subscriptions')
         .update({ status: 'active' })
         .eq('auth_user_id', user.id)
-        .eq('subscription_status', 'active')
+        .in('subscription_status', ['active', 'trialing'])
       return res.json({ success: true, status: 'active' })
     }
 
@@ -845,7 +845,7 @@ async function handleWeeklySummary(res) {
   const { data: connections } = await supabase
     .from('agent_connections').select('*, agent_subscriptions!inner(*)')
     .eq('agent_subscriptions.status', 'active')
-    .eq('agent_subscriptions.subscription_status', 'active')
+    .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
 
   if (!connections || connections.length === 0) {
     return res.json({ success: true, message: 'No active connections' })
@@ -970,7 +970,7 @@ async function handleMidweek(res) {
   const { data: connections } = await supabase
     .from('agent_connections').select('*, agent_subscriptions!inner(*)')
     .eq('agent_subscriptions.status', 'active')
-    .eq('agent_subscriptions.subscription_status', 'active')
+    .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
 
   if (!connections || connections.length === 0) {
     return res.json({ success: true, message: 'No active connections' })

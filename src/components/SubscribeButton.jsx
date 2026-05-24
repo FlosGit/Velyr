@@ -4,7 +4,7 @@ import { startCheckout } from '../utils/startCheckout.js'
 import CheckoutConfirmModal from './CheckoutConfirmModal.jsx'
 
 const LABELS = {
-  subscription: 'Subscribe – €29/month',
+  subscription: 'Start free trial – €29/month after',
 }
 
 // Higher-level checkout entry point used by CTAs. Handles the guest case:
@@ -101,7 +101,7 @@ export default function SubscribeButton({ type, style = {}, className = '', navi
         {loading ? 'Redirecting…' : label}
       </button>
       <p style={{ fontSize: 11, color: '#a09890', fontWeight: 300, textAlign: 'center', marginTop: 6 }}>
-        * Endpreis gem. § 19 UStG — no VAT charged
+        * 14-day free trial. Cancel anytime, no charge during trial. Endpreis gem. § 19 UStG — no VAT charged.
       </p>
 
       <CheckoutConfirmModal

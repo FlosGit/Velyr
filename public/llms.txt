@@ -1,23 +1,27 @@
 # Velyr
 
-> Velyr is an AI-powered business audit tool for small and medium-sized businesses worldwide.
+Velyr is an AI growth agent that ships one weekly conversion fix as a GitHub Pull Request. Your code, your repo, your approval.
 
-## What Velyr does
-- Automated AI Business Scan: analyzes businesses for growth potential, weaknesses, and market opportunities
-- AI Growth Agent: semi-autonomous system that continuously identifies and prioritizes growth actions
-- Strategic recommendations in minutes, not weeks — no consultants needed
+## What it does
+- Analyzes your repo + PostHog analytics every Monday
+- Identifies the #1 conversion problem across your funnel
+- Writes the code fix and opens a Pull Request on your GitHub
+- Sends a Telegram message — reply YES to deploy, NO to skip
+- Auto-rolls-back if bounce rate spikes within 48h
 
-## Target audience
-Founders, SME owners, and operators globally — any business that wants professional-grade analysis without expensive consulting
+## Who it's for
+React, Next.js, or Vite sites on Vercel with a GitHub repo. Indie hackers, solo founders, small SaaS teams.
+
+## Not supported
+Shopify, Wix, Squarespace, Webflow — the agent edits source code and these site builders don't expose that.
 
 ## Pricing
-€29 per month, subscription, cancel anytime
+€29/month after a 14-day free trial. Cancel anytime.
 
 ## Key pages
-- Homepage: https://www.velyr.io
-- Pricing: https://www.velyr.io/pricing
-- FAQ: https://www.velyr.io/faq
-- Impressum: https://www.velyr.io/impressum
+- / — homepage and pricing
+- /faq — frequently asked questions
+- /privacy — privacy policy
 
 ## Contact
 info@velyr.io

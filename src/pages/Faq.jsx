@@ -21,24 +21,36 @@ const SHARED_CSS = `
 
 const FAQS = [
   {
-    q: 'What is an AI Growth Agent and how does it help my business grow?',
-    a: 'An AI Growth Agent is a semi-autonomous system that continuously analyzes your business data, prioritizes the single highest-impact change each week, and ships the fix on your behalf. Velyr\'s Growth Agent reads your live analytics every Monday, identifies your worst-performing area (bounce rate, low-converting page, weak headline, missing CTA), writes the code change, opens a GitHub Pull Request, and sends it to you on Telegram for one-tap approval. After deployment, it monitors impact for 48 hours and automatically rolls back if metrics drop. It is the difference between hiring a growth consultant once and having a tireless one working every week.'
+    q: 'What does Velyr do?',
+    a: 'Every Monday, Velyr analyzes your repo and your analytics, identifies the #1 conversion problem, writes the code fix, and opens a GitHub Pull Request. You approve via Telegram (YES/NO).'
   },
   {
-    q: 'How much does an AI Growth Agent cost compared to hiring a consultant?',
-    a: 'A traditional growth or marketing consultant typically charges €1,500–€8,000 per month, plus several weeks of onboarding before any output. Velyr\'s Growth Agent costs €29 per month for a fully autonomous service that ships improvements weekly — roughly 50–250x cheaper than a human consultant. Most SMEs recover the monthly cost from a single improved conversion.'
+    q: 'Do I have to approve every change?',
+    a: 'Yes. Nothing merges without your explicit YES reply. You see the exact code change in the PR before deciding.'
   },
   {
-    q: 'How do I use AI for my SME growth strategy?',
-    a: 'The most effective way to use AI for SME growth is to let it handle the work humans are slow at: continuous monitoring, benchmark comparison, and writing the actual fix. Velyr\'s Growth Agent watches your analytics weekly, proposes the single highest-leverage change, and waits for your approval before deploying. Keep your role at the strategic level (saying yes or no) while AI handles diagnosis, prioritization, and implementation.'
+    q: 'What happens if a change makes things worse?',
+    a: 'Velyr checks your bounce rate 48 hours after each merged fix. If site-wide bounce rate jumps +15pp or more, the agent automatically opens a revert PR.'
   },
   {
-    q: 'Why use an AI growth agent instead of a traditional business consultant?',
-    a: 'An AI growth agent operates 24/7 at a fraction of the cost, ships actual code changes rather than recommendations, and learns from every deployment. A traditional consultant produces a strategy document; Velyr\'s Growth Agent reads your real analytics, writes the fix, opens a Pull Request, deploys after your approval, and rolls back automatically if the change hurts your bounce rate. There is no kickoff call, no retainer, no Slack channel — just a Telegram message every Monday with the next move. For founders and SME operators who value speed and measurable outcomes, this is a structurally better trade-off.'
+    q: 'What are Brand Guardrails?',
+    a: 'Your written rules about what the agent shouldn\'t change — specific copy, design elements, claims. Suggestions that violate them are rejected before reaching you.'
   },
   {
-    q: 'What does a fully automated business intelligence tool do for small businesses?',
-    a: 'A fully automated business intelligence tool turns the data small businesses already generate — analytics, conversion behavior — into a prioritized action list without anyone having to build dashboards or run reports. Velyr\'s Growth Agent reads your analytics each week, identifies your weakest link, writes the fix, and ships it after your approval. For a small team without a dedicated analyst, this is the difference between guessing where to invest time and knowing. Weekly summaries delivered to Telegram keep you informed without logging into another dashboard.'
+    q: 'Does it analyze my whole funnel or just the homepage?',
+    a: 'Your whole funnel. Velyr maps every page in your repo, cross-references with PostHog analytics to find where users actually drop off, and prioritizes the highest-impact fix.'
+  },
+  {
+    q: 'Is there a free trial?',
+    a: 'Yes — 14 days, all features included, credit card required to start. Cancel anytime during the trial and you\'re not charged.'
+  },
+  {
+    q: 'What happens when the trial ends?',
+    a: 'You\'re automatically charged €29 and your subscription continues monthly. If payment fails (expired card, etc.), the agent pauses and you have 7 days to update payment before the subscription cancels.'
+  },
+  {
+    q: 'Which sites are supported?',
+    a: 'React, Next.js, or Vite projects deployed on Vercel with a GitHub repo. Not supported: Shopify, Wix, Squarespace, Webflow.'
   },
 ]
 
@@ -135,10 +147,7 @@ export default function Faq({ navigate }) {
         <div className="faq-page-pad" style={{ maxWidth: 760, margin: '0 auto', padding: '72px 24px 96px' }}>
           <p style={{ fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: '#2a5c45', marginBottom: 16, fontWeight: 400 }}>Help</p>
           <h1 style={{ marginBottom: 16 }}>Frequently Asked Questions</h1>
-          {/* "AI business audits" here is generic SEO/positioning copy for the
-              Growth Agent's weekly analysis — NOT the removed free-scan/€9-report
-              product (S0a). Kept intentionally; reviewed in the cleanup bundle. */}
-          <p style={{ marginBottom: 56, color: '#a09890', fontSize: 15 }}>Common questions about AI business audits, the Velyr Growth Agent, and how automated business intelligence compares to traditional consulting.</p>
+          <p style={{ marginBottom: 56, color: '#a09890', fontSize: 15 }}>Common questions about the Velyr Growth Agent — how it ships weekly conversion fixes as GitHub Pull Requests, the approval and rollback model, and the 14-day free trial.</p>
 
           {FAQS.map((f, i) => (
             <div key={i} style={{ marginBottom: 40, paddingBottom: 40, borderBottom: i < FAQS.length - 1 ? '1px solid rgba(28,25,23,0.08)' : 'none' }}>

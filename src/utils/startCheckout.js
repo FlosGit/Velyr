@@ -4,8 +4,8 @@
 // the browser to the Checkout session URL. Returns { redirected, error }.
 //
 // Callers are responsible for resolving any Supabase session and passing
-// userId/userEmail. Pass nulls for a guest checkout (server allows this for
-// full_scan; subscription always requires a userId).
+// userId/userEmail. The subscription checkout always requires an authenticated
+// user (userId); the server rejects the call without one.
 export async function startCheckout(type, userId = null, userEmail = null) {
   try {
     const body = { type }

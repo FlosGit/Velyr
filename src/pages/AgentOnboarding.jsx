@@ -166,7 +166,7 @@ function Step0({ onNext }) {
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Before we start</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 1 of 5</p>
       <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Requirements check
       </h2>
@@ -253,7 +253,7 @@ function Step1({ onNext, onBack, navigate }) {
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 1 of 4</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 5</p>
       <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Your website
       </h2>
@@ -417,7 +417,7 @@ function Step2({ onNext, onBack, user, subscriptionId, formData }) {
 
   const heading = (
     <>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 4</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 3 of 5</p>
       <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect GitHub
       </h2>
@@ -539,7 +539,7 @@ function Step2({ onNext, onBack, user, subscriptionId, formData }) {
 function Step3({ onNext, onBack }) {
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 3 of 4</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 4 of 5</p>
       <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Analytics — zero setup
       </h2>
@@ -650,7 +650,7 @@ function Step4({ onNext, onBack, loading }) {
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 4 of 4</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 5 of 5</p>
       <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect Telegram
       </h2>
@@ -808,7 +808,8 @@ export default function AgentOnboarding({ navigate }) {
         )
         const json = await res.json()
         if (cancelled) return
-        const paid = json.paymentStatus === 'paid' && json.type === 'subscription'
+        // 'no_payment_required' = trial checkout (card captured, nothing charged yet).
+        const paid = (json.paymentStatus === 'paid' || json.paymentStatus === 'no_payment_required') && json.type === 'subscription'
         stripeResult = paid
         if (paid) passGate()
         else maybeBounceToStripe()
@@ -893,7 +894,8 @@ export default function AgentOnboarding({ navigate }) {
           )
           const json = await res.json()
           console.log('[onboarding/step4] verify_session response:', json)
-          return json.paymentStatus === 'paid' && json.type === 'subscription'
+          // 'no_payment_required' = trial checkout (card captured, nothing charged yet).
+          return (json.paymentStatus === 'paid' || json.paymentStatus === 'no_payment_required') && json.type === 'subscription'
         } catch (err) {
           console.log('[onboarding/step4] verify_session error:', err)
           return false
