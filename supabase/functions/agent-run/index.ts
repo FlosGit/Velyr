@@ -2134,6 +2134,37 @@ async function processConnection(conn: any) {
       return
     }
 
+    // ── Site network snapshot (best-effort) ──────────────────────────────────
+    // Written after RA3 so rankings are included, and after the sparse-graph
+    // gate so we never persist a graph too thin to be meaningful.
+    // unique(run_id) on the table makes this idempotent: a retry hits the
+    // unique violation, caught here and logged — never reaches the run return.
+    try {
+      const rankedByPath = new Map(
+        rankerResult.ranked.map((r, i) => [r.path, { rank: i + 1, reason: r.reason }] as const)
+      )
+      const networkNodes = graph.nodes.map(n => ({
+        id:            n.path,
+        componentName: n.componentName,
+        depth:         n.depth,
+        size:          n.size,
+        rank:          rankedByPath.get(n.path)?.rank   ?? null,
+        rankReason:    rankedByPath.get(n.path)?.reason ?? null,
+      }))
+      const networkEdges = graph.edges.map(e => ({ source: e.from, target: e.to }))
+      const { error: snErr } = await supabase.from('agent_site_network').insert({
+        subscription_id: conn.subscription_id,
+        run_id:          run.id,
+        framework:       mapResult.framework,
+        nodes:           networkNodes ?? [],
+        edges:           networkEdges ?? [],
+      })
+      if (snErr) slog('warn', 'site_network_write_failed', { runId: run.id, error: snErr.message })
+    } catch (snEx) {
+      slog('warn', 'site_network_write_exception', { runId: run.id, error: String(snEx) })
+    }
+    // ── End site network snapshot ─────────────────────────────────────────────
+
     // Stage RA4: deep-read the ranked components (+ supporting files) within a
     // byte budget. rankerResult + mapResult.repoTree are threaded in explicitly
     // (one getBlob per file). Consumed by RA5's Pass-2 prompt (callAIForFix) and
