@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js'
 import { demoData } from '../data/demoData'
 import { startCheckout } from '../utils/startCheckout.js'
 import CheckoutConfirmModal from '../components/CheckoutConfirmModal.jsx'
+import { SiteNetwork } from '../components/SiteNetwork.jsx'
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const C = {
@@ -67,6 +68,7 @@ const NAV_ITEMS = [
   { id:'overview',    label:'Overview',    icon:'⊙' },
   { id:'runs',        label:'Runs',        icon:'↻' },
   { id:'insights',    label:'Insights',    icon:'◈' },
+  { id:'network',     label:'Network',     icon:'◎' },
   { id:'funnel',      label:'Funnel',      icon:'⬦' },
   { id:'dna',         label:'DNA',         icon:'◉' },
   { id:'guardrails',  label:'Guardrails',  icon:'◻' },
@@ -1258,6 +1260,118 @@ function FunnelPage({funnelPages, loading}) {
   )
 }
 
+// ─── NETWORK PAGE ─────────────────────────────────────────────────────────────
+function NetworkPage({ runs, siteNetwork, websiteUrl }) {
+  const activeRun = runs.find(r => r.status === 'running') || null
+  const isRunning = !!activeRun
+  const lastRun   = runs[0] || null
+
+  // Status line
+  let statusText, statusColor
+  if (isRunning) {
+    const stepId    = activeRun.current_step && CURRENT_STEP_TO_ID[activeRun.current_step]
+    const stepLabel = stepId
+      ? (AGENT_STEPS.find(s => s.id === stepId)?.label || activeRun.current_step)
+      : 'Running'
+    statusText  = `Running now · ${stepLabel.toLowerCase()}`
+    statusColor = C.blue
+  } else if (lastRun) {
+    const next = nextMonday9am()
+    const nextLabel = next.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+    statusText  = `Last run ${fmt(lastRun.created_at)} · next Mon ${nextLabel}`
+    statusColor = C.textLight
+  } else {
+    statusText  = 'No runs yet'
+    statusColor = C.textLight
+  }
+
+  // Derive hostname for hub label
+  const domain = (() => {
+    try { return new URL(websiteUrl || '').hostname.replace(/^www\./, '') } catch { return null }
+  })()
+
+  // Transform raw DB row → SiteNetworkData.
+  // Status enrichment (fix-in-flight, optimized) is deferred to Stage 4.5
+  // when agent_site_network is populated; all nodes start neutral / tracked.
+  const networkData = siteNetwork?.nodes?.length > 0 ? {
+    meta: {
+      subscriptionId: siteNetwork.subscription_id,
+      runId:          siteNetwork.run_id,
+      snapshotAt:     siteNetwork.captured_at,
+      framework:      siteNetwork.framework || 'unknown',
+      domain:         domain || 'your site',
+      totalNodes:     siteNetwork.nodes.length,
+      totalEdges:     (siteNetwork.edges || []).length,
+    },
+    nodes: siteNetwork.nodes.map(n => ({
+      ...n,
+      status:       ['legal', 'utility'].includes(n.cluster) ? 'tracked' : 'neutral',
+      statusSource: null,
+    })),
+    edges: siteNetwork.edges || [],
+  } : null
+
+  return (
+    <div>
+      {/* Status bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+        {isRunning && (
+          <span className="pulse-dot" style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: C.blue, display: 'inline-block', flexShrink: 0,
+          }} />
+        )}
+        <span style={{ fontSize: 11, color: statusColor, fontWeight: isRunning ? 500 : 400 }}>
+          {statusText}
+        </span>
+      </div>
+
+      {/* Graph card */}
+      <div style={{
+        background: C.bgCard, borderRadius: 12,
+        border: `1px solid ${C.border}`, overflow: 'hidden',
+      }}>
+        {networkData ? (
+          <SiteNetwork
+            data={networkData}
+            onNodeClick={() => { /* stub — node drill-down wired in Stage 4+ */ }}
+            fonts={{
+              sans:  "'DM Sans', sans-serif",
+              serif: "'Instrument Serif', serif",
+              mono:  "'DM Mono', monospace",
+            }}
+            style={{ height: 'calc(100vh - 230px)', minHeight: 420 }}
+          />
+        ) : (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', padding: '64px 24px', textAlign: 'center',
+          }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%',
+              background: C.accentSoft, display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              marginBottom: 16, fontSize: 20, color: C.accent,
+            }}>◎</div>
+            <p style={{
+              fontFamily: 'Instrument Serif, serif', fontWeight: 400,
+              fontSize: 20, color: C.text, marginBottom: 8,
+            }}>
+              {isRunning ? 'Mapping your site…' : 'Your network graph appears here'}
+            </p>
+            <p style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7, maxWidth: 340 }}>
+              {isRunning
+                ? 'The agent is building an import graph of your repository. Check back in a few minutes.'
+                : "Your first network graph will appear after Monday's run. The agent maps every route, component, and relationship in your codebase."
+              }
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── GUARDRAILS PAGE ──────────────────────────────────────────────────────────
 function GuardrailsPage({subscriptionId}) {
   const [saving,setSaving]=useState(false), [saved,setSaved]=useState(false)
@@ -1966,6 +2080,8 @@ export default function AgentDashboard({ navigate }) {
   const [learnings,      setLearnings]      = useState([])
   const [impactMetrics,  setImpactMetrics]  = useState([])
   const [snippetDeclined, setSnippetDeclined] = useState(false)
+  const [siteNetwork,     setSiteNetwork]     = useState(null)   // agent_site_network latest row
+  const [websiteUrl,      setWebsiteUrl]      = useState(null)   // agent_connections.website_url
 
   // Demo mode: /agent?demo=true loads hardcoded data, bypasses Supabase.
   const isDemo = useMemo(
@@ -2121,13 +2237,15 @@ export default function AgentDashboard({ navigate }) {
     setSubscription(subs)
     if(!subs){setLoading(false);return}
 
-    const [runsRes, funnelRes, learningsRes, impactRes, connRes] = await Promise.all([
+    const [runsRes, funnelRes, learningsRes, impactRes, connRes, snRes] = await Promise.all([
       supabase.from('agent_runs').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
       supabase.from('agent_funnel_pages').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(30),
       supabase.from('agent_learnings').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
       // FIX #3: added .eq('subscription_id', subs.id) — previously fetched all users' metrics
       supabase.from('impact_metrics').select('*').eq('subscription_id',subs.id).order('measured_at',{ascending:false}).limit(20),
-      supabase.from('agent_connections').select('posthog_snippet_declined').eq('subscription_id',subs.id).maybeSingle(),
+      supabase.from('agent_connections').select('posthog_snippet_declined,website_url').eq('subscription_id',subs.id).maybeSingle(),
+      // agent_site_network may not exist yet (Stage 4.5 migration); error is silently ignored
+      supabase.from('agent_site_network').select('*').eq('subscription_id',subs.id).order('captured_at',{ascending:false}).limit(1).maybeSingle(),
     ])
 
     if(runsRes.data) setRuns(runsRes.data)
@@ -2138,6 +2256,13 @@ export default function AgentDashboard({ navigate }) {
     if(learningsRes.data) setLearnings(learningsRes.data)
     if(impactRes.data) setImpactMetrics(impactRes.data)
     setSnippetDeclined(connRes.data?.posthog_snippet_declined === true)
+    setWebsiteUrl(connRes.data?.website_url || null)
+    // 42P01 = relation does not exist (table absent until Stage 4.5 migration) — expected, stay silent.
+    // Any other error (RLS denial, permission issue) is surfaced so it doesn't silently eat real data.
+    if (snRes.error && snRes.error.code !== '42P01') {
+      console.warn('[fetchData] agent_site_network:', snRes.error.message)
+    }
+    setSiteNetwork(snRes.data || null)
     setLoading(false)
   }
 
@@ -2449,6 +2574,16 @@ export default function AgentDashboard({ navigate }) {
                 {activePage==='insights'&&(
                   <div className="fade-up">
                     <InsightsPage runs={runs} impactMetrics={impactMetrics} learnings={learnings} funnelPages={funnelPages}/>
+                  </div>
+                )}
+
+                {activePage==='network'&&(
+                  <div className="fade-up">
+                    <NetworkPage
+                      runs={runs}
+                      siteNetwork={siteNetwork}
+                      websiteUrl={websiteUrl}
+                    />
                   </div>
                 )}
 
