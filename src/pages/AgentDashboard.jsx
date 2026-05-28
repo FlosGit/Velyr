@@ -1965,6 +1965,7 @@ export default function AgentDashboard({ navigate }) {
   const [funnelPages,    setFunnelPages]    = useState([])
   const [learnings,      setLearnings]      = useState([])
   const [impactMetrics,  setImpactMetrics]  = useState([])
+  const [snippetDeclined, setSnippetDeclined] = useState(false)
 
   // Demo mode: /agent?demo=true loads hardcoded data, bypasses Supabase.
   const isDemo = useMemo(
@@ -2120,12 +2121,13 @@ export default function AgentDashboard({ navigate }) {
     setSubscription(subs)
     if(!subs){setLoading(false);return}
 
-    const [runsRes, funnelRes, learningsRes, impactRes] = await Promise.all([
+    const [runsRes, funnelRes, learningsRes, impactRes, connRes] = await Promise.all([
       supabase.from('agent_runs').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
       supabase.from('agent_funnel_pages').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(30),
       supabase.from('agent_learnings').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
       // FIX #3: added .eq('subscription_id', subs.id) — previously fetched all users' metrics
       supabase.from('impact_metrics').select('*').eq('subscription_id',subs.id).order('measured_at',{ascending:false}).limit(20),
+      supabase.from('agent_connections').select('posthog_snippet_declined').eq('subscription_id',subs.id).maybeSingle(),
     ])
 
     if(runsRes.data) setRuns(runsRes.data)
@@ -2135,6 +2137,7 @@ export default function AgentDashboard({ navigate }) {
     }
     if(learningsRes.data) setLearnings(learningsRes.data)
     if(impactRes.data) setImpactMetrics(impactRes.data)
+    setSnippetDeclined(connRes.data?.posthog_snippet_declined === true)
     setLoading(false)
   }
 
@@ -2184,6 +2187,15 @@ export default function AgentDashboard({ navigate }) {
       return { success: true }
     }
     return { error: data?.error || 'Save failed' }
+  }
+
+  async function handleReenableSnippet() {
+    const token = await getToken()
+    await fetch('/api/agent/run?action=reenable_snippet', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    })
+    setSnippetDeclined(false)
   }
 
   async function handleDeleteAccount() {
@@ -2390,6 +2402,23 @@ export default function AgentDashboard({ navigate }) {
 
             {subscription&&!loading&&(
               <>
+                {snippetDeclined&&!isDemo&&(
+                  <div style={{
+                    marginBottom:16,padding:'10px 16px',
+                    background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:8,
+                    display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,
+                  }}>
+                    <span style={{fontSize:12,color:C.yellow,lineHeight:1.4}}>
+                      ⚠️ Analytics tracking declined — fix recommendations will be less accurate without visitor data.
+                    </span>
+                    <button className="btn" onClick={handleReenableSnippet} style={{
+                      fontSize:11,padding:'5px 12px',borderRadius:6,flexShrink:0,
+                      background:C.yellow,color:'#fff',border:'none',fontFamily:'DM Sans,sans-serif',
+                    }}>
+                      Re-enable tracking →
+                    </button>
+                  </div>
+                )}
                 {activePage==='overview'&&(
                   <div className="fade-up" style={{marginBottom:20}}>
                     <SectionLabel style={{color:C.accent,marginBottom:6}}>Growth Agent Dashboard</SectionLabel>

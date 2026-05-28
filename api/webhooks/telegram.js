@@ -242,6 +242,13 @@ async function handleStart(message, startPayload) {
 // ─── FIND LATEST PENDING RUN FOR CHAT ────────────────────────────────────────
 // Used by the simple YES/NO flow — locates the most recent waiting_approval run
 // belonging to the subscription that owns this Telegram chat.
+//
+// INVARIANT: there is at most ONE waiting_approval run per subscription at any
+// time. The Setup-PR gate (maybeRunSnippetSetup in the Edge Function) returns
+// BEFORE createPR is ever reached, so a setup_posthog and a conversion_fix run
+// can never both be in waiting_approval simultaneously. The dedupe check inside
+// maybeRunSnippetSetup prevents double-opening Setup-PRs. This query is therefore
+// always unambiguous.
 async function findPendingRunForChat(chatId) {
   const subscriptionId = await getActiveSubId(chatId)
   if (!subscriptionId) return null
@@ -273,6 +280,35 @@ async function handleApprove(runId, chatId) {
   if (!run) return sendMessage(chatId, '❌ Run not found.')
   if (run.status !== 'waiting_approval')
     return sendMessage(chatId, '⚠️ This run is no longer waiting for approval.')
+
+  // ── Setup-PR: foreign-choice YES → fire Edge Function to build the PR ─────
+  // The foreign-choice row has no pr_number yet. Fire-and-forget to the Edge
+  // Function (same 2s-AbortController pattern as the cron trigger), which runs
+  // createForeignSetupPR and converts this row to a normal setup_posthog run.
+  if (run.run_type === 'setup_posthog_foreign_choice') {
+    await supabase.from('agent_runs').update({ status: 'running' }).eq('id', runId)
+    const edgeUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agent-run`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 2000)
+    try {
+      await fetch(edgeUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ intent: 'foreign_setup_pr', subscriptionId: run.subscription_id }),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        console.error('[telegram] foreign_setup_pr Edge trigger failed:', err?.message)
+      }
+    } finally {
+      clearTimeout(timeoutId)
+    }
+    return sendMessage(chatId, `⚙️ Got it — preparing the analytics PR now. I'll message you when it's ready for review.`)
+  }
 
   const { data: conn } = await supabase
     .from('agent_connections')
@@ -357,6 +393,14 @@ async function handleApprove(runId, chatId) {
 
   await supabase.from('agent_runs').update({ status: 'deployed', completed_at: new Date().toISOString(), merge_commit_sha: mergeSha }).eq('id', runId)
 
+  // ── Setup-PR YES: record installed_at, skip DNA (no conversion logic) ──────
+  if (run.run_type === 'setup_posthog') {
+    await supabase.from('agent_connections')
+      .update({ posthog_snippet_installed_at: new Date().toISOString() })
+      .eq('subscription_id', run.subscription_id)
+    return sendMessage(chatId, `✅ <b>Analytics installed.</b> Your next run will use real visitor data.`)
+  }
+
   // 3d: Business DNA — record as 'pending'; the 48h rollback check will promote to 'success' after 7 days deployed
   await supabase.from('agent_business_dna').insert({
     subscription_id: run.subscription_id, run_id: runId,
@@ -386,6 +430,19 @@ async function handleReject(runId, chatId) {
   if (!run) return sendMessage(chatId, '❌ Run not found.')
   if (run.status !== 'waiting_approval')
     return sendMessage(chatId, '⚠️ This run is no longer waiting for approval.')
+
+  // ── Setup-PR: foreign-choice NO → explicit permanent decline, no PR ───────
+  // The user saw the transparency Telegram and chose to skip. No PR was opened
+  // (the choice row has no pr_number), so skip the PR-close block entirely.
+  if (run.run_type === 'setup_posthog_foreign_choice') {
+    await supabase.from('agent_connections')
+      .update({ posthog_snippet_declined: true })
+      .eq('subscription_id', run.subscription_id)
+    await supabase.from('agent_runs')
+      .update({ status: 'rejected', rollback_reason: 'user_rejected' })
+      .eq('id', runId)
+    return sendMessage(chatId, `Understood — I won't ask again. Re-enable tracking from your dashboard anytime.`)
+  }
 
   // Stage 4.7: actually close the PR and delete the branch on reject. We used
   // to just flip status in the DB and leave the PR dangling on GitHub, which
@@ -436,6 +493,27 @@ async function handleReject(runId, chatId) {
     status: 'rejected',
     rollback_reason: 'user_rejected',
   }).eq('id', runId)
+
+  // ── Setup-PR NO: retry once, then permanently decline ────────────────────
+  if (run.run_type === 'setup_posthog') {
+    const { data: connForRetry } = await supabase
+      .from('agent_connections')
+      .select('posthog_snippet_retry_count')
+      .eq('subscription_id', run.subscription_id)
+      .single()
+    const retryCount = connForRetry?.posthog_snippet_retry_count || 0
+    if (retryCount < 1) {
+      await supabase.from('agent_connections')
+        .update({ posthog_snippet_retry_count: retryCount + 1 })
+        .eq('subscription_id', run.subscription_id)
+      return sendMessage(chatId, `⏭️ Skipped for now — I'll offer it once more next run.`)
+    } else {
+      await supabase.from('agent_connections')
+        .update({ posthog_snippet_declined: true })
+        .eq('subscription_id', run.subscription_id)
+      return sendMessage(chatId, `Understood — I won't ask again. Re-enable tracking from your dashboard anytime.`)
+    }
+  }
 
   // 3d: Business DNA — record rollback so future runs avoid the pattern
   await supabase.from('agent_business_dna').insert({

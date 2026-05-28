@@ -247,15 +247,16 @@ export default async function handler(req, res) {
   }
 
   // ── Authenticated user actions (Supabase JWT) ─────────────────────────────
-  if (action === 'update-settings' || action === 'export-dna') {
+  if (action === 'update-settings' || action === 'export-dna' || action === 'reenable_snippet') {
     const authHeader = req.headers.authorization
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' })
     const token = authHeader.replace('Bearer ', '')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
     if (authError || !user) return res.status(401).json({ error: 'Unauthorized' })
 
-    if (action === 'update-settings') return handleUpdateSettings(req, res, user)
-    if (action === 'export-dna')      return handleExportDNA(req, res, user)
+    if (action === 'update-settings')  return handleUpdateSettings(req, res, user)
+    if (action === 'export-dna')       return handleExportDNA(req, res, user)
+    if (action === 'reenable_snippet') return handleReenableSnippet(req, res, user)
   }
 
   // ── Account actions (quick — stay in Vercel) ──────────────────────────────
@@ -1225,6 +1226,22 @@ async function handleUpdateSettings(req, res, user) {
     .eq('auth_user_id', user.id).select().single()
   if (error) return res.status(500).json({ error: error.message })
   return res.status(200).json({ success: true, subscription: data })
+}
+
+// ─── Re-enable Snippet Tracking (Supabase JWT) ────────────────────────────────
+// Resets posthog_snippet_declined + retry_count so the Setup-PR flow will
+// offer again on the next weekly run. The dashboard banner calls this.
+async function handleReenableSnippet(req, res, user) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const { data: sub } = await supabase
+    .from('agent_subscriptions').select('id').eq('auth_user_id', user.id).single()
+  if (!sub) return res.status(404).json({ error: 'No subscription found' })
+  const { error } = await supabase
+    .from('agent_connections')
+    .update({ posthog_snippet_declined: false, posthog_snippet_retry_count: 0 })
+    .eq('subscription_id', sub.id)
+  if (error) return res.status(500).json({ error: error.message })
+  return res.status(200).json({ success: true })
 }
 
 // ─── Export DNA Playbook (Supabase JWT) ───────────────────────────────────────

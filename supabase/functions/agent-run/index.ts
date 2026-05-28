@@ -462,6 +462,20 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Parse optional JSON body. The normal cron trigger sends
+    // { triggeredBy, triggerId } (no intent). The foreign-setup-PR trigger
+    // sends { intent: 'foreign_setup_pr', subscriptionId }. An empty or
+    // non-JSON body falls through to handleFullRun unchanged.
+    let body: any = {}
+    try { body = await req.json() } catch { /* no body or not JSON */ }
+
+    if (body?.intent === 'foreign_setup_pr') {
+      const result = await createForeignSetupPR(body.subscriptionId)
+      return new Response(JSON.stringify(result), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     const result = await handleFullRun()
     return new Response(JSON.stringify(result), {
       headers: { 'Content-Type': 'application/json' },
@@ -830,66 +844,518 @@ function hostnameFromUrl(rawUrl: string | null | undefined): string | null {
   }
 }
 
+// Domain-derivation only. Writes posthog_host_filter, posthog_project_id,
+// posthog_snippet_token. Does NOT send a Telegram — the new Setup-PR flow
+// (maybeRunSnippetSetup) handles customer notification for supported frameworks;
+// unsupported frameworks get a one-shot manual-paste Telegram there too.
 async function setupPostHogForConnection(conn: any) {
   try {
     const sharedProjectId = Deno.env.get('POSTHOG_PROJECT_ID')
     if (!sharedProjectId) { console.error('POSTHOG_PROJECT_ID (shared project) not set — cannot set up analytics'); return null }
 
-    // Derive the partition key (hostname only, e.g. "precision-training.io")
-    // from the connection's website_url.
     const hostFilter = hostnameFromUrl(conn.website_url)
     if (!hostFilter) {
       console.warn(`PostHog setup: no usable website_url for connection ${conn.id} — cannot derive $host partition key`)
       return null
     }
 
-    // Public write token for the SHARED project (safe to ship to the browser —
-    // it's a write-only ingestion token, same one velyr.io uses in index.html).
-    const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || 'phc_qmLvjZawzLuEnR5ns5eFKXSFiSD5AX4y87LvELP9nqB5'
+    const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || VELYR_POSTHOG_TOKEN
 
-    // Record the domain so every read filters by it. Also stamp the shared
-    // project id into posthog_project_id for clarity (the column is no longer
-    // the trigger and reads fall back to env, but a non-null value documents
-    // which project this connection points at).
     await supabase.from('agent_connections').update({
       posthog_host_filter:   hostFilter,
       posthog_project_id:    sharedProjectId,
       posthog_snippet_token: snippetToken,
     }).eq('id', conn.id)
 
-    const isNext = conn.github_repo_name?.toLowerCase().includes('next')
-    // The snippet registers $host explicitly so every event is tagged with the
-    // partition key on emission (we don't rely on PostHog's auto-capture default
-    // to set $host). This keeps reads/writes keyed on the exact same hostname.
-    const snippetCode = isNext
-      ? `// pages/_app.jsx  OR  app/layout.tsx\nimport posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n  posthog.register({ $host: '${hostFilter}' })\n}`
-      : `// src/main.jsx  (or app/layout.tsx)\nimport posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\nposthog.register({ $host: '${hostFilter}' })`
-
-    const { data: sub } = await supabase
-      .from('agent_subscriptions').select('telegram_chat_id')
-      .eq('id', conn.subscription_id).single()
-
-    const chatId = sub?.telegram_chat_id
-    if (!chatId) return { posthogProjectId: sharedProjectId, hostFilter }
-
-    // Sent as HTML: the snippet body goes in <pre><code>…</code></pre> with the
-    // whole snippetCode run through escapeHtml() (covers the &/</> chars AND the
-    // interpolated snippetToken/hostFilter baked into it). Inline file names use
-    // <code>, the trailing note uses <i>, and the domain mention is escaped too.
-    await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `📊 <b>Analytics setup — one paste</b>\n\nAdd this to your app's entry file (<code>main.jsx</code>, <code>_app.jsx</code>, or <code>app/layout.tsx</code>) once:\n\n<pre><code>${escapeHtml(snippetCode)}</code></pre>\n\nFirst install the package:\n<code>npm install posthog-js</code>\n\n<i>Your visitor data is processed by Velyr's analytics infrastructure, scoped to your domain (<code>${escapeHtml(hostFilter)}</code>). Once added, the agent uses real visitor data for smarter recommendations.</i>`,
-        parse_mode: 'HTML',
-      }),
-    })
-
     return { posthogProjectId: sharedProjectId, hostFilter }
   } catch (err) {
     console.error('PostHog setup failed:', err)
     return null
   }
+}
+
+// ─── POSTHOG SETUP-PR (auto-snippet flow) ─────────────────────────────────────
+// Velyr PostHog public write token. Used as the literal to detect our own
+// snippet in customer repos (fast-path: no LLM, no Telegram for existing installs).
+// Keep in sync with setupPostHogForConnection above.
+const VELYR_POSTHOG_TOKEN = 'phc_qmLvjZawzLuEnR5ns5eFKXSFiSD5AX4y87LvELP9nqB5'
+
+// Resolve the target entry file for snippet insertion from mapResult.
+// Priority order as per product spec: framework → repoTree scan.
+// Returns a repo-root-relative path or null if none found.
+function resolveSnippetTarget(mapResult: MapResult): string | null {
+  const root = mapResult.siteRoot ? mapResult.siteRoot + '/' : ''
+  const has = (p: string) => mapResult.repoTree.some(e => e.path === p && e.type === 'blob')
+
+  if (mapResult.framework === 'nextjs-app') {
+    for (const ext of ['tsx', 'jsx', 'ts', 'js']) {
+      for (const prefix of ['app', 'src/app']) {
+        const p = `${root}${prefix}/layout.${ext}`
+        if (has(p)) return p
+      }
+    }
+    return null
+  }
+
+  if (mapResult.framework === 'nextjs-pages') {
+    for (const ext of ['tsx', 'jsx', 'ts', 'js']) {
+      for (const prefix of ['pages', 'src/pages']) {
+        const p = `${root}${prefix}/_app.${ext}`
+        if (has(p)) return p
+      }
+    }
+    return null
+  }
+
+  if (mapResult.framework === 'vite-react' || mapResult.framework === 'cra') {
+    // Use entryPoints first — repo-mapper already resolved the canonical entry.
+    const mainEntry = mapResult.entryPoints.find(e => /(?:^|\/)main\.(tsx|jsx|ts|js)$/.test(e))
+    if (mainEntry) return mainEntry
+    for (const ext of ['tsx', 'jsx', 'ts', 'js']) {
+      for (const prefix of ['src', '']) {
+        const p = prefix ? `${root}${prefix}/main.${ext}` : `${root}main.${ext}`
+        if (has(p)) return p
+      }
+    }
+    return null
+  }
+
+  return null  // vue-vite, svelte-kit, etc. — no auto-PR target
+}
+
+type SnippetDetectResult =
+  | { state: 'installed' }
+  | { state: 'foreign_detected' }
+  | { state: 'missing'; targetPath: string; hasDep: boolean }
+  | { state: 'error'; reason: string }
+
+// Column fast-path + file-read fallback.
+// 1. posthog_snippet_installed_at set → installed (zero GitHub calls).
+// 2. Read targetPath → our token present → backfill installed_at → installed.
+// 3. posthog.init / posthog-js import but NOT our token → foreign_detected.
+// 4. Neither → missing. Also checks package.json for posthog-js dep.
+async function detectSnippetState(
+  conn: any,
+  mapResult: MapResult,
+  octokit: any,
+  defaultBranch: string,
+): Promise<SnippetDetectResult> {
+  if (conn.posthog_snippet_installed_at) return { state: 'installed' }
+
+  const targetPath = resolveSnippetTarget(mapResult)
+  if (!targetPath) return { state: 'error', reason: `No snippet target for framework ${mapResult.framework}` }
+
+  let fileContent: string
+  try {
+    const { data: f } = await octokit.rest.repos.getContent({
+      owner: conn.github_repo_owner, repo: conn.github_repo_name,
+      path: targetPath, ref: defaultBranch,
+    })
+    fileContent = base64Decode(f.content)
+  } catch (err: any) {
+    return { state: 'error', reason: `Could not read ${targetPath}: ${err?.message}` }
+  }
+
+  if (fileContent.includes(VELYR_POSTHOG_TOKEN)) {
+    // Self-heal: customer manually pasted the snippet — record it so we skip Setup-PR forever.
+    await supabase.from('agent_connections')
+      .update({ posthog_snippet_installed_at: new Date().toISOString() })
+      .eq('id', conn.id)
+    return { state: 'installed' }
+  }
+
+  const hasForeignPostHog =
+    /posthog\.init\s*\(/.test(fileContent) ||
+    fileContent.includes("from 'posthog-js'") ||
+    fileContent.includes('from "posthog-js"')
+  if (hasForeignPostHog) return { state: 'foreign_detected' }
+
+  // Check package.json for posthog-js dep (read + devDependencies).
+  let hasDep = false
+  try {
+    const pkgPath = mapResult.siteRoot ? `${mapResult.siteRoot}/package.json` : 'package.json'
+    const { data: pkgFile } = await octokit.rest.repos.getContent({
+      owner: conn.github_repo_owner, repo: conn.github_repo_name,
+      path: pkgPath, ref: defaultBranch,
+    })
+    const pkg = JSON.parse(base64Decode(pkgFile.content))
+    hasDep = !!(pkg.dependencies?.['posthog-js'] || pkg.devDependencies?.['posthog-js'])
+  } catch { /* package.json read failure → hasDep stays false, PR warns */ }
+
+  return { state: 'missing', targetPath, hasDep }
+}
+
+function buildSnippetReceipt(opts: {
+  framework: string; targetPath: string; filesChanged: string[];
+  hasDep: boolean; coexist: boolean; hostFilter: string;
+}): string {
+  const { framework, targetPath, filesChanged, hasDep, coexist, hostFilter } = opts
+
+  const whatChanged = framework === 'nextjs-app'
+    ? `- Created \`${filesChanged.find(f => f.includes('velyr-analytics'))}\` (client component with PostHog init)\n- Added \`<VelyrAnalytics/>\` inside \`<body>\` in \`${targetPath}\``
+    : `- Added PostHog snippet to \`${targetPath}\``
+
+  const depWarning = hasDep ? '' :
+    '\n\n## ⚠️ Action required — install before merging\n\n```\nnpm install posthog-js\n```\n\nBuild will fail if this step is skipped.'
+
+  const coexistNote = coexist
+    ? '\n\n**Note:** your existing `posthog.init` is left untouched — this is a separate top-level call; both instances will fire.'
+    : ''
+
+  return `## Setup: Add Velyr analytics tracking
+
+Velyr uses PostHog to read your site's funnel data — bounce rates, page flows, drop-off points. Without it, fix recommendations are based on code structure alone (no real visitor data).
+
+This PR adds the Velyr analytics snippet. Events go to a shared PostHog project, scoped to your domain (\`${hostFilter}\`) via a \`$host\` property so your data stays isolated from other customers.
+
+### What changed
+
+${whatChanged}${coexistNote}
+
+### What's collected
+
+Standard pageview events (URL, session, device type, referrer). No PII beyond what PostHog collects by default. See [velyr.io/privacy](/privacy) for details.
+
+### Next steps
+
+1. Review the changes — this is a mechanical snippet add with no conversion logic.
+2. Merge when ready.${hasDep ? '' : '\n3. Run `npm install posthog-js` first (see warning above).'}${depWarning}
+
+_Once merged, the agent will read real visitor data on its next weekly run._`
+}
+
+async function sendSnippetTelegram(chatId: string, prUrl: string, hasDep: boolean) {
+  const depNote = hasDep ? '' : '\n\n⚠️ <b>Requires <code>npm install posthog-js</code> before merge</b> — build will fail otherwise.'
+  await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `📊 <b>Velyr wants to install analytics tracking</b> — required for the agent to read your funnel data. Reply <b>YES</b> to merge, <b>NO</b> to skip. Full details in the PR: <a href="${escapeHtml(prUrl)}">${escapeHtml(prUrl)}</a>${depNote}`,
+      parse_mode: 'HTML',
+    }),
+  }).catch(err => console.error('[snippet-telegram] send failed:', err))
+}
+
+async function sendForeignChoiceTelegram(chatId: string) {
+  await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `📊 <b>Velyr Analytics — Your choice</b>\n\nWe detected an existing PostHog installation in your project. Velyr uses its own analytics (separate project, partitioned by your domain).\n\nTwo options:\n• Reply <b>YES</b> — Add Velyr's snippet alongside yours. Events flow to both projects (slightly higher event volume on your end).\n• Reply <b>NO</b> — Skip Velyr analytics. Fix recommendations will be less accurate without funnel data.`,
+      parse_mode: 'HTML',
+    }),
+  }).catch(err => console.error('[foreign-choice-telegram] send failed:', err))
+}
+
+// Build and open the Setup-PR. Called both from maybeRunSnippetSetup (normal path)
+// and createForeignSetupPR (foreign YES path). coexist=true adds the "existing
+// posthog.init untouched" receipt note.
+async function createSnippetPR(
+  conn: any,
+  run: any,
+  mapResult: MapResult,
+  octokit: any,
+  defaultBranch: string,
+  detection: { state: 'missing'; targetPath: string; hasDep: boolean },
+  chatId: string | null,
+  coexist = false,
+): Promise<void> {
+  const { targetPath, hasDep } = detection
+  const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || VELYR_POSTHOG_TOKEN
+  const hostFilter = conn.posthog_host_filter || ''
+  const owner = conn.github_repo_owner
+  const repo  = conn.github_repo_name
+  const shortId = conn.subscription_id.slice(0, 8)
+  const branchName = `agent/setup-posthog-${shortId}`
+
+  // Defensive forbidden-path check (target is OUR resolved path, but belt-and-suspenders).
+  const forbiddenMatch = isForbiddenEditPath(targetPath)
+  if (forbiddenMatch) throw new Error(`Target path ${targetPath} is in FORBIDDEN_EDIT_PATHS (${forbiddenMatch})`)
+
+  const filesChanged: string[] = []
+
+  try {
+    const { data: refData } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` })
+    const baseSha = refData.object.sha
+    await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: baseSha })
+
+    if (mapResult.framework === 'nextjs-app') {
+      // App Router: create velyr-analytics component + edit layout to import+render it.
+      const ext = targetPath.split('.').pop() || 'tsx'
+      const componentPath = targetPath.replace(/\/layout\.[^.]+$/, `/velyr-analytics.${ext}`)
+      const componentBaseName = `velyr-analytics`
+
+      const componentContent =
+        `'use client'\nimport { useEffect } from 'react'\nimport posthog from 'posthog-js'\nexport default function VelyrAnalytics() {\n  useEffect(() => {\n    posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n    posthog.register({ $host: '${hostFilter}' })\n  }, [])\n  return null\n}\n`
+
+      const componentSyntax = validateSyntax(componentPath, componentContent)
+      if (!componentSyntax.ok) throw new Error(`VelyrAnalytics component syntax check failed: ${componentSyntax.reason}`)
+
+      await octokit.rest.repos.createOrUpdateFileContents({
+        owner, repo, path: componentPath,
+        message: 'setup: add VelyrAnalytics client component',
+        content: base64Encode(componentContent),
+        branch: branchName,
+      })
+      filesChanged.push(componentPath)
+
+      // Edit layout: add import + <VelyrAnalytics/> inside <body>.
+      const { data: layoutFile } = await octokit.rest.repos.getContent({
+        owner, repo, path: targetPath, ref: defaultBranch,
+      })
+      const layoutContent = base64Decode(layoutFile.content)
+      const importLine = `import VelyrAnalytics from './${componentBaseName}'`
+
+      // Step 1: insert import after the last import statement.
+      const importMatches = [...layoutContent.matchAll(/^(import\b[^\n]+)$/gm)]
+      if (importMatches.length === 0) throw new Error(`No import statements found in ${targetPath}`)
+      const lastImportStr = importMatches[importMatches.length - 1][0]
+      const importFVR = validateFindReplaceSafe(layoutContent, lastImportStr, '')
+      if (!importFVR.ok) throw new Error(`Cannot anchor import in ${targetPath}: ${importFVR.reason}`)
+      let newLayout = layoutContent.slice(0, importFVR.anchorPos)
+        + importFVR.actualFind + '\n' + importLine
+        + layoutContent.slice(importFVR.anchorPos + importFVR.actualFind.length)
+
+      // Step 2: insert <VelyrAnalytics/> right after the <body...> opening tag.
+      const bodyTagMatch = newLayout.match(/<body[^>]*>/)
+      if (!bodyTagMatch) throw new Error(`No <body> tag found in ${targetPath}`)
+      const bodyTag = bodyTagMatch[0]
+      const bodyFVR = validateFindReplaceSafe(newLayout, bodyTag, '')
+      if (!bodyFVR.ok) throw new Error(`Cannot anchor <body> in ${targetPath}: ${bodyFVR.reason}`)
+      newLayout = newLayout.slice(0, bodyFVR.anchorPos)
+        + bodyFVR.actualFind + '\n        <VelyrAnalytics/>'
+        + newLayout.slice(bodyFVR.anchorPos + bodyFVR.actualFind.length)
+
+      const layoutSyntax = validateSyntax(targetPath, newLayout)
+      if (!layoutSyntax.ok) throw new Error(`Edited layout syntax check failed: ${layoutSyntax.reason}`)
+
+      await octokit.rest.repos.createOrUpdateFileContents({
+        owner, repo, path: targetPath,
+        message: 'setup: import and render VelyrAnalytics in root layout',
+        content: base64Encode(newLayout),
+        sha: layoutFile.sha,
+        branch: branchName,
+      })
+      filesChanged.push(targetPath)
+
+    } else {
+      // nextjs-pages or vite-react/cra: edit a single entry file.
+      const { data: targetFile } = await octokit.rest.repos.getContent({
+        owner, repo, path: targetPath, ref: defaultBranch,
+      })
+      const fileContent = base64Decode(targetFile.content)
+
+      const snippet = mapResult.framework === 'nextjs-pages'
+        ? `import posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n  posthog.register({ $host: '${hostFilter}' })\n}`
+        : `import posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\nposthog.register({ $host: '${hostFilter}' })`
+
+      const importMatches = [...fileContent.matchAll(/^(import\b[^\n]+)$/gm)]
+      if (importMatches.length === 0) throw new Error(`No import statements found in ${targetPath}`)
+      const lastImportStr = importMatches[importMatches.length - 1][0]
+      const fvr = validateFindReplaceSafe(fileContent, lastImportStr, '')
+      if (!fvr.ok) throw new Error(`Cannot anchor snippet in ${targetPath}: ${fvr.reason}`)
+
+      const newContent = fileContent.slice(0, fvr.anchorPos)
+        + fvr.actualFind + '\n' + snippet
+        + fileContent.slice(fvr.anchorPos + fvr.actualFind.length)
+
+      const syntaxCheck = validateSyntax(targetPath, newContent)
+      if (!syntaxCheck.ok) throw new Error(`Edited entry file syntax check failed: ${syntaxCheck.reason}`)
+
+      await octokit.rest.repos.createOrUpdateFileContents({
+        owner, repo, path: targetPath,
+        message: 'setup: add Velyr analytics snippet',
+        content: base64Encode(newContent),
+        sha: targetFile.sha,
+        branch: branchName,
+      })
+      filesChanged.push(targetPath)
+    }
+
+    const receipt = buildSnippetReceipt({
+      framework: mapResult.framework, targetPath, filesChanged, hasDep, coexist, hostFilter,
+    })
+
+    const { data: pr } = await octokit.rest.pulls.create({
+      owner, repo,
+      title: 'Setup: Add Velyr analytics tracking',
+      body: receipt, head: branchName, base: defaultBranch,
+    })
+
+    await supabase.from('agent_runs').update({
+      run_type:     'setup_posthog',
+      status:       'waiting_approval',
+      current_step: 'done',
+      completed_at: new Date().toISOString(),
+      pr_number:    pr.number,
+      pr_url:       pr.html_url,
+      pages_fixed:  filesChanged,
+    }).eq('id', run.id)
+
+    if (chatId) await sendSnippetTelegram(chatId, pr.html_url, hasDep)
+
+  } catch (err: any) {
+    slog('error', 'snippet_pr_failed', {
+      subscriptionId: conn.subscription_id, runId: run.id, error: err.message,
+    })
+    // Clean up branch best-effort, then fall back to manual-paste Telegram.
+    await octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branchName}` }).catch(() => {})
+    await supabase.from('agent_runs').update({
+      status: 'failed', current_step: 'done',
+      completed_at: new Date().toISOString(),
+      error_message: `Setup-PR creation failed: ${err.message}`,
+    }).eq('id', run.id)
+    if (chatId) {
+      const fallbackSnippet = mapResult.framework === 'nextjs-app'
+        ? `// app/velyr-analytics.tsx\n'use client'\nimport { useEffect } from 'react'\nimport posthog from 'posthog-js'\nexport default function VelyrAnalytics() {\n  useEffect(() => {\n    posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n    posthog.register({ $host: '${hostFilter}' })\n  }, [])\n  return null\n}`
+        : mapResult.framework === 'nextjs-pages'
+        ? `import posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n  posthog.register({ $host: '${hostFilter}' })\n}`
+        : `import posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\nposthog.register({ $host: '${hostFilter}' })`
+      await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `📊 <b>Analytics setup — one paste</b>\n\n(Automatic PR failed — add this manually:)\n\n<pre><code>${escapeHtml(fallbackSnippet)}</code></pre>${hasDep ? '' : '\n\nFirst install: <code>npm install posthog-js</code>'}\n\n<i>Scoped to <code>${escapeHtml(hostFilter)}</code>.</i>`,
+          parse_mode: 'HTML',
+        }),
+      }).catch(() => {})
+    }
+  }
+}
+
+// Called by Deno.serve when body.intent === 'foreign_setup_pr'. Loads the
+// subscription's connection, re-derives framework/target, and opens a standard
+// Setup-PR with coexist=true (customer's existing posthog.init stays untouched).
+async function createForeignSetupPR(subscriptionId: string): Promise<any> {
+  try {
+    if (!subscriptionId) throw new Error('subscriptionId required')
+    const { data: conn } = await supabase
+      .from('agent_connections').select('*').eq('subscription_id', subscriptionId).single()
+    if (!conn) throw new Error(`No connection for subscription ${subscriptionId}`)
+
+    // Find the run that the Telegram handleApprove flipped to status='running'.
+    const { data: run } = await supabase
+      .from('agent_runs')
+      .select('*')
+      .eq('subscription_id', subscriptionId)
+      .eq('run_type', 'setup_posthog_foreign_choice')
+      .eq('status', 'running')
+      .order('created_at', { ascending: false })
+      .limit(1).single()
+    if (!run) throw new Error(`No running foreign-choice run for subscription ${subscriptionId}`)
+
+    const { data: sub } = await supabase
+      .from('agent_subscriptions').select('telegram_chat_id').eq('id', subscriptionId).single()
+
+    const octokit = await getOctokit(conn.github_installation_id)
+    const preflight = await repoPreflight(octokit, conn.github_repo_owner, conn.github_repo_name)
+    if (!preflight.ok) throw new Error(preflight.reason)
+
+    const mapResult: MapResult = await discoverFrameworkAndStructure(
+      octokit, conn.github_repo_owner, conn.github_repo_name, preflight.defaultBranch,
+    )
+    if (mapResult.framework === 'unsupported') throw new Error(`Unsupported framework: ${mapResult.unsupportedReason}`)
+
+    const targetPath = resolveSnippetTarget(mapResult)
+    if (!targetPath) throw new Error(`Cannot resolve snippet target for ${mapResult.framework}`)
+
+    // coexist=true: customer has existing posthog.init (they said YES to side-by-side).
+    // hasDep is always true for foreign: their posthog-js dep is already installed.
+    await createSnippetPR(
+      conn, run, mapResult, octokit, preflight.defaultBranch,
+      { state: 'missing', targetPath, hasDep: true },
+      sub?.telegram_chat_id || null,
+      true,
+    )
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[createForeignSetupPR] failed:', err.message)
+    return { ok: false, error: err.message }
+  }
+}
+
+// Main orchestrator for the Setup-PR gate. Called from processConnection AFTER
+// RA1 (mapResult available) and BEFORE RA2 (buildImportGraph / LLM spend).
+// Returns true if this run was consumed by the snippet gate (caller must return).
+//
+// INVARIANT: a Setup-PR (run_type setup_posthog or setup_posthog_foreign_choice
+// in status waiting_approval) and a conversion-fix (waiting_approval) are NEVER
+// simultaneously open for one subscription. The gate returns before createPR is
+// reached, and the dedupe check below prevents double-opening Setup-PRs. So
+// findPendingRunForChat is always unambiguous.
+async function maybeRunSnippetSetup(
+  conn: any,
+  run: any,
+  mapResult: MapResult,
+  octokit: any,
+  defaultBranch: string,
+  chatId: string | null,
+  wasFirstRun: boolean,
+): Promise<boolean> {
+  if (conn.posthog_snippet_declined) return false
+
+  // Dedupe: if a Setup-PR is already waiting approval, mark this run skipped.
+  const { data: existingSetup } = await supabase
+    .from('agent_runs')
+    .select('id')
+    .eq('subscription_id', conn.subscription_id)
+    .in('run_type', ['setup_posthog', 'setup_posthog_foreign_choice'])
+    .eq('status', 'waiting_approval')
+    .maybeSingle()
+
+  if (existingSetup) {
+    await supabase.from('agent_runs').update({
+      status: 'skipped_setup_pending', current_step: 'done',
+      completed_at: new Date().toISOString(),
+      error_message: 'Setup-PR already awaiting approval — run skipped',
+    }).eq('id', run.id)
+    return true
+  }
+
+  const SNIPPET_SUPPORTED = ['nextjs-app', 'nextjs-pages', 'vite-react', 'cra']
+  if (!SNIPPET_SUPPORTED.includes(mapResult.framework)) {
+    // Vue-vite, Svelte-kit, etc.: no auto-PR. Send one-shot manual-paste Telegram
+    // on the first run (gated on wasFirstRun so it doesn't spam every week).
+    // TODO: App Router for Vue is pending framework-specific entry-point detection.
+    if (wasFirstRun && chatId && conn.posthog_host_filter) {
+      const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || VELYR_POSTHOG_TOKEN
+      const hostFilter = conn.posthog_host_filter
+      const snippetCode =
+        `import posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\nposthog.register({ $host: '${hostFilter}' })`
+      await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `📊 <b>Analytics setup — one paste</b>\n\nAdd this to your app's entry file once:\n\n<pre><code>${escapeHtml(snippetCode)}</code></pre>\n\nFirst install the package:\n<code>npm install posthog-js</code>\n\n<i>Your visitor data is scoped to your domain (<code>${escapeHtml(hostFilter)}</code>). Once added, the agent uses real visitor data for smarter recommendations.</i>`,
+          parse_mode: 'HTML',
+        }),
+      }).catch(err => console.error('[unsupported-framework-snippet] send failed:', err))
+    }
+    return false  // continue to conversion-fix pipeline
+  }
+
+  const detection = await detectSnippetState(conn, mapResult, octokit, defaultBranch)
+
+  if (detection.state === 'installed') return false
+  if (detection.state === 'error') {
+    console.warn(`[snippet] detection error for ${conn.subscription_id}: ${detection.reason}`)
+    return false
+  }
+
+  if (detection.state === 'foreign_detected') {
+    await supabase.from('agent_runs').update({
+      run_type:     'setup_posthog_foreign_choice',
+      status:       'waiting_approval',
+      current_step: 'done',
+      completed_at: new Date().toISOString(),
+    }).eq('id', run.id)
+    if (chatId) await sendForeignChoiceTelegram(chatId)
+    return true
+  }
+
+  // state === 'missing': open Setup-PR
+  await createSnippetPR(conn, run, mapResult, octokit, defaultBranch, detection, chatId)
+  return true
 }
 
 // (fetchSubscriptionEmail removed — it existed only to address the weekly /
@@ -1442,10 +1908,12 @@ async function processConnection(conn: any) {
   let run: any = null
 
   try {
-    // PostHog setup on first run (shared project). Gated on the domain partition
-    // key being absent — once posthog_host_filter is set, the snippet has been
-    // sent and reads are scoped, so we never re-run it.
+    // Domain setup on first run (sets posthog_host_filter, project_id, snippet_token).
+    // wasFirstRun is used by maybeRunSnippetSetup to gate the one-shot
+    // manual-paste Telegram for unsupported frameworks.
+    let wasFirstRun = false
     if (!conn.posthog_host_filter) {
+      wasFirstRun = true
       const phSetup = await setupPostHogForConnection(conn)
       if (phSetup) {
         conn.posthog_host_filter = phSetup.hostFilter
@@ -1524,6 +1992,16 @@ async function processConnection(conn: any) {
     // to RA7's buildReceipt; we never run ESLint/tsc here.
     const lintInfo: LintInfo = detectLintInfo(mapResult)
     slog('info', 'lint_info_detected', { runId: run.id, eslint: lintInfo.eslint, tsStrict: lintInfo.tsStrict })
+
+    // ── Setup-PR gate (BEFORE RA2 / buildImportGraph → zero LLM spend) ───────
+    // If the Velyr PostHog snippet is not yet in the repo (and the customer has
+    // not declined), open a Setup-PR this run and return. The conversion-fix
+    // pipeline resumes on the next weekly cron after the snippet is merged.
+    const snippetConsumed = await maybeRunSnippetSetup(
+      conn, run, mapResult, octokit, preflight.defaultBranch,
+      subRow?.telegram_chat_id || null, wasFirstRun,
+    )
+    if (snippetConsumed) return
 
     // Stage RA2: import-graph traversal from the discovered entry points.
     // BFS over local imports (bounded by AGENT_GRAPH_MAX_DEPTH / _MAX_FILES);
