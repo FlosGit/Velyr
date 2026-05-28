@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { supabase } from './lib/supabase.js'
 import { startCheckout } from './utils/startCheckout.js'
 import Home from './Home.jsx'
@@ -11,7 +11,11 @@ import ResetPassword from './pages/ResetPassword.jsx'
 import AGB from './pages/AGB.jsx'
 import AgentPublic from './pages/AgentPublic.jsx'
 import Faq from './pages/Faq.jsx'
-import SiteNetworkDemo from './pages/SiteNetworkDemo.jsx'
+// Dev-only: lazy-loaded so Rollup excludes SiteNetworkDemo + mockSiteNetwork
+// from the prod bundle (import.meta.env.DEV inlines to false at build time).
+const SiteNetworkDemo = import.meta.env.DEV
+  ? lazy(() => import('./pages/SiteNetworkDemo.jsx'))
+  : null
 
 const RESERVED_AGENT_PATHS = new Set(['login', 'register', 'dashboard', 'onboarding', 'reset-password', 'post-signup'])
 const PUBLIC_AGENT_REGEX   = /^\/agent\/([a-z0-9][a-z0-9-]{1,28}[a-z0-9])$/
@@ -140,7 +144,9 @@ export default function App() {
   }
 
   // ── Routes ───────────────────────────────────────────────────────────────────
-  if (path === '/demo/network')            return <SiteNetworkDemo navigate={navigate} />
+  if (import.meta.env.DEV && path === '/demo/network') return (
+    <Suspense fallback={null}><SiteNetworkDemo navigate={navigate} /></Suspense>
+  )
   if (path === '/agb')                     return <AGB navigate={navigate} />
   if (path === '/faq')                    return <Faq navigate={navigate} />
   if (path === '/impressum')              return <Impressum navigate={navigate} />
