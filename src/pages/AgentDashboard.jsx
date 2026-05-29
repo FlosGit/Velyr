@@ -1475,7 +1475,7 @@ function NetworkPage({ runs, siteNetwork, websiteUrl }) {
               serif: "'Instrument Serif', serif",
               mono:  "'DM Mono', monospace",
             }}
-            style={{ height: 'calc(100vh - 150px)', minHeight: 620 }}
+            style={{ height: 'calc(100vh - 150px)', minHeight: 360 }}
           />
         ) : (
           <div style={{

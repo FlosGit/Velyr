@@ -263,7 +263,12 @@ function settle(rawNodes, rawEdges) {
     if (cl.y - 8  < minY) minY = cl.y - 8
     if (cl.y + 4  > maxY) maxY = cl.y + 4
   }
-  maxY += 14  // node labels render ~12px below the node circle
+  // Reserve room for node labels so nothing clips at k=1 under overflow:hidden.
+  // (Wide labels are also kept in-bounds by edge-inward anchoring at render time;
+  // this padding covers the vertical label gap + a margin of comfort.)
+  const LABEL_PAD = 30
+  minX -= LABEL_PAD; maxX += LABEL_PAD
+  minY -= LABEL_PAD; maxY += LABEL_PAD + 6
   const bbox = { x0: minX, y0: minY, x1: maxX, y1: maxY }
 
   return {
@@ -414,8 +419,14 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
   const [ch,      setCh]      = useState(500)
   const [layout,  setLayout]  = useState(null)
   const [tooltip, setTooltip] = useState(null)  // { node, x, y }
-  const [zoomT,   setZoomT]   = useState(zoomIdentity)
   const [showHint, setShowHint] = useState(false)
+  // Zoom transform is applied IMPERATIVELY to the group every frame (smooth, no
+  // React render). React state is only the quantised scale (label recompute),
+  // a zoomed-in flag (reset button), and a panning flag (cursor).
+  const transformRef = useRef(zoomIdentity)
+  const [kq,       setKq]       = useState(1)
+  const [zoomedIn, setZoomedIn] = useState(false)
+  const [panning,  setPanning]  = useState(false)
 
   const prefersReduced = typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -479,7 +490,6 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
   // inside the zoomed group (scaled by k), so dividing by kq keeps text a near
   // constant SCREEN size and shrinks the collision box in content space — which
   // means more labels fit (reveal) as you zoom into a dense region.
-  const kq = Math.max(1, Math.round(zoomT.k / 0.25) * 0.25)
   const labelPlacements = useMemo(() => {
     if (!layout) return []
     const prio = n => STATUS_LOUD.has(n.status) ? 0 : n.isEntry ? 1 : (n.rank ?? 9000 + (n.label?.length || 0))
@@ -489,12 +499,20 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
     const mandatory = all.filter(n => labeledIds.has(n.id))
     const optional  = all.filter(n => !labeledIds.has(n.id))
 
+    // Edge-inward anchoring: labels near the content edge extend toward the
+    // interior (start/end), never outward — so they can't clip at the card edge
+    // at k=1 OR when revealed on zoom near the viewport edge.
+    const { x0, y0, x1, y1 } = layout.bbox
+    const band = (x1 - x0) * 0.16
+
     const placed = []
     const overlaps = (a) => placed.some(b =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y)
     const out = []
     const tryPlace = (n, force) => {
       const w = (n.label.length * 5.6 + 4) / kq, h = 12 / kq
+      const anchor = n.x < x0 + band ? 'start' : n.x > x1 - band ? 'end' : 'middle'
+      const boxX = anchor === 'start' ? n.x : anchor === 'end' ? n.x - w : n.x - w / 2
       const cands = [
         n.y + n.r + 11 / kq,   // below
         n.y - n.r - 5 / kq,    // above
@@ -502,11 +520,11 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
         n.y - n.r - 18 / kq,   // above, nudged
       ]
       for (let i = 0; i < cands.length; i++) {
-        const box = { x: n.x - w / 2, y: cands[i] - 9 / kq, w, h }
+        const box = { x: boxX, y: cands[i] - 9 / kq, w, h }
         const last = i === cands.length - 1
         if (!overlaps(box) || (force && last)) {
           placed.push(box)
-          out.push({ id: n.id, label: n.label, x: n.x, y: cands[i], bold: n.rank === 1 || STATUS_LOUD.has(n.status) })
+          out.push({ id: n.id, label: n.label, x: n.x, y: cands[i], anchor, bold: n.rank === 1 || STATUS_LOUD.has(n.status) })
           return
         }
       }
@@ -572,11 +590,24 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
         }
         return !event.button
       })
-      .on('start', () => { didPanRef.current = false })
-      .on('zoom', (event) => {
-        if (event.sourceEvent && event.sourceEvent.type !== 'wheel') didPanRef.current = true
-        setZoomT(event.transform)
+      .on('start', (event) => {
+        didPanRef.current = false
+        // grabbing cursor only for an actual drag-pan (not a wheel-zoom)
+        if (event.sourceEvent && event.sourceEvent.type !== 'wheel') setPanning(true)
       })
+      .on('zoom', (event) => {
+        const t = event.transform
+        // Imperative transform every frame → smooth on wheel / pinch / trackpad,
+        // no React render. Bound to transformRef in JSX so re-renders don't clobber it.
+        transformRef.current = t
+        if (zoomGroupRef.current) zoomGroupRef.current.setAttribute('transform', t.toString())
+        if (event.sourceEvent && event.sourceEvent.type !== 'wheel') didPanRef.current = true
+        // React state only on meaningful changes (label recompute / reset button).
+        const nkq = Math.max(1, Math.round(t.k / 0.25) * 0.25)
+        setKq(prev => (prev !== nkq ? nkq : prev))
+        setZoomedIn(prev => { const z = t.k > 1.01; return prev !== z ? z : prev })
+      })
+      .on('end', () => setPanning(false))
     select(svg).call(zb).on('dblclick.zoom', null)  // no dbl-click zoom
     zoomBehaviorRef.current = zb
     return () => { select(svg).on('.zoom', null) }
@@ -589,7 +620,9 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
   useEffect(() => {
     if (!layout || !zoomBehaviorRef.current) return
     bboxRef.current = layout.bbox
-    const b = layout.bbox, m = 80
+    // Tight bound so panning can't reach empty space — content stays in view at
+    // any zoom. (bbox already includes label padding from settle().)
+    const b = layout.bbox, m = 24
     zoomBehaviorRef.current.translateExtent([[b.x0 - m, b.y0 - m], [b.x1 + m, b.y1 + m]])
   }, [layout])
 
@@ -635,10 +668,10 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
           width="100%"
           height="100%"
           style={{ display: 'block', overflow: 'hidden', touchAction: 'none',
-                   cursor: zoomT.k > 1 ? 'grab' : 'default' }}
+                   cursor: panning ? 'grabbing' : 'grab' }}
           preserveAspectRatio="xMidYMid meet"
         >
-         <g ref={zoomGroupRef} transform={zoomT.toString()}>
+         <g ref={zoomGroupRef} transform={transformRef.current.toString()}>
           {/* Soft cluster region blobs — a whisper of category structure behind
               the nodes. Very low alpha so status colours always read over them. */}
           <g>
@@ -754,7 +787,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
             {labelPlacements.map(pl => (
               <text key={pl.id}
                 x={pl.x} y={pl.y}
-                textAnchor="middle"
+                textAnchor={pl.anchor}
                 style={{
                   fontSize: 10 / kq,
                   fill: '#1c1917',
@@ -777,7 +810,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
       {/* Zoom hint + reset affordance */}
       {layout && cw >= 600 && (
         <>
-          {showHint && zoomT.k <= 1.01 && (
+          {showHint && !zoomedIn && (
             <div style={{
               position: 'absolute', left: 14, bottom: 12,
               fontSize: 10.5, color: 'rgba(42,92,69,0.5)', fontFamily: fSans,
@@ -786,7 +819,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
               ⌘ + scroll to zoom · drag to pan
             </div>
           )}
-          {zoomT.k > 1.01 && (
+          {zoomedIn && (
             <button onClick={resetView} style={{
               position: 'absolute', top: 12, right: 12,
               background: 'rgba(247,244,239,0.95)', border: '1px solid rgba(28,25,23,0.14)',
