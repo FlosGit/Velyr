@@ -12,7 +12,7 @@
 // Layout: d3-force simulation run synchronously to convergence.
 // Stage 3 will add a `live` prop for the onboarding build animation.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   forceCollide,
   forceLink,
@@ -28,17 +28,18 @@ const SIM_W = 840   // widened from 600 to fill the ~1032px dashboard content pa
 const SIM_H = 480
 const VIEW_PAD_X = 40  // extra horizontal margin so cluster labels and edge nodes don't clip
 
-// Cluster target positions. Hub fixed at (0,0).
-// x-values scaled ×1.4 from the original 600-wide space.
+// Cluster target positions. Hub fixed at (0,0). Anchors pushed out toward the
+// viewBox edges (x spans ±460, y spans ±240) so clusters use the full panel
+// instead of floating in the centre.
 const CLUSTER_POS = {
-  core:      { x:   0,  y:  -55 },
-  marketing: { x: 227,  y:  -88 },
-  auth:      { x: 241,  y:   62 },
-  product:   { x: 109,  y:  158 },
-  content:   { x: -189, y:  122 },
-  utility:   { x: -249, y:    0 },
-  legal:     { x:  -73, y:  202 },
-  other:     { x: 140,  y: -185 },
+  core:      { x:    0, y:  -70 },
+  marketing: { x:  340, y: -110 },
+  auth:      { x:  360, y:   60 },
+  product:   { x:  150, y:  175 },
+  content:   { x: -320, y:  130 },
+  utility:   { x: -370, y:  -10 },
+  legal:     { x: -130, y:  195 },
+  other:     { x:  230, y: -190 },
 }
 
 const CLUSTER_NAME = {
@@ -88,8 +89,23 @@ function calcR(node) {
   return Math.max(5, Math.min(Math.round(r), 22))
 }
 
-function permanentLabel(node) {
-  return node.isHub || node.isEntry || node.isGrouped || (node.rank != null && node.rank <= 3)
+// Which nodes get an always-on SVG label. Hub, entry points, and grouped
+// nodes are always labelled. For ranked nodes we label only the TOP-ranked one
+// per cluster — otherwise dense same-cluster siblings (e.g. four similarly
+// ranked Form* pages) stack overlapping labels. The rest reveal their label
+// via the hover tooltip.
+function computeLabeledIds(nodes) {
+  const ids = new Set()
+  const bestByCluster = {}  // cluster → { id, rank }
+  for (const n of nodes) {
+    if (n.isHub || n.isEntry || n.isGrouped) ids.add(n.id)
+    if (n.rank != null) {
+      const cur = bestByCluster[n.cluster]
+      if (!cur || n.rank < cur.rank) bestByCluster[n.cluster] = { id: n.id, rank: n.rank }
+    }
+  }
+  for (const c in bestByCluster) ids.add(bestByCluster[c].id)
+  return ids
 }
 
 function splitDomain(domain) {
@@ -127,7 +143,7 @@ function settle(rawNodes, rawEdges) {
     d.isHub ? 0 : 0.18 / Math.sqrt(clusterCount[d.cluster] || 1)
 
   const sim = forceSimulation(simNodes)
-    .force('link',    forceLink(simEdges).id(d => d.id).distance(52).strength(0.18))
+    .force('link',    forceLink(simEdges).id(d => d.id).distance(52).strength(0.11))
     .force('charge',  forceManyBody().strength(d => -(d.r ** 1.8) * 0.65))
     .force('collide', forceCollide(d => d.r + 9).strength(0.9))
     .force('x',       forceX(d => CLUSTER_POS[d.cluster]?.x ?? 0).strength(clusterStr))
@@ -330,6 +346,12 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
 
   const hideTooltip = useCallback(() => setTooltip(null), [])
 
+  // Node ids that get an always-on label (top-ranked per cluster + anchors).
+  const labeledIds = useMemo(
+    () => (layout ? computeLabeledIds(layout.nodes) : new Set()),
+    [layout],
+  )
+
   const presentClusters = layout
     ? [...new Set(layout.nodes.map(n => n.cluster))].filter(c => c !== 'core')
     : []
@@ -446,7 +468,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
                   )}
 
                   {/* External label for entry points, grouped, top 3 ranked */}
-                  {!node.isHub && permanentLabel(node) && (
+                  {!node.isHub && labeledIds.has(node.id) && (
                     <text
                       x={node.x} y={node.y + node.r + 12}
                       textAnchor="middle"
