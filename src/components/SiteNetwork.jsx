@@ -63,10 +63,11 @@ const RING = {
 }
 
 const STATUS_COPY = {
-  'fix-in-flight': 'Fix in flight',
+  neutral:         'Watching',
+  tracked:         'Tracked',
+  'fix-in-flight': 'Fix in progress',
   optimized:       'Optimized',
   problem:         'Regression',
-  tracked:         'Watching',
 }
 
 const EDGE_COLOR = {
@@ -152,13 +153,36 @@ function settle(rawNodes, rawEdges) {
 
   for (let i = 0; i < 300; i++) sim.tick()
 
-  // ── Fit-to-content viewBox ──────────────────────────────────────────────────
-  // Replaces the fixed symmetric box. The viewBox now tracks the actual settled
-  // node bbox (+ padding), so the graph is always centred and fills the panel
-  // regardless of the panel's aspect ratio — probe and live render identically.
-  // Asymmetric padding leaves room for the labels drawn below nodes and the
-  // faint cluster labels drawn above each cluster.
-  const PAD_X = 70, PAD_TOP = 56, PAD_BOTTOM = 40
+  // ── Cluster labels pushed radially outward from the graph centroid ──────────
+  // (was: at the cluster centroid, which printed over the cluster's own nodes
+  // and the hub when clusters crowd the centre). We project past the cluster's
+  // outermost node along the centroid→cluster direction so the label clears it.
+  const nonHub = simNodes.filter(n => !n.isHub)
+  const gx = nonHub.reduce((s, n) => s + n.x, 0) / (nonHub.length || 1)
+  const gy = nonHub.reduce((s, n) => s + n.y, 0) / (nonHub.length || 1)
+
+  const clusterAgg = {}
+  for (const n of nonHub) {
+    const a = clusterAgg[n.cluster] || (clusterAgg[n.cluster] = { sx: 0, sy: 0, n: 0, nodes: [] })
+    a.sx += n.x; a.sy += n.y; a.n += 1; a.nodes.push(n)
+  }
+  const clusterLabels = Object.entries(clusterAgg).map(([cluster, a]) => {
+    const cx = a.sx / a.n, cy = a.sy / a.n
+    let dx = cx - gx, dy = cy - gy
+    const len = Math.hypot(dx, dy) || 1
+    dx /= len; dy /= len                       // unit direction, centroid → outward
+    // distance from cluster centroid to its farthest node edge along that direction
+    let reach = 0
+    for (const n of a.nodes) {
+      const proj = (n.x - cx) * dx + (n.y - cy) * dy + n.r
+      if (proj > reach) reach = proj
+    }
+    return { cluster, x: cx + dx * (reach + 16), y: cy + dy * (reach + 16) }
+  })
+
+  // ── Content bbox (nodes + their radii + cluster labels) ─────────────────────
+  // The render expands this to the live panel's aspect ratio (cw/ch) so meet
+  // never pillarboxes — graph stays centred AND fills the panel at any aspect.
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
   for (const n of simNodes) {
     if (n.x - n.r < minX) minX = n.x - n.r
@@ -166,29 +190,18 @@ function settle(rawNodes, rawEdges) {
     if (n.y - n.r < minY) minY = n.y - n.r
     if (n.y + n.r > maxY) maxY = n.y + n.r
   }
-  const viewBox = [
-    (minX - PAD_X).toFixed(1),
-    (minY - PAD_TOP).toFixed(1),
-    (maxX - minX + PAD_X * 2).toFixed(1),
-    (maxY - minY + PAD_TOP + PAD_BOTTOM).toFixed(1),
-  ].join(' ')
-
-  // ── Per-cluster label anchors at the settled centroid of member nodes ───────
-  // (was: fixed CLUSTER_POS, which floated in empty space when small clusters
-  // never reached their anchor). Label sits just above the cluster's topmost node.
-  const clusterAgg = {}
-  for (const n of simNodes) {
-    if (n.isHub) continue
-    const a = clusterAgg[n.cluster] || (clusterAgg[n.cluster] = { sx: 0, n: 0, topY: Infinity })
-    a.sx += n.x; a.n += 1
-    if (n.y - n.r < a.topY) a.topY = n.y - n.r
+  // fold in cluster-label points (with rough text half-extent) and node labels below
+  for (const cl of clusterLabels) {
+    if (cl.x - 36 < minX) minX = cl.x - 36
+    if (cl.x + 36 > maxX) maxX = cl.x + 36
+    if (cl.y - 8  < minY) minY = cl.y - 8
+    if (cl.y + 4  > maxY) maxY = cl.y + 4
   }
-  const clusterLabels = Object.entries(clusterAgg).map(([cluster, a]) => ({
-    cluster, x: a.sx / a.n, y: a.topY - 10,
-  }))
+  maxY += 14  // node labels render ~12px below the node circle
+  const bbox = { x0: minX, y0: minY, x1: maxX, y1: maxY }
 
   return {
-    viewBox,
+    bbox,
     clusterLabels,
     nodes: simNodes,
     edges: simEdges.map(e => {
@@ -262,10 +275,12 @@ function NetworkList({ nodes, onNodeClick, fSans }) {
 
 const TOOLTIP_W = 214
 
-function NodeTooltip({ node, x, y, cw, ch, fSans, fSerif, fMono }) {
+function NodeTooltip({ node, x, y, cw, ch, rankUnique, fSans, fSerif, fMono }) {
   const flipLeft = x + node.r + 18 + TOOLTIP_W > cw
   const tipX = flipLeft ? x - node.r - TOOLTIP_W - 8 : x + node.r + 10
   const tipY = Math.max(4, Math.min(ch - 150, y - 38))
+
+  const isFile = !node.isHub && !String(node.id).startsWith('__')
 
   return (
     <div style={{
@@ -278,22 +293,22 @@ function NodeTooltip({ node, x, y, cw, ch, fSans, fSerif, fMono }) {
     }}>
       <div style={{
         fontFamily: fSerif, fontWeight: 500,
-        fontSize: 15, color: '#1c1917', marginBottom: 2, lineHeight: 1.2,
+        fontSize: 15, color: '#1c1917', marginBottom: isFile ? 3 : 0, lineHeight: 1.2,
       }}>
         {node.label}
       </div>
 
-      {node.route && (
+      {isFile && (
         <div style={{
-          fontSize: 11, color: '#6b6460', marginBottom: 5,
-          fontFamily: fMono, letterSpacing: '.02em',
+          fontSize: 10.5, color: '#8a857e', marginBottom: 5,
+          fontFamily: fMono, letterSpacing: '.01em', wordBreak: 'break-all',
         }}>
-          {node.route}
+          {node.id}
         </div>
       )}
 
-      {STATUS_COPY[node.status] && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+      {!node.isHub && STATUS_COPY[node.status] && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: rankUnique ? 3 : 0 }}>
           <span style={{
             width: 7, height: 7, borderRadius: '50%',
             background: FILL[node.status], flexShrink: 0,
@@ -302,19 +317,10 @@ function NodeTooltip({ node, x, y, cw, ch, fSans, fSerif, fMono }) {
         </div>
       )}
 
-      {node.rank != null && (
-        <div style={{ fontSize: 11, color: '#6b6460', marginBottom: node.rankReason ? 3 : 0 }}>
+      {/* Priority shown ONLY when the rank is genuinely unique (no tied score). */}
+      {rankUnique && (
+        <div style={{ fontSize: 11, color: '#6b6460' }}>
           Priority #{node.rank}
-        </div>
-      )}
-
-      {node.rankReason && (
-        <div style={{
-          fontSize: 11, color: '#8a857e', lineHeight: 1.55,
-          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}>
-          {node.rankReason}
         </div>
       )}
     </div>
@@ -389,6 +395,37 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
     [layout],
   )
 
+  // Node ids whose rank is genuinely unique (no other ranked node shares its
+  // rankReason — our proxy for a tied score). Only these show a "Priority #N";
+  // tied nodes omit the line rather than print misleadingly-distinct numbers.
+  const uniqueRankIds = useMemo(() => {
+    if (!layout) return new Set()
+    const reasonCount = {}
+    for (const n of layout.nodes) {
+      if (n.rank != null && n.rankReason) reasonCount[n.rankReason] = (reasonCount[n.rankReason] || 0) + 1
+    }
+    const ids = new Set()
+    for (const n of layout.nodes) {
+      if (n.rank != null && (!n.rankReason || reasonCount[n.rankReason] === 1)) ids.add(n.id)
+    }
+    return ids
+  }, [layout])
+
+  // Aspect-matched viewBox: expand the settled content bbox on its short axis to
+  // the live panel's aspect (cw/ch) and centre it, so preserveAspectRatio="meet"
+  // has nothing to pillarbox — the graph fills any panel shape, not just the
+  // one the probe happened to test.
+  const viewBox = useMemo(() => {
+    if (!layout) return '0 0 1 1'
+    const { x0, y0, x1, y1 } = layout.bbox
+    const cxC = (x0 + x1) / 2, cyC = (y0 + y1) / 2
+    let w = x1 - x0, h = y1 - y0
+    const panelAspect = (cw > 0 && ch > 0) ? cw / ch : w / h
+    if (panelAspect > w / h) w = h * panelAspect   // panel wider → add horizontal margin
+    else                     h = w / panelAspect   // panel taller → add vertical margin
+    return `${(cxC - w / 2).toFixed(1)} ${(cyC - h / 2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`
+  }, [layout, cw, ch])
+
   return (
     <div ref={containerRef} style={{ position: 'relative', background: '#f7f4ef', ...style }}>
 
@@ -417,7 +454,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
       {layout && cw >= 600 && (
         <svg
           ref={svgRef}
-          viewBox={layout.viewBox}
+          viewBox={viewBox}
           width="100%"
           height="100%"
           style={{ display: 'block', overflow: 'visible' }}
@@ -530,6 +567,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
           y={tooltip.y}
           cw={cw}
           ch={ch}
+          rankUnique={uniqueRankIds.has(tooltip.node.id)}
           fSans={fSans}
           fSerif={fSerif}
           fMono={fMono}

@@ -1319,11 +1319,44 @@ function labelFromNode(n) {
   return n.componentName || n.id.split('/').pop().replace(/\.[^.]+$/, '')
 }
 
+// Humanized node status copy (mirrors SiteNetwork's STATUS_COPY) for the panel.
+const NODE_STATUS_COPY = {
+  neutral:         'Watching',
+  tracked:         'Tracked',
+  'fix-in-flight': 'Fix in progress',
+  optimized:       'Optimized',
+  problem:         'Regression',
+}
+const NODE_STATUS_DOT = {
+  neutral:         '#a8a39a',
+  tracked:         '#ccc8c3',
+  'fix-in-flight': '#c2a45f',
+  optimized:       '#2f6b4f',
+  problem:         '#c2573d',
+}
+
+// Hub label from website_url. Deploy subdomains (*.vercel.app / *.netlify.app)
+// show the project slug, not the full deploy host, so the hub reads cleanly.
+function hubDomainFromUrl(websiteUrl) {
+  let host
+  try { host = new URL(websiteUrl || '').hostname.replace(/^www\./, '') } catch { return null }
+  const m = host.match(/^(.+?)\.(?:vercel|netlify)\.app$/i)
+  return m ? m[1] : host
+}
+
 // ─── NETWORK PAGE ─────────────────────────────────────────────────────────────
 function NetworkPage({ runs, siteNetwork, websiteUrl }) {
+  const [selectedNode, setSelectedNode] = useState(null)
   const activeRun = runs.find(r => r.status === 'running') || null
   const isRunning = !!activeRun
   const lastRun   = runs[0] || null
+
+  // Most-recent active run drives fix-in-flight + the panel's PR link.
+  // runs is created_at desc; running takes priority over waiting_approval.
+  const inflightRun = runs.find(r => r.status === 'running')
+                   || runs.find(r => r.status === 'waiting_approval')
+                   || null
+  const fileInFlight = inflightRun?.analysis_result?.file_to_edit || null
 
   // Status line
   let statusText, statusColor
@@ -1344,23 +1377,13 @@ function NetworkPage({ runs, siteNetwork, websiteUrl }) {
     statusColor = C.textLight
   }
 
-  // Derive hostname for hub label
-  const domain = (() => {
-    try { return new URL(websiteUrl || '').hostname.replace(/^www\./, '') } catch { return null }
-  })()
+  // Hub label (deploy-subdomain aware)
+  const domain = hubDomainFromUrl(websiteUrl)
 
   // Transform raw DB row → SiteNetworkData.
   // Nodes in agent_site_network carry only: id, componentName, depth, size,
   // rank, rankReason — all other SiteNode fields are reconstructed here.
   const networkData = siteNetwork?.nodes?.length > 0 ? (() => {
-    // Most-recent active run for fix-in-flight enrichment.
-    // runs is already ordered created_at desc from fetchData.
-    // running takes priority over waiting_approval.
-    const inflightRun = runs.find(r => r.status === 'running')
-                     || runs.find(r => r.status === 'waiting_approval')
-                     || null
-    const fileInFlight = inflightRun?.analysis_result?.file_to_edit || null
-
     const hubNode = {
       id: '__hub__', label: domain || 'your site', route: '/', cluster: 'core',
       status: 'neutral', statusSource: null,
@@ -1439,19 +1462,20 @@ function NetworkPage({ runs, siteNetwork, websiteUrl }) {
 
       {/* Graph card */}
       <div style={{
+        position: 'relative',
         background: C.bgCard, borderRadius: 12,
         border: `1px solid ${C.border}`, overflow: 'hidden',
       }}>
         {networkData ? (
           <SiteNetwork
             data={networkData}
-            onNodeClick={() => { /* stub — node drill-down wired in Stage 4+ */ }}
+            onNodeClick={(n) => { if (!n.isHub) setSelectedNode(n) }}
             fonts={{
               sans:  "'DM Sans', sans-serif",
               serif: "'Instrument Serif', serif",
               mono:  "'DM Mono', monospace",
             }}
-            style={{ height: 'calc(100vh - 230px)', minHeight: 420 }}
+            style={{ height: 'calc(100vh - 150px)', minHeight: 620 }}
           />
         ) : (
           <div style={{
@@ -1478,6 +1502,52 @@ function NetworkPage({ runs, siteNetwork, websiteUrl }) {
             </p>
           </div>
         )}
+
+        {/* Slide-in node detail panel */}
+        {selectedNode && (() => {
+          const prUrl = selectedNode.status === 'fix-in-flight' ? inflightRun?.pr_url : null
+          const prNum = inflightRun?.pr_number
+          return (
+            <div style={{
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: 320, maxWidth: '85%',
+              background: C.bgCard, borderLeft: `1px solid ${C.border}`,
+              boxShadow: '-8px 0 28px rgba(26,25,22,0.08)', zIndex: 20,
+              padding: '20px 22px', overflowY: 'auto',
+              animation: 'slideInRight .22s ease both',
+            }}>
+              <style>{`@keyframes slideInRight { from { opacity:0; transform:translateX(16px) } to { opacity:1; transform:none } }`}</style>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                <p style={{ fontFamily: 'Instrument Serif, serif', fontWeight: 400, fontSize: 22, color: C.text, lineHeight: 1.15 }}>
+                  {selectedNode.label}
+                </p>
+                <button className="btn" onClick={() => setSelectedNode(null)} style={{
+                  background: 'none', border: `1px solid ${C.border}`, borderRadius: 6,
+                  width: 26, height: 26, fontSize: 14, color: C.textMuted, flexShrink: 0, lineHeight: 1,
+                }}>×</button>
+              </div>
+
+              <p style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: C.textMuted, wordBreak: 'break-all', marginTop: 6, marginBottom: 16 }}>
+                {selectedNode.id}
+              </p>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: prUrl ? 18 : 0 }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: NODE_STATUS_DOT[selectedNode.status], flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: C.text }}>{NODE_STATUS_COPY[selectedNode.status] || 'Watching'}</span>
+              </div>
+
+              {prUrl && (
+                <a href={prUrl} target="_blank" rel="noreferrer" style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  background: C.yellowSoft, border: `1px solid ${C.yellowMid}`, borderRadius: 8,
+                  padding: '9px 13px', fontSize: 12, color: C.yellow, fontWeight: 500, textDecoration: 'none',
+                }}>
+                  View open PR{prNum ? ` #${prNum}` : ''} →
+                </a>
+              )}
+            </div>
+          )
+        })()}
       </div>
     </div>
   )
