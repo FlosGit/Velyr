@@ -70,6 +70,35 @@ const STATUS_COPY = {
   problem:         'Regression',
 }
 
+// Per-cluster low-saturation tints — a whisper of category. Used as the fill for
+// non-status (neutral/tracked) nodes and, at very low alpha, as the soft region
+// blob behind each cluster. Status colours (gold/green/terracotta) override the
+// node fill so they always shout over the tint.
+// Low-saturation (near-grey, hint of hue) so a solid tinted node never reads as
+// a saturated status colour. Deliberately kept clear of gold #c2a45f, green
+// #2f6b4f, terracotta #c2573d so status always stays the loudest thing.
+const CLUSTER_TINT = {
+  core:      '#838c86',
+  marketing: '#979084',
+  auth:      '#878d94',
+  product:   '#838d87',
+  content:   '#8f8a91',
+  utility:   '#8d8983',
+  legal:     '#8b8983',
+  other:     '#8d8983',
+}
+const CLUSTER_RING = {
+  core:      '#646c67',
+  marketing: '#737065',
+  auth:      '#686e74',
+  product:   '#656e68',
+  content:   '#6f6a71',
+  utility:   '#6c6963',
+  legal:     '#6b6963',
+  other:     '#6c6963',
+}
+const STATUS_LOUD = new Set(['fix-in-flight', 'optimized', 'problem'])
+
 const EDGE_RGB = '42,92,69'
 // Base stroke opacity per edge kind, before the degree-fade multiplier. Kept
 // low so edges whisper; high-degree fans fade further (see edgeFade()).
@@ -97,22 +126,21 @@ function calcR(node) {
   return Math.max(5, Math.min(Math.round(r), 24))
 }
 
-// Which nodes get an always-on SVG label. Hub, entry points, and grouped
-// nodes are always labelled. For ranked nodes we label only the TOP-ranked one
-// per cluster — otherwise dense same-cluster siblings (e.g. four similarly
-// ranked Form* pages) stack overlapping labels. The rest reveal their label
-// via the hover tooltip.
+// Which nodes get an always-on SVG label: hub, entry points, grouped nodes,
+// every status-coloured node (gold/green/regression — always named), and the
+// top ~9 by rank. The rest reveal their label on hover. Overlap among the
+// always-on labels is resolved by collision avoidance at render time.
+const MAX_RANK_LABELS = 9
 function computeLabeledIds(nodes) {
   const ids = new Set()
-  const bestByCluster = {}  // cluster → { id, rank }
   for (const n of nodes) {
-    if (n.isHub || n.isEntry || n.isGrouped) ids.add(n.id)
-    if (n.rank != null) {
-      const cur = bestByCluster[n.cluster]
-      if (!cur || n.rank < cur.rank) bestByCluster[n.cluster] = { id: n.id, rank: n.rank }
-    }
+    if (n.isHub || n.isEntry || n.isGrouped || STATUS_LOUD.has(n.status)) ids.add(n.id)
   }
-  for (const c in bestByCluster) ids.add(bestByCluster[c].id)
+  nodes
+    .filter(n => n.rank != null)
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, MAX_RANK_LABELS)
+    .forEach(n => ids.add(n.id))
   return ids
 }
 
@@ -195,19 +223,26 @@ function settle(rawNodes, rawEdges) {
     const a = clusterAgg[n.cluster] || (clusterAgg[n.cluster] = { sx: 0, sy: 0, n: 0, nodes: [] })
     a.sx += n.x; a.sy += n.y; a.n += 1; a.nodes.push(n)
   }
-  const clusterLabels = Object.entries(clusterAgg).map(([cluster, a]) => {
+  // Cluster labels sit ADJACENT to their cluster (centroid nudged outward by a
+  // small amount so they're beside the nodes, not floating in empty space), and
+  // cluster blobs are faint tinted regions behind the nodes for gentle structure.
+  const clusterLabels = []
+  const clusterBlobs = []
+  for (const [cluster, a] of Object.entries(clusterAgg)) {
     const cx = a.sx / a.n, cy = a.sy / a.n
     let dx = cx - gx, dy = cy - gy
     const len = Math.hypot(dx, dy) || 1
-    dx /= len; dy /= len                       // unit direction, centroid → outward
-    // distance from cluster centroid to its farthest node edge along that direction
-    let reach = 0
+    dx /= len; dy /= len
+    let reach = 0           // farthest node-edge distance from centroid (any direction)
     for (const n of a.nodes) {
-      const proj = (n.x - cx) * dx + (n.y - cy) * dy + n.r
-      if (proj > reach) reach = proj
+      const dist = Math.hypot(n.x - cx, n.y - cy) + n.r
+      if (dist > reach) reach = dist
     }
-    return { cluster, x: cx + dx * (reach + 16), y: cy + dy * (reach + 16) }
-  })
+    // label: adjacent — centroid nudged outward by a modest amount, capped
+    const push = Math.min(reach * 0.55 + 6, 40)
+    clusterLabels.push({ cluster, x: cx + dx * push, y: cy + dy * push })
+    if (cluster !== 'core') clusterBlobs.push({ cluster, cx, cy, r: reach + 26 })
+  }
 
   // ── Content bbox (nodes + their radii + cluster labels) ─────────────────────
   // The render expands this to the live panel's aspect ratio (cw/ch) so meet
@@ -232,6 +267,7 @@ function settle(rawNodes, rawEdges) {
   return {
     bbox,
     clusterLabels,
+    clusterBlobs,
     nodes: simNodes,
     edges: simEdges.map(e => {
       const s = e.source  // D3 resolved to node object
@@ -419,11 +455,47 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
 
   const hideTooltip = useCallback(() => setTooltip(null), [])
 
-  // Node ids that get an always-on label (top-ranked per cluster + anchors).
+  // Node ids that get an always-on label (top ~9 ranked + anchors + status).
   const labeledIds = useMemo(
     () => (layout ? computeLabeledIds(layout.nodes) : new Set()),
     [layout],
   )
+
+  // Resolve label positions with greedy collision avoidance: place higher-priority
+  // labels first (status → entry → rank), each below its node by default; if that
+  // box overlaps an already-placed label, try above, then nudge further out.
+  const labelPlacements = useMemo(() => {
+    if (!layout) return []
+    const nodes = layout.nodes
+      .filter(n => !n.isHub && labeledIds.has(n.id))
+      .sort((a, b) => {
+        const pa = STATUS_LOUD.has(a.status) ? 0 : a.isEntry ? 1 : (a.rank ?? 999)
+        const pb = STATUS_LOUD.has(b.status) ? 0 : b.isEntry ? 1 : (b.rank ?? 999)
+        return pa - pb
+      })
+    const placed = []
+    const overlaps = (a) => placed.some(b =>
+      a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y)
+    const out = []
+    for (const n of nodes) {
+      const w = n.label.length * 5.6 + 4, h = 12
+      // candidate baselines (text y); box top = baseline - 9
+      const cands = [
+        n.y + n.r + 11,   // below
+        n.y - n.r - 5,    // above
+        n.y + n.r + 24,   // below, nudged
+        n.y - n.r - 18,   // above, nudged
+      ]
+      let chosen = cands[0]
+      for (const ty of cands) {
+        const box = { x: n.x - w / 2, y: ty - 9, w, h }
+        if (!overlaps(box)) { chosen = ty; placed.push(box); break }
+        if (ty === cands[cands.length - 1]) { chosen = ty; placed.push(box) }  // last resort
+      }
+      out.push({ id: n.id, label: n.label, x: n.x, y: chosen, anchor: 'middle', bold: n.rank === 1 || STATUS_LOUD.has(n.status) })
+    }
+    return out
+  }, [layout, labeledIds])
 
   // Node ids whose rank is genuinely unique (no other ranked node shares its
   // rankReason — our proxy for a tied score). Only these show a "Priority #N";
@@ -490,15 +562,27 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
           style={{ display: 'block', overflow: 'visible' }}
           preserveAspectRatio="xMidYMid meet"
         >
-          {/* Faint cluster section labels, at each cluster's settled centroid */}
+          {/* Soft cluster region blobs — a whisper of category structure behind
+              the nodes. Very low alpha so status colours always read over them. */}
+          <g>
+            {layout.clusterBlobs.map(bl => (
+              <circle key={bl.cluster}
+                cx={bl.cx} cy={bl.cy} r={bl.r}
+                fill={CLUSTER_TINT[bl.cluster] || '#9a958e'}
+                fillOpacity={0.06}
+              />
+            ))}
+          </g>
+
+          {/* Cluster section labels — readable muted ink, adjacent to nodes */}
           {layout.clusterLabels.filter(cl => cl.cluster !== 'core').map(cl => (
             <text key={cl.cluster}
               x={cl.x} y={cl.y}
               textAnchor="middle"
               style={{
-                fontSize: 8, fill: 'rgba(42,92,69,0.18)',
+                fontSize: 9, fill: 'rgba(42,92,69,0.55)',
                 fontFamily: fSans, fontWeight: 500,
-                letterSpacing: '0.12em', userSelect: 'none',
+                letterSpacing: '0.14em', userSelect: 'none',
                 pointerEvents: 'none',
               }}
             >
@@ -531,13 +615,18 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
           <g>
             {layout.nodes.map(node => {
               const isHov   = tooltip?.node?.id === node.id
-              const fill    = node.isHub ? '#2a5c45' : FILL[node.status]
-              const stroke  = node.isHub ? 'none'    : RING[node.status]
+              const statusLoud = STATUS_LOUD.has(node.status)
+              // Status colour dominates; otherwise the node wears its cluster tint.
+              const fill   = node.isHub ? '#2a5c45'
+                           : statusLoud ? FILL[node.status]
+                           : (CLUSTER_TINT[node.cluster] || FILL[node.status])
+              const stroke = node.isHub ? 'none'
+                           : statusLoud ? RING[node.status]
+                           : (CLUSTER_RING[node.cluster] || RING[node.status])
               const sw      = node.isEntry && !node.isHub ? 2.0 : 1.5
               const [dl1, dl2] = node.isHub ? hubLabelLines(data.meta.domain) : []
               // Hierarchy via opacity: ranked nodes + anchors lead; leaves recede
               // to 0.65. Status-coloured nodes (gold/green/regression) stay full.
-              const statusLoud = node.status === 'fix-in-flight' || node.status === 'optimized' || node.status === 'problem'
               const fillOpacity = (node.isHub || node.isEntry || node.rank != null || statusLoud) ? 1 : 0.65
 
               return (
@@ -576,29 +665,31 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
                       <tspan x={node.x} dy="10">{dl2}</tspan>
                     </text>
                   )}
-
-                  {/* External label for entry points, grouped, top 3 ranked */}
-                  {!node.isHub && labeledIds.has(node.id) && (
-                    <text
-                      x={node.x} y={node.y + node.r + 12}
-                      textAnchor="middle"
-                      style={{
-                        fontSize: 10,
-                        fill: '#1c1917',
-                        stroke: 'rgba(247,244,239,0.88)',
-                        strokeWidth: 3,
-                        paintOrder: 'stroke fill',
-                        fontFamily: fSans,
-                        fontWeight: node.rank === 1 ? 500 : 300,
-                        pointerEvents: 'none', userSelect: 'none',
-                      }}
-                    >
-                      {node.label}
-                    </text>
-                  )}
                 </g>
               )
             })}
+          </g>
+
+          {/* Node labels — collision-avoided, drawn above all nodes */}
+          <g>
+            {labelPlacements.map(pl => (
+              <text key={pl.id}
+                x={pl.x} y={pl.y}
+                textAnchor={pl.anchor}
+                style={{
+                  fontSize: 10,
+                  fill: '#1c1917',
+                  stroke: 'rgba(247,244,239,0.9)',
+                  strokeWidth: 3,
+                  paintOrder: 'stroke fill',
+                  fontFamily: fSans,
+                  fontWeight: pl.bold ? 500 : 300,
+                  pointerEvents: 'none', userSelect: 'none',
+                }}
+              >
+                {pl.label}
+              </text>
+            ))}
           </g>
         </svg>
       )}
