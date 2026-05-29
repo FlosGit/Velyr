@@ -476,6 +476,16 @@ Deno.serve(async (req) => {
       })
     }
 
+    if (body?.intent === 'discover_structure') {
+      // Stage 3 first-connect preview: RA1 only (tree + framework, no AI, no
+      // verdicts). discoverStructurePreview never throws — it writes status to
+      // the row so the onboarding finale can skip gracefully on failure.
+      const result = await discoverStructurePreview(body.subscriptionId)
+      return new Response(JSON.stringify(result), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     const result = await handleFullRun()
     return new Response(JSON.stringify(result), {
       headers: { 'Content-Type': 'application/json' },
@@ -1271,6 +1281,137 @@ async function createForeignSetupPR(subscriptionId: string): Promise<any> {
   } catch (err: any) {
     console.error('[createForeignSetupPR] failed:', err.message)
     return { ok: false, error: err.message }
+  }
+}
+
+// ─── Stage 3: first-connect structure preview ────────────────────────────────
+// Runs RA1 ONLY (discoverFrameworkAndStructure → tree + framework, no AI, no
+// RA2/import graph) and writes site_structure_preview for the onboarding build
+// finale. NEVER throws into the dispatcher: every failure path writes
+// status:'error' so the finale skips the build beat and routes to Overview.
+const PREVIEW_NODE_CAP = 160
+const PREVIEW_SOURCE_RE = /\.(jsx?|tsx?|vue|svelte|astro)$/i
+
+function previewDir(p: string): string {
+  const i = p.lastIndexOf('/')
+  return i === -1 ? '' : p.slice(0, i)
+}
+
+async function writeStructurePreview(subscriptionId: string, fields: Record<string, unknown>) {
+  const { error } = await supabase
+    .from('site_structure_preview')
+    .upsert(
+      { subscription_id: subscriptionId, updated_at: new Date().toISOString(), ...fields },
+      { onConflict: 'subscription_id' },
+    )
+  if (error) slog('warn', 'structure_preview_write_failed', { subscriptionId, error: error.message })
+}
+
+async function discoverStructurePreview(subscriptionId: string): Promise<any> {
+  try {
+    if (!subscriptionId) throw new Error('subscriptionId required')
+    const { data: conn } = await supabase
+      .from('agent_connections').select('*').eq('subscription_id', subscriptionId).single()
+    if (!conn) throw new Error(`No connection for subscription ${subscriptionId}`)
+
+    // Identical installation-token path as the weekly run (getOctokit) — so
+    // private repos work with no extra auth surface.
+    const octokit = await getOctokit(conn.github_installation_id)
+    const preflight = await repoPreflight(octokit, conn.github_repo_owner, conn.github_repo_name)
+    if (!preflight.ok) throw new Error(preflight.reason)
+
+    // RA1 only. No AI, no buildImportGraph.
+    const mapResult: MapResult = await discoverFrameworkAndStructure(
+      octokit, conn.github_repo_owner, conn.github_repo_name, preflight.defaultBranch,
+    )
+    if (mapResult.framework === 'unsupported') {
+      // Nothing honest to preview → 'error' so the finale skips straight to Overview.
+      await writeStructurePreview(subscriptionId, {
+        status: 'error', framework: 'unsupported',
+        error_message: mapResult.unsupportedReason || 'unsupported repository shape',
+        nodes: [], edges: [], truncated: false,
+      })
+      return { ok: true, status: 'error' }
+    }
+
+    const siteRoot = mapResult.siteRoot || ''
+    // entryPoints are siteRoot-relative; repoTree paths are repo-root-relative.
+    const entrySet = new Set(
+      (mapResult.entryPoints || []).map(p => (siteRoot ? `${siteRoot}/${p}` : p)),
+    )
+
+    // Source files from the tree (assets are dropped by the frontend's
+    // clusterFromPath; pre-filtering to code bounds the node set). Big repo →
+    // cap + truncated:'partial' (also covers a truncated getTree, which would be
+    // far over the cap). Never fail on size.
+    const allFiles = mapResult.repoTree
+      .filter(e => e.type === 'blob' && PREVIEW_SOURCE_RE.test(e.path))
+      .map(e => e.path)
+
+    let truncated = false
+    let chosen = allFiles
+    if (allFiles.length > PREVIEW_NODE_CAP) {
+      truncated = true
+      // shallowest files first (most meaningful), then guarantee entry points in.
+      chosen = [...allFiles].sort((a, b) => a.split('/').length - b.split('/').length).slice(0, PREVIEW_NODE_CAP)
+      for (const e of entrySet) if (allFiles.includes(e) && !chosen.includes(e)) chosen.push(e)
+    }
+    const chosenSet = new Set(chosen)
+
+    const nodes = chosen.map(path => ({
+      id:            path,
+      componentName: null,                  // RA1 doesn't parse exports; frontend falls back to filename
+      depth:         entrySet.has(path) ? 0 : 1,  // entry points depth 0 → isEntry + hub spokes
+      size:          0,
+      rank:          null,                   // structure-only: no verdicts at first connect
+      rankReason:    null,
+    }))
+
+    // Folder-hierarchy edges (NOT import wiring — that lands on the first run).
+    // Each file → a representative of its directory; each directory rep → its
+    // parent directory's rep. Index/entry-like files are preferred as reps.
+    const repOf = new Map<string, string>()
+    const isLead = (p: string) => /\/(index|main|app|layout|_app|root)\.[jt]sx?$/i.test('/' + p)
+    for (const p of chosen) {
+      const d = previewDir(p)
+      const cur = repOf.get(d)
+      if (!cur || (isLead(p) && !isLead(cur))) repOf.set(d, p)
+    }
+    const edges: Array<{ source: string; target: string; kind: string }> = []
+    const seenEdge = new Set<string>()
+    const addEdge = (s: string, t: string) => {
+      if (s === t || !chosenSet.has(s) || !chosenSet.has(t)) return
+      const k = `${s}>${t}`
+      if (seenEdge.has(k)) return
+      seenEdge.add(k)
+      edges.push({ source: s, target: t, kind: 'structural' })
+    }
+    for (const p of chosen) {
+      const rep = repOf.get(previewDir(p))
+      if (rep) addEdge(p, rep)                       // file → its directory rep
+    }
+    for (const [d, rep] of repOf) {
+      let parent = previewDir(d)
+      while (parent && !repOf.has(parent)) parent = previewDir(parent)
+      const prep = repOf.get(parent)
+      if (prep) addEdge(rep, prep)                   // dir rep → parent dir rep
+    }
+
+    await writeStructurePreview(subscriptionId, {
+      status:        truncated ? 'partial' : 'ready',
+      framework:     mapResult.framework,
+      truncated,
+      error_message: null,
+      nodes:         nodes ?? [],   // coalesced so the generated node_count can't go null
+      edges:         edges ?? [],
+    })
+    return { ok: true, status: truncated ? 'partial' : 'ready' }
+  } catch (err: any) {
+    console.error('[discoverStructurePreview] failed:', err?.message)
+    await writeStructurePreview(subscriptionId, {
+      status: 'error', error_message: err?.message || String(err), nodes: [], edges: [], truncated: false,
+    })
+    return { ok: false, status: 'error', error: err?.message }
   }
 }
 
