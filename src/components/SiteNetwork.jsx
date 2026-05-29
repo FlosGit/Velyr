@@ -21,6 +21,8 @@ import {
   forceX,
   forceY,
 } from 'd3-force'
+import { select } from 'd3-selection'
+import { zoom as d3zoom, zoomIdentity } from 'd3-zoom'
 
 // ─── simulation constants ─────────────────────────────────────────────────────
 
@@ -402,11 +404,18 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
 
   const containerRef = useRef(null)
   const svgRef       = useRef(null)
+  const zoomGroupRef = useRef(null)
+  const zoomBehaviorRef = useRef(null)
+  const vbRef        = useRef({ x: 0, y: 0, w: 1, h: 1 })  // live viewBox nums for zoom extent
+  const bboxRef      = useRef(null)
+  const didPanRef    = useRef(false)
 
   const [cw,      setCw]      = useState(700)
   const [ch,      setCh]      = useState(500)
   const [layout,  setLayout]  = useState(null)
   const [tooltip, setTooltip] = useState(null)  // { node, x, y }
+  const [zoomT,   setZoomT]   = useState(zoomIdentity)
+  const [showHint, setShowHint] = useState(false)
 
   const prefersReduced = typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -441,9 +450,12 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
 
   const showTooltip = useCallback((node) => {
     const svgEl  = svgRef.current
+    const grpEl  = zoomGroupRef.current
     const contEl = containerRef.current
-    if (!svgEl || !contEl) return
-    const ctm = svgEl.getScreenCTM()
+    if (!svgEl || !grpEl || !contEl) return
+    // Use the ZOOM GROUP's CTM so the tooltip stays glued to the node through
+    // both the viewBox fit and the live zoom/pan transform.
+    const ctm = grpEl.getScreenCTM()
     if (!ctm) return
     const pt = svgEl.createSVGPoint()
     pt.x = node.x
@@ -461,41 +473,48 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
     [layout],
   )
 
-  // Resolve label positions with greedy collision avoidance: place higher-priority
-  // labels first (status → entry → rank), each below its node by default; if that
-  // box overlaps an already-placed label, try above, then nudge further out.
+  // Zoom-adaptive labels. Quantize the zoom scale to 0.25 steps so the greedy
+  // O(n²) collision pass only re-runs on meaningful zoom changes (cheap at 30
+  // nodes, safe at 200). All label geometry is divided by kq: the labels live
+  // inside the zoomed group (scaled by k), so dividing by kq keeps text a near
+  // constant SCREEN size and shrinks the collision box in content space — which
+  // means more labels fit (reveal) as you zoom into a dense region.
+  const kq = Math.max(1, Math.round(zoomT.k / 0.25) * 0.25)
   const labelPlacements = useMemo(() => {
     if (!layout) return []
-    const nodes = layout.nodes
-      .filter(n => !n.isHub && labeledIds.has(n.id))
-      .sort((a, b) => {
-        const pa = STATUS_LOUD.has(a.status) ? 0 : a.isEntry ? 1 : (a.rank ?? 999)
-        const pb = STATUS_LOUD.has(b.status) ? 0 : b.isEntry ? 1 : (b.rank ?? 999)
-        return pa - pb
-      })
+    const prio = n => STATUS_LOUD.has(n.status) ? 0 : n.isEntry ? 1 : (n.rank ?? 9000 + (n.label?.length || 0))
+    // Mandatory = the always-on set; optional = everything else (revealed by zoom
+    // when their shrunken box fits). Both walked in priority order.
+    const all = layout.nodes.filter(n => !n.isHub).sort((a, b) => prio(a) - prio(b))
+    const mandatory = all.filter(n => labeledIds.has(n.id))
+    const optional  = all.filter(n => !labeledIds.has(n.id))
+
     const placed = []
     const overlaps = (a) => placed.some(b =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y)
     const out = []
-    for (const n of nodes) {
-      const w = n.label.length * 5.6 + 4, h = 12
-      // candidate baselines (text y); box top = baseline - 9
+    const tryPlace = (n, force) => {
+      const w = (n.label.length * 5.6 + 4) / kq, h = 12 / kq
       const cands = [
-        n.y + n.r + 11,   // below
-        n.y - n.r - 5,    // above
-        n.y + n.r + 24,   // below, nudged
-        n.y - n.r - 18,   // above, nudged
+        n.y + n.r + 11 / kq,   // below
+        n.y - n.r - 5 / kq,    // above
+        n.y + n.r + 24 / kq,   // below, nudged
+        n.y - n.r - 18 / kq,   // above, nudged
       ]
-      let chosen = cands[0]
-      for (const ty of cands) {
-        const box = { x: n.x - w / 2, y: ty - 9, w, h }
-        if (!overlaps(box)) { chosen = ty; placed.push(box); break }
-        if (ty === cands[cands.length - 1]) { chosen = ty; placed.push(box) }  // last resort
+      for (let i = 0; i < cands.length; i++) {
+        const box = { x: n.x - w / 2, y: cands[i] - 9 / kq, w, h }
+        const last = i === cands.length - 1
+        if (!overlaps(box) || (force && last)) {
+          placed.push(box)
+          out.push({ id: n.id, label: n.label, x: n.x, y: cands[i], bold: n.rank === 1 || STATUS_LOUD.has(n.status) })
+          return
+        }
       }
-      out.push({ id: n.id, label: n.label, x: n.x, y: chosen, anchor: 'middle', bold: n.rank === 1 || STATUS_LOUD.has(n.status) })
     }
+    mandatory.forEach(n => tryPlace(n, true))           // always shown (calm overview set)
+    if (kq > 1) optional.forEach(n => tryPlace(n, false)) // reveal more only once zoomed in
     return out
-  }, [layout, labeledIds])
+  }, [layout, labeledIds, kq])
 
   // Node ids whose rank is genuinely unique (no other ranked node shares its
   // rankReason — our proxy for a tied score). Only these show a "Priority #N";
@@ -518,18 +537,74 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
   // has nothing to pillarbox — the graph fills any panel shape, not just the
   // one the probe happened to test.
   const viewBox = useMemo(() => {
-    if (!layout) return '0 0 1 1'
+    if (!layout) return { str: '0 0 1 1', x: 0, y: 0, w: 1, h: 1 }
     const { x0, y0, x1, y1 } = layout.bbox
     const cxC = (x0 + x1) / 2, cyC = (y0 + y1) / 2
     let w = x1 - x0, h = y1 - y0
     const panelAspect = (cw > 0 && ch > 0) ? cw / ch : w / h
     if (panelAspect > w / h) w = h * panelAspect   // panel wider → add horizontal margin
     else                     h = w / panelAspect   // panel taller → add vertical margin
-    return `${(cxC - w / 2).toFixed(1)} ${(cyC - h / 2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`
+    const x = cxC - w / 2, y = cyC - h / 2
+    return { str: `${x.toFixed(1)} ${y.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`, x, y, w, h }
   }, [layout, cw, ch])
+  vbRef.current = viewBox  // live values for the zoom extent function
+
+  // ── Zoom + pan (d3-zoom) ────────────────────────────────────────────────────
+  // Layered ON TOP of the fit: d3-zoom writes only the inner group transform; the
+  // viewBox still owns framing/resize. extent() reads the live viewBox so cursor-
+  // centred zoom is correct through the viewBox; transforms compose, never fight.
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    const zb = d3zoom()
+      .scaleExtent([1, 8])
+      .extent(() => {
+        const v = vbRef.current
+        return [[v.x, v.y], [v.x + v.w, v.y + v.h]]
+      })
+      .filter((event) => {
+        // Wheel: require ⌘/ctrl (trackpad pinch sets ctrlKey, so pinch passes;
+        // a plain page-scroll over the canvas does NOT zoom — no scroll trap).
+        if (event.type === 'wheel') return event.ctrlKey || event.metaKey
+        // Drag-pan: empty canvas only — exclude drags that start on a node.
+        if (event.type === 'mousedown' || event.type === 'pointerdown') {
+          return !event.button && !(event.target.closest && event.target.closest('.sn-node'))
+        }
+        return !event.button
+      })
+      .on('start', () => { didPanRef.current = false })
+      .on('zoom', (event) => {
+        if (event.sourceEvent && event.sourceEvent.type !== 'wheel') didPanRef.current = true
+        setZoomT(event.transform)
+      })
+    select(svg).call(zb).on('dblclick.zoom', null)  // no dbl-click zoom
+    zoomBehaviorRef.current = zb
+    return () => { select(svg).on('.zoom', null) }
+    // Depends on layout because the <svg> only mounts once layout is set (the
+    // deferred settle); a []-dep effect would run before the SVG exists.
+  }, [layout])
+
+  // Keep pan bounds in sync with the settled content (translateExtent isn't a
+  // function accessor, so re-set it when the layout changes).
+  useEffect(() => {
+    if (!layout || !zoomBehaviorRef.current) return
+    bboxRef.current = layout.bbox
+    const b = layout.bbox, m = 80
+    zoomBehaviorRef.current.translateExtent([[b.x0 - m, b.y0 - m], [b.x1 + m, b.y1 + m]])
+  }, [layout])
+
+  const resetView = useCallback(() => {
+    const svg = svgRef.current, zb = zoomBehaviorRef.current
+    if (!svg || !zb) return
+    const sel = select(svg)
+    ;(prefersReduced ? sel : sel.transition().duration(220)).call(zb.transform, zoomIdentity)
+  }, [prefersReduced])
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', background: '#f7f4ef', ...style }}>
+    <div ref={containerRef}
+      onMouseEnter={() => setShowHint(true)}
+      onMouseLeave={() => setShowHint(false)}
+      style={{ position: 'relative', background: '#f7f4ef', ...style }}>
 
       {/* Loading state */}
       {!layout && (
@@ -556,12 +631,14 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
       {layout && cw >= 600 && (
         <svg
           ref={svgRef}
-          viewBox={viewBox}
+          viewBox={viewBox.str}
           width="100%"
           height="100%"
-          style={{ display: 'block', overflow: 'visible' }}
+          style={{ display: 'block', overflow: 'hidden', touchAction: 'none',
+                   cursor: zoomT.k > 1 ? 'grab' : 'default' }}
           preserveAspectRatio="xMidYMid meet"
         >
+         <g ref={zoomGroupRef} transform={zoomT.toString()}>
           {/* Soft cluster region blobs — a whisper of category structure behind
               the nodes. Very low alpha so status colours always read over them. */}
           <g>
@@ -630,11 +707,11 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
               const fillOpacity = (node.isHub || node.isEntry || node.rank != null || statusLoud) ? 1 : 0.65
 
               return (
-                <g key={node.id}
+                <g key={node.id} className="sn-node"
                   style={{ cursor: onNodeClick ? 'pointer' : 'default' }}
                   onMouseEnter={() => showTooltip(node)}
                   onMouseLeave={hideTooltip}
-                  onClick={() => onNodeClick?.(node)}
+                  onClick={() => { if (didPanRef.current) return; onNodeClick?.(node) }}
                 >
                   <circle cx={node.x} cy={node.y} r={node.r + 5} fill="transparent" />
 
@@ -670,17 +747,19 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
             })}
           </g>
 
-          {/* Node labels — collision-avoided, drawn above all nodes */}
+          {/* Node labels — collision-avoided, drawn above all nodes. Geometry is
+              counter-scaled by the zoom (10/kq etc.) so text stays a near-constant
+              SCREEN size while the graph magnifies, and more labels reveal on zoom. */}
           <g>
             {labelPlacements.map(pl => (
               <text key={pl.id}
                 x={pl.x} y={pl.y}
-                textAnchor={pl.anchor}
+                textAnchor="middle"
                 style={{
-                  fontSize: 10,
+                  fontSize: 10 / kq,
                   fill: '#1c1917',
                   stroke: 'rgba(247,244,239,0.9)',
-                  strokeWidth: 3,
+                  strokeWidth: 3 / kq,
                   paintOrder: 'stroke fill',
                   fontFamily: fSans,
                   fontWeight: pl.bold ? 500 : 300,
@@ -691,7 +770,34 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
               </text>
             ))}
           </g>
+         </g>
         </svg>
+      )}
+
+      {/* Zoom hint + reset affordance */}
+      {layout && cw >= 600 && (
+        <>
+          {showHint && zoomT.k <= 1.01 && (
+            <div style={{
+              position: 'absolute', left: 14, bottom: 12,
+              fontSize: 10.5, color: 'rgba(42,92,69,0.5)', fontFamily: fSans,
+              letterSpacing: '0.02em', pointerEvents: 'none', userSelect: 'none',
+            }}>
+              ⌘ + scroll to zoom · drag to pan
+            </div>
+          )}
+          {zoomT.k > 1.01 && (
+            <button onClick={resetView} style={{
+              position: 'absolute', top: 12, right: 12,
+              background: 'rgba(247,244,239,0.95)', border: '1px solid rgba(28,25,23,0.14)',
+              borderRadius: 8, padding: '5px 11px', fontSize: 11, color: '#2a5c45',
+              fontFamily: fSans, fontWeight: 500, cursor: 'pointer',
+              boxShadow: '0 2px 10px rgba(28,25,23,0.08)',
+            }}>
+              Reset view
+            </button>
+          )}
+        </>
       )}
 
       {/* HTML tooltip */}
