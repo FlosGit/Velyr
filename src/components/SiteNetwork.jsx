@@ -24,13 +24,9 @@ import {
 
 // ─── simulation constants ─────────────────────────────────────────────────────
 
-const SIM_W = 840   // widened from 600 to fill the ~1032px dashboard content panel
-const SIM_H = 480
-const VIEW_PAD_X = 40  // extra horizontal margin so cluster labels and edge nodes don't clip
-
-// Cluster target positions. Hub fixed at (0,0). Anchors pushed out toward the
-// viewBox edges (x spans ±460, y spans ±240) so clusters use the full panel
-// instead of floating in the centre.
+// Cluster anchor positions that shape the radial arrangement. The render no
+// longer uses a fixed viewBox — settle() fits the viewBox to the settled node
+// bbox — so these only steer relative cluster placement, not absolute framing.
 const CLUSTER_POS = {
   core:      { x:    0, y:  -70 },
   marketing: { x:  340, y: -110 },
@@ -142,17 +138,58 @@ function settle(rawNodes, rawEdges) {
   const clusterStr = d =>
     d.isHub ? 0 : 0.18 / Math.sqrt(clusterCount[d.cluster] || 1)
 
+  // Charge/collide/link bumped from the earlier (0.65 / +9 / 52) tuning so dense
+  // clusters — notably the 14-node product cluster whose members all import App
+  // — push apart instead of knotting. The fit-to-content viewBox (below)
+  // absorbs the larger spread, so a bigger layout just fills the panel the same.
   const sim = forceSimulation(simNodes)
-    .force('link',    forceLink(simEdges).id(d => d.id).distance(52).strength(0.11))
-    .force('charge',  forceManyBody().strength(d => -(d.r ** 1.8) * 0.65))
-    .force('collide', forceCollide(d => d.r + 9).strength(0.9))
+    .force('link',    forceLink(simEdges).id(d => d.id).distance(60).strength(0.11))
+    .force('charge',  forceManyBody().strength(d => -(d.r ** 1.8) * 1.0))
+    .force('collide', forceCollide(d => d.r + 13).strength(0.95))
     .force('x',       forceX(d => CLUSTER_POS[d.cluster]?.x ?? 0).strength(clusterStr))
     .force('y',       forceY(d => CLUSTER_POS[d.cluster]?.y ?? 0).strength(clusterStr))
     .stop()
 
   for (let i = 0; i < 300; i++) sim.tick()
 
+  // ── Fit-to-content viewBox ──────────────────────────────────────────────────
+  // Replaces the fixed symmetric box. The viewBox now tracks the actual settled
+  // node bbox (+ padding), so the graph is always centred and fills the panel
+  // regardless of the panel's aspect ratio — probe and live render identically.
+  // Asymmetric padding leaves room for the labels drawn below nodes and the
+  // faint cluster labels drawn above each cluster.
+  const PAD_X = 70, PAD_TOP = 56, PAD_BOTTOM = 40
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const n of simNodes) {
+    if (n.x - n.r < minX) minX = n.x - n.r
+    if (n.x + n.r > maxX) maxX = n.x + n.r
+    if (n.y - n.r < minY) minY = n.y - n.r
+    if (n.y + n.r > maxY) maxY = n.y + n.r
+  }
+  const viewBox = [
+    (minX - PAD_X).toFixed(1),
+    (minY - PAD_TOP).toFixed(1),
+    (maxX - minX + PAD_X * 2).toFixed(1),
+    (maxY - minY + PAD_TOP + PAD_BOTTOM).toFixed(1),
+  ].join(' ')
+
+  // ── Per-cluster label anchors at the settled centroid of member nodes ───────
+  // (was: fixed CLUSTER_POS, which floated in empty space when small clusters
+  // never reached their anchor). Label sits just above the cluster's topmost node.
+  const clusterAgg = {}
+  for (const n of simNodes) {
+    if (n.isHub) continue
+    const a = clusterAgg[n.cluster] || (clusterAgg[n.cluster] = { sx: 0, n: 0, topY: Infinity })
+    a.sx += n.x; a.n += 1
+    if (n.y - n.r < a.topY) a.topY = n.y - n.r
+  }
+  const clusterLabels = Object.entries(clusterAgg).map(([cluster, a]) => ({
+    cluster, x: a.sx / a.n, y: a.topY - 10,
+  }))
+
   return {
+    viewBox,
+    clusterLabels,
     nodes: simNodes,
     edges: simEdges.map(e => {
       const s = e.source  // D3 resolved to node object
@@ -352,10 +389,6 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
     [layout],
   )
 
-  const presentClusters = layout
-    ? [...new Set(layout.nodes.map(n => n.cluster))].filter(c => c !== 'core')
-    : []
-
   return (
     <div ref={containerRef} style={{ position: 'relative', background: '#f7f4ef', ...style }}>
 
@@ -384,31 +417,27 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
       {layout && cw >= 600 && (
         <svg
           ref={svgRef}
-          viewBox={`${-SIM_W / 2 - VIEW_PAD_X} ${-SIM_H / 2} ${SIM_W + VIEW_PAD_X * 2} ${SIM_H}`}
+          viewBox={layout.viewBox}
           width="100%"
           height="100%"
           style={{ display: 'block', overflow: 'visible' }}
           preserveAspectRatio="xMidYMid meet"
         >
-          {/* Faint cluster section labels, behind nodes */}
-          {presentClusters.map(c => {
-            const cp = CLUSTER_POS[c]
-            if (!cp) return null
-            return (
-              <text key={c}
-                x={cp.x} y={cp.y - 42}
-                textAnchor="middle"
-                style={{
-                  fontSize: 8, fill: 'rgba(42,92,69,0.18)',
-                  fontFamily: fSans, fontWeight: 500,
-                  letterSpacing: '0.12em', userSelect: 'none',
-                  pointerEvents: 'none',
-                }}
-              >
-                {CLUSTER_NAME[c]?.toUpperCase()}
-              </text>
-            )
-          })}
+          {/* Faint cluster section labels, at each cluster's settled centroid */}
+          {layout.clusterLabels.filter(cl => cl.cluster !== 'core').map(cl => (
+            <text key={cl.cluster}
+              x={cl.x} y={cl.y}
+              textAnchor="middle"
+              style={{
+                fontSize: 8, fill: 'rgba(42,92,69,0.18)',
+                fontFamily: fSans, fontWeight: 500,
+                letterSpacing: '0.12em', userSelect: 'none',
+                pointerEvents: 'none',
+              }}
+            >
+              {CLUSTER_NAME[cl.cluster]?.toUpperCase()}
+            </text>
+          ))}
 
           {/* Edges */}
           <g>
