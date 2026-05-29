@@ -359,6 +359,79 @@ async function handleTelegramStartToken(req, res) {
   return res.status(200).json({ token })
 }
 
+// ─── action=discover_structure (POST) ────────────────────────────────────────
+// Stage 3: fire the edge function's `discover_structure` intent (RA1 only) after
+// the GitHub step so the first-connect preview is mapping while the user finishes
+// Telegram. Seeds the row as 'mapping' so the finale poll sees it immediately,
+// then fires the edge function (non-blocking, same cron-fire pattern). Errors are
+// non-fatal: the row stays 'mapping' and the finale times out → routes to Overview.
+async function handleDiscoverStructure(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+  if (!SERVICE_ROLE_KEY) {
+    console.error('onboarding/discover_structure: SUPABASE_SERVICE_ROLE_KEY not configured')
+    return res.status(500).json({ error: 'Onboarding is not configured. Contact support.' })
+  }
+
+  const auth = await getUser(req)
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' })
+
+  const { subscriptionId } = req.body || {}
+  if (!subscriptionId) return res.status(400).json({ error: 'Missing subscriptionId.' })
+
+  // Ownership: the subscription must belong to the caller before we touch its row
+  // or fire a server-side job for it.
+  const { data: sub, error: subErr } = await serviceClient
+    .from('agent_subscriptions')
+    .select('auth_user_id')
+    .eq('id', subscriptionId)
+    .maybeSingle()
+  if (subErr) {
+    console.error('onboarding/discover_structure: subscription lookup failed:', subErr.message)
+    return res.status(500).json({ error: 'Could not start structure mapping.' })
+  }
+  if (!sub || sub.auth_user_id !== auth.user.id) {
+    return res.status(403).json({ error: 'subscription does not belong to authenticated user' })
+  }
+
+  // Seed 'mapping' so the finale poll has a row to read right away.
+  await serviceClient
+    .from('site_structure_preview')
+    .upsert(
+      { subscription_id: subscriptionId, status: 'mapping', updated_at: new Date().toISOString() },
+      { onConflict: 'subscription_id' },
+    )
+
+  // Fire the edge function (non-blocking — same 2s-abort cron-fire pattern as
+  // api/agent/run.js). The edge fn writes the terminal status; we don't await it.
+  const edgeUrl   = `${SUPABASE_URL}/functions/v1/agent-run`
+  const controller = new AbortController()
+  const timeoutId  = setTimeout(() => controller.abort(), 2000)
+  try {
+    await fetch(edgeUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ intent: 'discover_structure', subscriptionId }),
+      signal: controller.signal,
+    })
+  } catch (err) {
+    // AbortError = our 2s timeout → the request landed and the edge fn is running.
+    // Anything else: the row stays 'mapping' and the finale times out gracefully.
+    if (err?.name !== 'AbortError') {
+      console.error('onboarding/discover_structure: edge dispatch failed:', err?.message || err)
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+
+  return res.status(200).json({ ok: true })
+}
+
 // ─── action=verify_telegram_code (POST) ──────────────────────────────────────
 // Lightweight, read-only Step-4 affordance: tells the UI whether a pasted code
 // is currently valid (exists, unused, unexpired) so it can show "connected to
@@ -455,6 +528,7 @@ export default async function handler(req, res) {
   if (action === 'complete')             return handleComplete(req, res)
   if (action === 'finalize')             return handleFinalize(req, res)
   if (action === 'telegram_start_token') return handleTelegramStartToken(req, res)
+  if (action === 'discover_structure')   return handleDiscoverStructure(req, res)
   if (action === 'verify_telegram_code') return handleVerifyTelegramCode(req, res)
   return res.status(400).json({ error: 'Unknown action' })
 }

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 
 import { supabase } from '../lib/supabase.js'
 import { startCheckout } from '../utils/startCheckout.js'
+import { SiteNetwork } from '../components/SiteNetwork.jsx'
+import { buildNetworkData, hubDomainFromUrl } from '../lib/siteNetworkData.js'
 
 const C = {
   bg:        '#f7f4ef',
@@ -715,6 +717,108 @@ function Step4({ onNext, onBack, loading }) {
   )
 }
 
+// ─── FIRST-CONNECT BUILD FINALE ───────────────────────────────────────────────
+// Stage 3 (C1 + C2). Polls site_structure_preview (RA1 result, fired after the
+// GitHub step) and animates the real folder structure wave-by-wave, then closes
+// with the C2 "your network sharpens on Monday" beat and routes to the dashboard
+// Overview. Honest: structure-only, neutral nodes, NO verdicts. Failure-safe: on
+// status:'error' / timeout / empty it skips the build beat and still closes clean.
+function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
+  const [phase, setPhase] = useState('polling')   // polling | building | skip
+  const [data, setData]   = useState(null)
+  const [showOutro, setShowOutro] = useState(false)
+  const domain = hubDomainFromUrl(websiteUrl) || 'your site'
+
+  // Poll the preview row until terminal. ready/partial with nodes → build;
+  // error / timeout / empty → skip (never hang, never show a broken graph).
+  useEffect(() => {
+    if (!subscriptionId) { setPhase('skip'); return }
+    let cancelled = false
+    let polls = 0
+    const MAX_POLLS = 14   // ~21s at 1.5s
+    const tick = async () => {
+      if (cancelled) return
+      polls++
+      const { data: row } = await supabase
+        .from('site_structure_preview').select('*')
+        .eq('subscription_id', subscriptionId).maybeSingle()
+      if (cancelled) return
+      const st = row?.status
+      if (st === 'ready' || st === 'partial') {
+        const nd = buildNetworkData(row, { domain })
+        if (nd && nd.nodes.length > 1) { setData(nd); setPhase('building'); return }
+        setPhase('skip'); return                 // ready but nothing to show
+      }
+      if (st === 'error')        { setPhase('skip'); return }
+      if (polls >= MAX_POLLS)    { setPhase('skip'); return }
+      setTimeout(tick, 1500)
+    }
+    tick()
+    return () => { cancelled = true }
+  }, [subscriptionId, domain])
+
+  // building → let the reveal play, then fade in the outro. skip → outro now.
+  useEffect(() => {
+    if (phase === 'building') {
+      const t = setTimeout(() => setShowOutro(true), 2600)
+      return () => clearTimeout(t)
+    }
+    if (phase === 'skip') setShowOutro(true)
+  }, [phase])
+
+  // Auto-route once the outro is shown (generous read pause); button skips it.
+  useEffect(() => {
+    if (!showOutro) return
+    const t = setTimeout(() => navigate('/agent/dashboard'), 5200)
+    return () => clearTimeout(t)
+  }, [showOutro, navigate])
+
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '20px 28px' }}>
+        <Logo size={20} />
+        <span style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 500, fontSize: 18, color: C.text }}>Velyr</span>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px 24px' }}>
+        <p style={{ fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: C.accent, marginBottom: 6, fontWeight: 500 }}>
+          {phase === 'building' ? 'Mapping your site' : phase === 'polling' ? 'Mapping your site' : 'All set'}
+        </p>
+        <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 30, letterSpacing: '-.015em', color: C.text, marginBottom: 18 }}>
+          {domain}
+        </h2>
+
+        {phase === 'polling' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '60px 0' }}>
+            <div style={{ width: 26, height: 26, border: '2px solid rgba(42,92,69,0.15)', borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+            <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300 }}>Reading your repository structure…</p>
+          </div>
+        )}
+
+        {phase === 'building' && data && (
+          <div style={{ width: '100%', maxWidth: 960, borderRadius: 16, overflow: 'hidden', background: '#f7f4ef', border: `1px solid ${C.border}` }}>
+            <SiteNetwork data={data} reveal style={{ height: 'min(56vh, 520px)', minHeight: 360 }} />
+          </div>
+        )}
+
+        {/* Outro — C2: the network itself sharpens on Monday */}
+        <div style={{
+          marginTop: 22, textAlign: 'center', maxWidth: 460,
+          opacity: showOutro ? 1 : 0, transition: 'opacity .6s ease',
+        }}>
+          <p style={{ fontSize: 14, color: C.text, fontWeight: 400, lineHeight: 1.6, marginBottom: 6 }}>
+            This is your site’s structure. On your first run Monday, the agent maps how your
+            pages actually connect — and ships its first conversion fix.
+          </p>
+          <button className="ob-btn" onClick={() => navigate('/agent/dashboard')} style={{ width: 'auto', padding: '12px 24px', marginTop: 12 }}>
+            Enter your dashboard →
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── ROOT ────────────────────────────────────────────────────────────────────
 // FIX 3: useNavigate hook instead of navigate prop
 export default function AgentOnboarding({ navigate }) {
@@ -857,7 +961,25 @@ export default function AgentOnboarding({ navigate }) {
 
   const handleStep0 = ()     => setStep(1)
   const handleStep1 = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(2) }
-  const handleStep2 = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(3) }
+  const handleStep2 = (data) => {
+    setFormData(prev => ({ ...prev, ...data }))
+    setStep(3)
+    // Stage 3: kick off the first-connect structure preview now (RA1, ~2s) so it's
+    // ready by the time the user reaches the build finale. Fire-and-forget; any
+    // failure is non-fatal (the finale times out → skips gracefully to Overview).
+    ;(async () => {
+      try {
+        if (!subscriptionId) return
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
+        await fetch('/api/onboarding?action=discover_structure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ subscriptionId }),
+        })
+      } catch { /* non-fatal */ }
+    })()
+  }
   const handleStep3 = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(4) }
 
   const handleStep4 = async (data) => {
@@ -999,7 +1121,12 @@ export default function AgentOnboarding({ navigate }) {
       // verify effect owns cleanup after confirming with Stripe. Removing the
       // key here would make the dashboard's fallback read null and bounce
       // freshly-onboarded users to "Unlock your Growth Agent".
-      navigate('/agent/dashboard')
+      //
+      // Stage 3: instead of jumping straight to the dashboard, show the
+      // first-connect build finale (step 5). It animates the structure preview
+      // and then routes to the Overview (or skips straight there on any failure).
+      setLoading(false)
+      setStep(5)
     } catch (err) {
       console.error('[onboarding/step4] failed:', {
         message: err?.message,
@@ -1024,6 +1151,17 @@ export default function AgentOnboarding({ navigate }) {
           <div style={{ width: 32, height: 32, border: '2px solid rgba(28,25,23,0.15)', borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
           <p style={{ fontSize: 13, color: C.textLight, fontWeight: 300 }}>Checking your subscription…</p>
         </div>
+      </>
+    )
+  }
+
+  // Stage 3: first-connect build finale takes over full-screen (the graph needs
+  // more width than the 520px step card).
+  if (step === 5) {
+    return (
+      <>
+        <style>{CSS}</style>
+        <OnboardingBuild subscriptionId={subscriptionId} websiteUrl={formData.websiteUrl} navigate={navigate} />
       </>
     )
   }

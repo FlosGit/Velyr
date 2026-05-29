@@ -402,7 +402,14 @@ function NodeTooltip({ node, x, y, cw, ch, rankUnique, fSans, fSerif, fMono }) {
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
+// First-connect build animation: nodes fade in hub → entries → cluster-by-cluster,
+// then edges, then labels — a client-side reveal of the one real getTree result.
+const REVEAL_STEP = 0.13
+const REVEAL_CLUSTER_ORDER = ['core', 'marketing', 'product', 'content', 'auth', 'utility', 'legal', 'other']
+const revealWaveOf = (n) =>
+  n.isHub ? 0 : n.isEntry ? 1 : 2 + Math.max(0, REVEAL_CLUSTER_ORDER.indexOf(n.cluster))
+
+export function SiteNetwork({ data, onNodeClick, style, fonts = {}, reveal = false }) {
   const fSans  = fonts.sans  ?? 'Jost, sans-serif'
   const fSerif = fonts.serif ?? 'Cormorant Garant, serif'
   const fMono  = fonts.mono  ?? 'DM Mono, monospace'
@@ -633,6 +640,13 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
     ;(prefersReduced ? sel : sel.transition().duration(220)).call(zb.transform, zoomIdentity)
   }, [prefersReduced])
 
+  // Build-reveal: only animate when asked AND motion is allowed. Nodes stagger by
+  // wave; edges then labels fade in after the last node wave.
+  const animate  = reveal && !prefersReduced
+  const maxWave  = layout ? layout.nodes.reduce((m, n) => Math.max(m, revealWaveOf(n)), 0) : 0
+  const edgeDelay  = (maxWave + 1) * REVEAL_STEP
+  const labelDelay = (maxWave + 2) * REVEAL_STEP
+
   return (
     <div ref={containerRef}
       onMouseEnter={() => setShowHint(true)}
@@ -671,10 +685,11 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
                    cursor: panning ? 'grabbing' : 'grab' }}
           preserveAspectRatio="xMidYMid meet"
         >
+         {animate && <style>{`@keyframes _sn_fadein { from { opacity: 0 } to { opacity: 1 } }`}</style>}
          <g ref={zoomGroupRef} transform={transformRef.current.toString()}>
           {/* Soft cluster region blobs — a whisper of category structure behind
               the nodes. Very low alpha so status colours always read over them. */}
-          <g>
+          <g style={animate ? { opacity: 0, animation: '_sn_fadein .5s ease forwards' } : undefined}>
             {layout.clusterBlobs.map(bl => (
               <circle key={bl.cluster}
                 cx={bl.cx} cy={bl.cy} r={bl.r}
@@ -703,7 +718,8 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
           {/* Edges — faint curved arcs; opacity fades with endpoint degree so
               busy fans recede. Curve = control point offset perpendicular to
               the midpoint by ~12% of edge length. */}
-          <g fill="none">
+          <g fill="none"
+            style={animate ? { opacity: 0, animation: '_sn_fadein .5s ease forwards', animationDelay: `${edgeDelay}s` } : undefined}>
             {layout.edges.map(e => {
               const dx = e.x2 - e.x1, dy = e.y2 - e.y1
               const len = Math.hypot(dx, dy) || 1
@@ -741,7 +757,10 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
 
               return (
                 <g key={node.id} className="sn-node"
-                  style={{ cursor: onNodeClick ? 'pointer' : 'default' }}
+                  style={{
+                    cursor: onNodeClick ? 'pointer' : 'default',
+                    ...(animate ? { opacity: 0, animation: '_sn_fadein .42s ease forwards', animationDelay: `${revealWaveOf(node) * REVEAL_STEP}s` } : null),
+                  }}
                   onMouseEnter={() => showTooltip(node)}
                   onMouseLeave={hideTooltip}
                   onClick={() => { if (didPanRef.current) return; onNodeClick?.(node) }}
@@ -783,7 +802,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
           {/* Node labels — collision-avoided, drawn above all nodes. Geometry is
               counter-scaled by the zoom (10/kq etc.) so text stays a near-constant
               SCREEN size while the graph magnifies, and more labels reveal on zoom. */}
-          <g>
+          <g style={animate ? { opacity: 0, animation: '_sn_fadein .5s ease forwards', animationDelay: `${labelDelay}s` } : undefined}>
             {labelPlacements.map(pl => (
               <text key={pl.id}
                 x={pl.x} y={pl.y}
