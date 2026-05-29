@@ -70,20 +70,31 @@ const STATUS_COPY = {
   problem:         'Regression',
 }
 
-const EDGE_COLOR = {
-  import:     'rgba(42,92,69,0.22)',
-  structural: 'rgba(42,92,69,0.10)',
+const EDGE_RGB = '42,92,69'
+// Base stroke opacity per edge kind, before the degree-fade multiplier. Kept
+// low so edges whisper; high-degree fans fade further (see edgeFade()).
+const EDGE_BASE_OPACITY = { import: 0.16, structural: 0.09 }
+
+// Continuous degree fade — NOT a fitted threshold. Edges touching a busy node
+// (App, a shared util, etc.) recede smoothly; low-degree links stay legible.
+// exp decay on the busier endpoint's degree, floored so nothing fully vanishes.
+function edgeFade(maxDeg) {
+  return Math.max(0.22, Math.exp(-(maxDeg - 1) / 6))
 }
+
 
 // ─── layout helpers ───────────────────────────────────────────────────────────
 
 function calcR(node) {
-  if (node.isHub)     return 22
-  if (node.isGrouped) return 10 + Math.min(6, Math.sqrt(node.groupCount || 0))
-  let r = node.isEntry ? 10 : 7
-  if (node.rank      != null) r += Math.max(0, 7 - node.rank * 0.8)
-  if (node.dropOffScore != null) r += node.dropOffScore * 3.5
-  return Math.max(5, Math.min(Math.round(r), 22))
+  if (node.isHub)     return 24
+  if (node.isGrouped) return 11 + Math.min(6, Math.sqrt(node.groupCount || 0))
+  // Rank drives radius with real contrast: top ranks clearly large, tail small.
+  // r1 ≈ 16 → r10 ≈ 9; unranked leaves 5 (entry-but-unranked floored at 9).
+  let r
+  if (node.rank != null) r = 17 - Math.min(node.rank, 12) * 0.8
+  else                   r = node.isEntry ? 9 : 5
+  if (node.dropOffScore != null) r += node.dropOffScore * 3   // funnel signal, when present
+  return Math.max(5, Math.min(Math.round(r), 24))
 }
 
 // Which nodes get an always-on SVG label. Hub, entry points, and grouped
@@ -105,12 +116,25 @@ function computeLabeledIds(nodes) {
   return ids
 }
 
-function splitDomain(domain) {
-  const dot = domain.lastIndexOf('.')
-  if (dot === -1) return [domain.slice(0, 10), '']
-  const body = domain.slice(0, dot)
-  const tld  = domain.slice(dot)
-  return [body.length > 10 ? body.slice(0, 9) + '…' : body, tld]
+// Two-line hub label. Dotted domains split body / .tld; dotless deploy slugs
+// (test-iota-drab-18) wrap at the hyphen nearest the middle. Lines too long to
+// fit the hub circle ellipsize cleanly — never a hard mid-word cut.
+function hubLabelLines(domain) {
+  const cap = s => (s.length > 12 ? s.slice(0, 11) + '…' : s)
+  if (domain.includes('.')) {
+    const dot = domain.lastIndexOf('.')
+    return [cap(domain.slice(0, dot)), domain.slice(dot)]
+  }
+  const parts = domain.split('-')
+  if (parts.length >= 2) {
+    let best = 1, bestDiff = Infinity
+    for (let i = 1; i < parts.length; i++) {
+      const diff = Math.abs(parts.slice(0, i).join('-').length - parts.slice(i).join('-').length)
+      if (diff < bestDiff) { bestDiff = diff; best = i }
+    }
+    return [cap(parts.slice(0, best).join('-')), cap(parts.slice(best).join('-'))]
+  }
+  return [cap(domain), '']
 }
 
 // Run D3 force simulation to convergence; returns flat renderable snapshot.
@@ -135,6 +159,11 @@ function settle(rawNodes, rawEdges) {
   const simEdges = rawEdges
     .filter(e => validIds.has(e.source) && validIds.has(e.target))
     .map(e => ({ ...e }))
+
+  // Node degree (for the continuous edge fade — busy nodes' fans recede).
+  const degree = {}
+  for (const id of validIds) degree[id] = 0
+  for (const e of simEdges) { degree[e.source]++; degree[e.target]++ }
 
   const clusterStr = d =>
     d.isHub ? 0 : 0.18 / Math.sqrt(clusterCount[d.cluster] || 1)
@@ -212,6 +241,7 @@ function settle(rawNodes, rawEdges) {
         kind:  e.kind,
         x1: s.x, y1: s.y,
         x2: t.x, y2: t.y,
+        maxDeg: Math.max(degree[s.id] || 0, degree[t.id] || 0),
       }
     }),
   }
@@ -476,15 +506,25 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
             </text>
           ))}
 
-          {/* Edges */}
-          <g>
-            {layout.edges.map(e => (
-              <line key={e.key}
-                x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
-                stroke={EDGE_COLOR[e.kind]}
-                strokeWidth={e.kind === 'import' ? 1.2 : 0.7}
-              />
-            ))}
+          {/* Edges — faint curved arcs; opacity fades with endpoint degree so
+              busy fans recede. Curve = control point offset perpendicular to
+              the midpoint by ~12% of edge length. */}
+          <g fill="none">
+            {layout.edges.map(e => {
+              const dx = e.x2 - e.x1, dy = e.y2 - e.y1
+              const len = Math.hypot(dx, dy) || 1
+              const off = len * 0.12
+              const mx = (e.x1 + e.x2) / 2 + (-dy / len) * off
+              const my = (e.y1 + e.y2) / 2 + ( dx / len) * off
+              const opacity = (EDGE_BASE_OPACITY[e.kind] ?? 0.1) * edgeFade(e.maxDeg)
+              return (
+                <path key={e.key}
+                  d={`M${e.x1.toFixed(1)} ${e.y1.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${e.x2.toFixed(1)} ${e.y2.toFixed(1)}`}
+                  stroke={`rgba(${EDGE_RGB},${opacity.toFixed(3)})`}
+                  strokeWidth={e.kind === 'import' ? 0.8 : 0.55}
+                />
+              )
+            })}
           </g>
 
           {/* Nodes */}
@@ -494,7 +534,11 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
               const fill    = node.isHub ? '#2a5c45' : FILL[node.status]
               const stroke  = node.isHub ? 'none'    : RING[node.status]
               const sw      = node.isEntry && !node.isHub ? 2.0 : 1.5
-              const [dl1, dl2] = node.isHub ? splitDomain(data.meta.domain) : []
+              const [dl1, dl2] = node.isHub ? hubLabelLines(data.meta.domain) : []
+              // Hierarchy via opacity: ranked nodes + anchors lead; leaves recede
+              // to 0.65. Status-coloured nodes (gold/green/regression) stay full.
+              const statusLoud = node.status === 'fix-in-flight' || node.status === 'optimized' || node.status === 'problem'
+              const fillOpacity = (node.isHub || node.isEntry || node.rank != null || statusLoud) ? 1 : 0.65
 
               return (
                 <g key={node.id}
@@ -513,7 +557,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
 
                   <circle
                     cx={node.x} cy={node.y} r={node.r}
-                    fill={fill} stroke={stroke} strokeWidth={sw}
+                    fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={sw}
                   />
 
                   {/* Hub: two-line domain label inside circle */}
@@ -522,7 +566,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {} }) {
                       x={node.x} y={node.y}
                       textAnchor="middle"
                       style={{
-                        fontSize: 7, fill: 'rgba(247,244,239,0.92)',
+                        fontSize: 7.5, fill: 'rgba(247,244,239,0.92)',
                         fontFamily: fSans, fontWeight: 500,
                         letterSpacing: '0.04em',
                         pointerEvents: 'none', userSelect: 'none',
