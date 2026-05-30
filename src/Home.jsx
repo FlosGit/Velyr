@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { demoData } from './data/demoData'
 import SubscribeButton from './components/SubscribeButton.jsx'
+import SiteNetwork from './components/SiteNetwork.jsx'
+import { mockSiteNetworkData } from './data/mockSiteNetwork.js'
 
 const C = {
   bg:          '#f7f4ef',
@@ -77,6 +79,8 @@ const CSS = `
     .pricing-card { padding: 26px 22px !important; }
     .growth-section { padding: 64px 16px !important; }
     .nav-logo-text { font-size: 18px !important; }
+    .why-compare { grid-template-columns: 1fr !important; }
+    .diff-grid { grid-template-columns: 1fr !important; }
   }
 
   @media (max-width: 900px) {
@@ -255,27 +259,30 @@ function Hero({ navigate }) {
     <section className="hero-section" style={{ paddingTop:120, paddingBottom:64, paddingLeft:24, paddingRight:24, background:C.bg }}>
       <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ maxWidth:1060, margin:'0 auto' }}>
 
-        {/* Live label + pulsing dot */}
-        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:18 }}>
-          <div style={{ position:'relative', width:10, height:10 }}>
-            <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:'#22c55e', animation:'agentPing 2s ease-out infinite' }} />
-            <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:'#22c55e' }} />
-          </div>
-          <span style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>Growth Agent</span>
+        {/* Brand eyebrow — calm, static (no live-activity implication) */}
+        <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:18 }}>
+          <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
+          <span style={{ fontSize:11, letterSpacing:'.16em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>AI Growth Agent · for React, Next.js & Vite</span>
         </div>
 
         <h1 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(36px, 6vw, 64px)', lineHeight:1.1, letterSpacing:'-.025em', color:C.text }}>
           Conversion fixes, <em style={{ fontStyle:'italic', color:C.warm }}>shipped weekly</em>.
         </h1>
 
-        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 19px)', color:C.textMuted, maxWidth:640, marginTop:24, lineHeight:1.6 }}>
-          Your AI growth agent identifies the #1 conversion problem on your site each week, writes the code fix, opens a Pull Request — and reverts itself if the metric drops.
+        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 19px)', color:C.textMuted, maxWidth:660, marginTop:24, lineHeight:1.6 }}>
+          Velyr is an AI agent that connects to your GitHub repo, finds the #1 conversion problem on your site each week, and writes the fix as a Pull Request.
+        </p>
+        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(15px, 1.5vw, 18px)', color:C.textMuted, maxWidth:660, marginTop:12, lineHeight:1.6 }}>
+          You approve it with one reply on Telegram. If the numbers drop, it reverts itself.
         </p>
 
-        <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:40, flexWrap:'wrap' }}>
-          <button className="btn-primary" style={{ width:'auto' }} onClick={() => scrollTo('pricing-section')}>See pricing →</button>
-          <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>How it works</button>
+        <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:36, flexWrap:'wrap', alignItems:'center' }}>
+          <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
+          <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>See how it works</button>
         </div>
+        <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:14, letterSpacing:'.01em' }}>
+          14-day free trial · You approve every change · Cancel anytime
+        </p>
 
         <div style={{ marginTop:56 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400, marginBottom:18 }}>10-week demo</p>
@@ -297,17 +304,6 @@ function Hero({ navigate }) {
 // ─── Growth Agent Section ─────────────────────────────────────────────────────
 function GrowthAgentSection({ navigate }) {
   const [ref, visible] = useReveal()
-  const [featuresExpanded, setFeaturesExpanded] = useState(false)
-
-  const featuresTop = [
-    { icon:'📱', title:'YES or NO from Telegram', desc:'You get a Telegram message every Monday with the problem, the solution, and the PR link. Reply YES to deploy or NO to skip — done.' },
-  ]
-
-  const featuresExtra = [
-    { icon:'🔍', title:'Competitor weekly scan', desc:"Track up to 2 competitors. Every Monday the agent checks for hero, CTA, and pricing changes — and tells you what they shipped that you didn't." },
-    { icon:'🔥', title:'Monthly roast report', desc:"Once a month, brutal honesty: what improved, what is still embarrassingly bad versus competitors, and what you keep ignoring that the agent can't fix for you." },
-    { icon:'🌐', title:'Public impact timeline', desc:'Optional public page at velyr.io/agent/your-slug showing every run and its results. Use it as social proof or share with your team.' },
-  ]
 
   const timelinePhases = [
     {
@@ -317,7 +313,7 @@ function GrowthAgentSection({ navigate }) {
         { time:'8:00 am',  icon:'📊', text:'Weekly Executive Summary sent to Telegram — traffic, bounce rate, last week\'s impact.' },
         { time:'9:00 am',  icon:'🔍', text:'Agent reads your PostHog analytics + scans every page in your GitHub repo.' },
         { time:'9:10 am',  icon:'🎯', text:'Identifies the #1 conversion problem across your full funnel.' },
-        { time:'9:15 am',  icon:'✍️', text:'Writes the code fix and opens a Pull Request with a live preview link.' },
+        { time:'9:15 am',  icon:'✍️', text:'Writes the code fix and opens a Pull Request with a Vercel preview link.' },
         { time:'9:20 am',  icon:'📲', text:'Telegram message arrives — problem, data, solution, PR link. Reply YES to ship, NO to skip.' },
       ]
     },
@@ -325,14 +321,14 @@ function GrowthAgentSection({ navigate }) {
       phase: 'Wednesday',
       color: C.warm,
       steps: [
-        { time:'9:00 am',  icon:'📈', text:'Mid-week check: traffic update, bounce rate delta, social traffic sources.' },
+        { time:'9:00 am',  icon:'📈', text:'Mid-week check: traffic trend, bounce rate, and top traffic sources.' },
       ]
     },
     {
       phase: '+48h after deploy',
       color: C.yellow,
       steps: [
-        { time:'Auto',  icon:'🔄', text:'Bounce rate check — if it increased 15%+, the agent auto-reverts and notifies you.' },
+        { time:'Auto',  icon:'🔄', text:'Bounce rate check — if it rose 15 percentage points or more, the agent auto-reverts and notifies you.' },
       ]
     },
   ]
@@ -342,12 +338,9 @@ function GrowthAgentSection({ navigate }) {
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
 
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:64 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:16 }}>
-            <div style={{ position:'relative', width:10, height:10 }}>
-              <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:'#22c55e', animation:'agentPing 2s ease-out infinite' }} />
-              <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:'#22c55e' }} />
-            </div>
-            <span style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>Growth Agent</span>
+          <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:16 }}>
+            <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
+            <span style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>How it works</span>
           </div>
           <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(32px, 5vw, 60px)', letterSpacing:'-.025em', lineHeight:1.08, color:C.text, marginBottom:20 }}>
             Your website,<br />
@@ -360,50 +353,6 @@ function GrowthAgentSection({ navigate }) {
             Requires a React, Next.js, or Vite site hosted on GitHub + Vercel.
           </p>
         </div>
-
-        {/* Top features always visible */}
-        <div className="agent-features-grid" style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:2, marginBottom:2 }}>
-          {featuresTop.map((f, i) => (
-            <div key={i} style={{
-              background:'#fff',
-              border:`1px solid ${C.border}`,
-              borderRadius: i===0 ? '14px 0 0 0' : '0 14px 0 0',
-              padding:'32px 28px',
-              opacity: visible ? 1 : 0,
-              transform: visible ? 'none' : 'translateY(16px)',
-              transition: `all .55s ease ${i * 0.07}s`,
-            }}>
-              <div style={{ fontSize:24, marginBottom:16 }}>{f.icon}</div>
-              <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:20, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{f.title}</h3>
-              <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{f.desc}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Expandable extra features */}
-        <div style={{ maxHeight:featuresExpanded?400:0, overflow:'hidden', transition:'max-height .4s cubic-bezier(.4,0,.2,1)' }}>
-          <div className="agent-features-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:2, marginBottom:2 }}>
-            {featuresExtra.map((f, i) => (
-              <div key={i} style={{
-                background:'#fff',
-                border:`1px solid ${C.border}`,
-                borderRadius: i===0 ? '0 0 0 14px' : i===2 ? '0 0 14px 0' : '0',
-                padding:'32px 28px',
-              }}>
-                <div style={{ fontSize:24, marginBottom:16 }}>{f.icon}</div>
-                <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:20, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{f.title}</h3>
-                <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{f.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <button onClick={() => setFeaturesExpanded(o=>!o)} style={{ width:'100%', background:'#fff', border:`1px solid ${C.border}`, borderRadius:'0 0 14px 14px', padding:'13px', fontFamily:'Jost,sans-serif', fontSize:13, fontWeight:300, color:C.textMuted, cursor:'pointer', transition:'all .2s', marginBottom:48, display:'flex', alignItems:'center', justifyContent:'center', gap:7 }}
-          onMouseEnter={e=>e.currentTarget.style.background=C.bgSecond}
-          onMouseLeave={e=>e.currentTarget.style.background='#fff'}
-        >
-          {featuresExpanded ? '↑ Show less' : `↓ Show ${featuresExtra.length} more features`}
-        </button>
 
         {/* How it works + CTA side by side */}
         <div className="agent-bottom-grid" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
@@ -471,7 +420,7 @@ function GrowthAgentSection({ navigate }) {
               transition: 'all .6s ease .65s',
             }}>
               <p style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:24, color:'#fff', letterSpacing:'-.015em', marginBottom:6 }}>Ready to let the agent work?</p>
-              <p style={{ fontSize:13, color:'rgba(247,244,239,0.6)', fontWeight:300, marginBottom:20 }}>Set up in 5 minutes. €29/month. Cancel anytime.</p>
+              <p style={{ fontSize:13, color:'rgba(247,244,239,0.6)', fontWeight:300, marginBottom:20 }}>Set up in a few minutes. 14-day free trial, then €29/month. Cancel anytime.</p>
               <div style={{ display:'flex', gap:8, flexDirection:'column' }}>
                 <button onClick={() => navigate('/agent/register')} style={{
                   background:'#f7f4ef', color:C.text, border:'none', borderRadius:10,
@@ -480,7 +429,7 @@ function GrowthAgentSection({ navigate }) {
                 }}
                   onMouseEnter={e => { e.currentTarget.style.background='#fff' }}
                   onMouseLeave={e => { e.currentTarget.style.background='#f7f4ef' }}
-                >Start Growth Agent →</button>
+                >Start free trial →</button>
                 <button onClick={() => navigate('/agent/login')} style={{
                   background:'transparent', color:'rgba(247,244,239,0.9)',
                   border:'1px solid rgba(247,244,239,0.35)', borderRadius:10,
@@ -580,7 +529,6 @@ function AgentDashboardPreview({ navigate }) {
     'Fetching repo',
     'Pulling analytics',
     'Scanning competitors',
-    'Checking seasonal',
     'Reading Business DNA',
     'Mapping funnel',
     'Finding biggest issue',
@@ -1176,6 +1124,181 @@ function Footer({ navigate }) {
   )
 }
 
+// ─── Trust strip (honest signals only) ────────────────────────────────────────
+function TrustStrip() {
+  const items = [
+    'Powered by Claude',
+    'You approve every change before it ships',
+    'Auto-reverts if the metric drops',
+    'Read + Pull-Request access only — revoke anytime',
+  ]
+  return (
+    <section style={{ background:C.bg, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, padding:'18px 24px' }}>
+      <div style={{ maxWidth:1060, margin:'0 auto', display:'flex', flexWrap:'wrap', gap:'12px 32px', alignItems:'center', justifyContent:'center' }}>
+        {items.map((t, i) => (
+          <div key={i} style={{ display:'flex', alignItems:'center', gap:9 }}>
+            <span style={{ width:6, height:6, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
+            <span style={{ fontSize:12.5, color:C.textMuted, fontWeight:300, letterSpacing:'.01em' }}>{t}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ─── Why / problem + agency comparison ────────────────────────────────────────
+function WhySection() {
+  const [ref, visible] = useReveal()
+  const rows = [
+    { old:'Hire a CRO agency at €2–5k/mo — or never get around to it.', neu:'€29/mo. One high-impact fix every week, automatically.' },
+    { old:'Receive a slide deck of recommendations to build yourself.', neu:'Receive a ready-to-merge Pull Request with the code already written.' },
+    { old:'Ship the change and hope it helped.', neu:'Measured 48h later — it auto-reverts if it made things worse.' },
+  ]
+  return (
+    <section className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
+      <div style={{ maxWidth:1060, margin:'0 auto' }}>
+        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:40, maxWidth:640 }}>
+          <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Why Velyr</p>
+          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text, marginBottom:18 }}>
+            Every site leaks conversions.<br /><em style={{ fontStyle:'italic', color:C.warm }}>Fixing them never makes the to-do list.</em>
+          </h2>
+          <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7 }}>
+            Conversion work is slow, manual, and easy to postpone — so it waits behind the next feature, forever. Velyr does it for you, one fix a week, and proves whether it worked.
+          </p>
+        </div>
+
+        <div className="why-compare" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'stretch' }}>
+          <div style={{ background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'28px 30px', opacity:visible?1:0, transform:visible?'none':'translateY(16px)', transition:'all .55s ease .15s' }}>
+            <p style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:C.textLight, fontWeight:400, marginBottom:20 }}>The usual way</p>
+            {rows.map((r,i) => (
+              <div key={i} style={{ display:'flex', gap:11, alignItems:'flex-start', paddingBottom: i<rows.length-1?14:0, marginBottom: i<rows.length-1?14:0, borderBottom: i<rows.length-1?`1px dashed rgba(28,25,23,0.08)`:'none' }}>
+                <span style={{ color:C.textLight, flexShrink:0, marginTop:1, fontSize:13 }}>✕</span>
+                <p style={{ fontSize:14, color:C.textMuted, fontWeight:300, lineHeight:1.6 }}>{r.old}</p>
+              </div>
+            ))}
+          </div>
+          <div style={{ background:C.accent, borderRadius:16, padding:'28px 30px', opacity:visible?1:0, transform:visible?'none':'translateY(16px)', transition:'all .55s ease .28s', boxShadow:'0 8px 30px rgba(42,92,69,0.18)' }}>
+            <p style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:'rgba(247,244,239,0.7)', fontWeight:400, marginBottom:20 }}>With Velyr</p>
+            {rows.map((r,i) => (
+              <div key={i} style={{ display:'flex', gap:11, alignItems:'flex-start', paddingBottom: i<rows.length-1?14:0, marginBottom: i<rows.length-1?14:0, borderBottom: i<rows.length-1?`1px dashed rgba(247,244,239,0.18)`:'none' }}>
+                <span style={{ color:'#fff', flexShrink:0, marginTop:1, fontSize:13 }}>✓</span>
+                <p style={{ fontSize:14, color:'rgba(247,244,239,0.92)', fontWeight:300, lineHeight:1.6 }}>{r.neu}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Showcase: dashboard mock + site network (example data) ───────────────────
+function ShowcaseSection({ navigate }) {
+  const [ref, visible] = useReveal()
+  return (
+    <section className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, padding:'96px 24px' }}>
+      <div style={{ maxWidth:1060, margin:'0 auto' }}>
+        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:36, maxWidth:640 }}>
+          <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Your dashboard</p>
+          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text, marginBottom:16 }}>
+            See exactly what it found, fixed, <em style={{ fontStyle:'italic', color:C.warm }}>and shipped.</em>
+          </h2>
+          <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7 }}>
+            Every run, every fix, and the funnel the agent worked from — in one place. The figures below are example data to show the layout.
+          </p>
+        </div>
+
+        <div style={{ opacity:visible?1:0, transform:visible?'none':'translateY(20px)', transition:'all .6s ease .12s' }}>
+          <AgentDashboardPreview navigate={navigate} />
+        </div>
+        <p style={{ fontSize:11.5, color:C.textLight, fontWeight:300, marginTop:12, textAlign:'center', letterSpacing:'.02em' }}>
+          Example data — this is your dashboard after the first runs.
+        </p>
+
+        <div style={{ marginTop:56 }}>
+          <div style={{ marginBottom:18, maxWidth:640 }}>
+            <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:'clamp(22px,2.6vw,30px)', letterSpacing:'-.015em', color:C.text, marginBottom:8 }}>
+              The map the agent works from
+            </h3>
+            <p style={{ fontSize:15, color:C.textMuted, fontWeight:300, lineHeight:1.65 }}>
+              Velyr maps every page in your repo and how visitors move between them, then targets the highest-leverage page to fix.
+            </p>
+          </div>
+          <div style={{ opacity:visible?1:0, transform:visible?'none':'translateY(20px)', transition:'all .6s ease .2s' }}>
+            <div style={{ background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, overflow:'hidden' }}>
+              <SiteNetwork
+                data={mockSiteNetworkData}
+                style={{ height:460 }}
+                fonts={{ sans:'Jost, sans-serif', serif:'Cormorant Garant, serif', mono:'DM Mono, monospace' }}
+              />
+            </div>
+            <p style={{ fontSize:11.5, color:C.textLight, fontWeight:300, marginTop:12, textAlign:'center', letterSpacing:'.02em' }}>
+              Example site — your real page map appears here after onboarding.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Differentiators (beyond the weekly fix) ──────────────────────────────────
+function DifferentiatorsSection() {
+  const [ref, visible] = useReveal()
+  const cards = [
+    { icon:'📱', title:'One-tap Telegram approval', desc:'Every Monday you get the problem, the data, the fix and the PR link in Telegram. Reply YES to ship or NO to skip — nothing goes live without you.' },
+    { icon:'🔍', title:'Competitor weekly scan', desc:"Track up to 2 competitors. The agent watches their hero, CTA and pricing each week and tells you what they shipped that you didn't." },
+    { icon:'🔥', title:'Monthly roast report', desc:'Once a month, brutal honesty: what improved, what is still embarrassingly bad versus competitors, and what you keep ignoring.' },
+    { icon:'🌐', title:'Public impact timeline', desc:'An optional shareable page at velyr.io/agent/your-slug showing every run and its result. Use it as social proof.' },
+  ]
+  return (
+    <section className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
+      <div style={{ maxWidth:1060, margin:'0 auto' }}>
+        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:36, maxWidth:640 }}>
+          <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>More than a weekly fix</p>
+          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text }}>
+            Always watching, <em style={{ fontStyle:'italic', color:C.warm }}>always honest.</em>
+          </h2>
+        </div>
+        <div className="diff-grid" style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:16 }}>
+          {cards.map((c,i) => (
+            <div key={i} style={{
+              background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'30px 30px',
+              opacity:visible?1:0, transform:visible?'none':'translateY(16px)', transition:`all .5s ease ${0.1 + i*0.08}s`,
+            }}>
+              <div style={{ fontSize:26, marginBottom:16 }}>{c.icon}</div>
+              <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:21, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{c.title}</h3>
+              <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{c.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Closing CTA ──────────────────────────────────────────────────────────────
+function ClosingCTA({ navigate }) {
+  const [ref, visible] = useReveal()
+  return (
+    <section className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, padding:'96px 24px' }}>
+      <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ maxWidth:680, margin:'0 auto', textAlign:'center' }}>
+        <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(32px, 5vw, 56px)', letterSpacing:'-.025em', lineHeight:1.08, color:C.text, marginBottom:18 }}>
+          Let the agent ship your <em style={{ fontStyle:'italic', color:C.warm }}>next win.</em>
+        </h2>
+        <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7, marginBottom:32, maxWidth:520, marginLeft:'auto', marginRight:'auto' }}>
+          Connect your repo and get your first conversion fix this week. You approve every change — nothing ships without your YES.
+        </p>
+        <div style={{ display:'flex', gap:12, justifyContent:'center', flexWrap:'wrap' }}>
+          <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
+          <button className="btn-ghost" style={{ width:'auto' }} onClick={() => document.getElementById('pricing-section')?.scrollIntoView({ behavior:'smooth' })}>See pricing</button>
+        </div>
+        <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:16 }}>14-day free trial · €29/month after · Cancel anytime</p>
+      </div>
+    </section>
+  )
+}
+
 export default function Home({ navigate, scrollToPricing }) {
   useEffect(() => {
     if (scrollToPricing) {
@@ -1190,16 +1313,15 @@ export default function Home({ navigate, scrollToPricing }) {
       <style>{CSS}</style>
       <Nav navigate={navigate} />
       <Hero navigate={navigate} />
-      {/* Dashboard mock rendered directly under the Hero as immediate proof. */}
-      <section className="section-pad" style={{ padding:'80px 24px', background:C.bg }}>
-        <div style={{ maxWidth:1060, margin:'0 auto' }}>
-          <AgentDashboardPreview navigate={navigate} />
-        </div>
-      </section>
+      <TrustStrip />
+      <WhySection />
       <GrowthAgentSection navigate={navigate} />
+      <ShowcaseSection navigate={navigate} />
+      <DifferentiatorsSection />
       <AgentRequirements />
       <Pricing navigate={navigate} />
       <FAQ />
+      <ClosingCTA navigate={navigate} />
       <Footer navigate={navigate} />
     </>
   )
