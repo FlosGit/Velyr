@@ -133,6 +133,27 @@ function Logo({ size = 32, color = '#2a5c45' }) {
   )
 }
 
+// ─── Card icon — thin-stroke line glyphs in brand accent (replaces emoji) ─────
+function CardIcon({ name, size = 22 }) {
+  const common = { width:size, height:size, viewBox:'0 0 24 24', fill:'none', stroke:C.accent, strokeWidth:1.4, strokeLinecap:'round', strokeLinejoin:'round' }
+  const paths = {
+    chat:     <><path d="M21 11.5a8 8 0 0 1-11.6 7.1L4 20l1.4-4.4A8 8 0 1 1 21 11.5z"/><path d="M8.8 11.8l2.1 2.1 4.3-4.3"/></>,
+    scan:     <><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></>,
+    report:   <><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7z"/><path d="M14 3v4h4"/><path d="M9 12.5h6M9 16h4"/></>,
+    share:    <><circle cx="6" cy="12" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M7.9 11l8.2-4M7.9 13l8.2 4"/></>,
+    git:      <><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="17" cy="8" r="2.2"/><path d="M6 8.2v7.6"/><path d="M17 10.2c0 4-4.4 3.6-6.4 5"/></>,
+    triangle: <path d="M12 4.5 20.5 19.5H3.5z"/>,
+    code:     <><path d="M9 8.5 5.5 12 9 15.5"/><path d="M15 8.5 18.5 12 15 15.5"/></>,
+    key:      <><circle cx="8" cy="15" r="3.2"/><path d="M10.3 12.7 20 3"/><path d="M16.5 6.5l2.5 2.5"/><path d="M14 9l2 2"/></>,
+    send:     <><path d="M21 3 10.5 13.5"/><path d="M21 3l-6.7 18-3.8-8.2L2.3 9.2 21 3z"/></>,
+  }
+  return (
+    <div style={{ width:40, height:40, borderRadius:10, background:C.accentLight, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <svg {...common}>{paths[name] || null}</svg>
+    </div>
+  )
+}
+
 // ─── Nav ──────────────────────────────────────────────────────────────────────
 function Nav({ navigate }) {
   const [scrolled, setScrolled] = useState(false)
@@ -284,17 +305,17 @@ function Hero({ navigate }) {
           14-day free trial · You approve every change · Cancel anytime
         </p>
 
-        <div style={{ marginTop:56 }}>
-          <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400, marginBottom:18 }}>10-week demo</p>
-          <div className="hero-stats" style={{ display:'flex', gap:48, flexWrap:'wrap', justifyContent:'flex-start' }}>
+        <div style={{ marginTop:52, maxWidth:680, border:`1px solid ${C.border}`, borderRadius:14, background:C.bgCard, padding:'20px 24px' }}>
+          <p style={{ fontSize:10.5, letterSpacing:'.14em', textTransform:'uppercase', color:C.textLight, fontWeight:400, marginBottom:16 }}>Example dashboard · illustrative 10-week run</p>
+          <div className="hero-stats" style={{ display:'flex', gap:40, flexWrap:'wrap', justifyContent:'flex-start' }}>
             {stats.map((s, i) => (
               <div key={i}>
-                <p style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(28px, 3vw, 40px)', color:C.text, lineHeight:1 }}>{s.value}</p>
-                <p style={{ fontFamily:'DM Mono, monospace', fontSize:11, letterSpacing:'.08em', textTransform:'uppercase', color:C.textMuted, marginTop:6 }}>{s.label}</p>
+                <p style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(24px, 2.4vw, 32px)', color:C.textMuted, lineHeight:1 }}>{s.value}</p>
+                <p style={{ fontFamily:'DM Mono, monospace', fontSize:10.5, letterSpacing:'.08em', textTransform:'uppercase', color:C.textLight, marginTop:6 }}>{s.label}</p>
               </div>
             ))}
           </div>
-          <p style={{ fontSize:11, letterSpacing:'.04em', color:C.textLight, fontWeight:300, marginTop:18 }}>Example data shown — your dashboard after onboarding.</p>
+          <p style={{ fontSize:11, letterSpacing:'.02em', color:C.textLight, fontWeight:300, marginTop:16 }}>Sample figures showing what the dashboard tracks — not real customer results.</p>
         </div>
       </div>
     </section>
@@ -515,15 +536,28 @@ function AgentDashboardPreview({ navigate }) {
     rolled_back:      { label:'Rolled Back',       color:DC.textMuted, bg:DC.mutedSoft,  border:DC.mutedMid,  dot:DC.textMuted },
   }
 
+  const [tab, setTab] = useState('overview')
+
+  // Only Overview, Insights, Funnel and Network are wired in this landing mock;
+  // the rest are visible-but-inert, matching the real dashboard's look.
   const NAV_ITEMS = [
-    { id:'overview',   label:'Overview',   icon:'⊙' },
+    { id:'overview',   label:'Overview',   icon:'⊙', wired:true },
     { id:'runs',       label:'Runs',       icon:'↻' },
-    { id:'insights',   label:'Insights',   icon:'◈' },
-    { id:'funnel',     label:'Funnel',     icon:'⬦' },
+    { id:'insights',   label:'Insights',   icon:'◈', wired:true },
+    { id:'funnel',     label:'Funnel',     icon:'⬦', wired:true },
+    { id:'network',    label:'Network',    icon:'⬡', wired:true },
     { id:'dna',        label:'DNA',        icon:'◉' },
     { id:'guardrails', label:'Guardrails', icon:'◻' },
     { id:'settings',   label:'Settings',   icon:'⚙' },
   ]
+
+  const HEADER = {
+    overview: { kicker:'Growth Agent Dashboard', title:<>Autonomous growth <em style={{ fontStyle:'italic', color:DC.accent }}>optimization.</em></>, sub:'Your agent analyzes, fixes and improves your website — continuously. · Auto-refreshes every 30s' },
+    insights: { kicker:'Insights',               title:<>What the agent <em style={{ fontStyle:'italic', color:DC.accent }}>learned.</em></>, sub:'Patterns and recommendations distilled from your runs and outcomes.' },
+    funnel:   { kicker:'Funnel',                 title:<>Where visitors <em style={{ fontStyle:'italic', color:DC.accent }}>drop off.</em></>, sub:'Every page cross-referenced with analytics to find the biggest leak.' },
+    network:  { kicker:'Site Network',           title:<>The map the agent <em style={{ fontStyle:'italic', color:DC.accent }}>works from.</em></>, sub:'Every page in your repo and how visitors move between them.' },
+  }
+  const head = HEADER[tab] || HEADER.overview
 
   const AGENT_STEPS = [
     'Fetching repo',
@@ -628,15 +662,22 @@ function AgentDashboardPreview({ navigate }) {
 
         <nav style={{ padding:'10px 8px', flex:1 }}>
           {NAV_ITEMS.map(item => {
-            const active = item.id === 'overview'
+            const active = item.id === tab
             return (
-              <div key={item.id} style={{
-                display:'flex', alignItems:'center', gap:9,
-                padding:'8px 10px', borderRadius:7, marginBottom:2,
-                background: active ? DC.accentSoft : 'transparent',
-                color:      active ? DC.accent     : DC.textMuted,
-                cursor:'default',
-              }}>
+              <div
+                key={item.id}
+                onClick={item.wired ? () => setTab(item.id) : undefined}
+                style={{
+                  display:'flex', alignItems:'center', gap:9,
+                  padding:'8px 10px', borderRadius:7, marginBottom:2,
+                  background: active ? DC.accentSoft : 'transparent',
+                  color:      active ? DC.accent     : DC.textMuted,
+                  cursor: item.wired ? 'pointer' : 'default',
+                  transition:'background .15s, color .15s',
+                }}
+                onMouseEnter={e => { if (item.wired && !active) e.currentTarget.style.background = DC.mutedSoft }}
+                onMouseLeave={e => { if (item.wired && !active) e.currentTarget.style.background = 'transparent' }}
+              >
                 <span style={{ fontSize:13, flexShrink:0, opacity: active ? 1 : 0.6 }}>{item.icon}</span>
                 <span style={{ fontSize:12, fontWeight: active ? 500 : 400 }}>{item.label}</span>
               </div>
@@ -665,20 +706,21 @@ function AgentDashboardPreview({ navigate }) {
       {/* ── MAIN CONTENT ─────────────────────────────────────────────── */}
       <div className="dp-main" style={{ flex:1, minWidth:0, padding:'22px 22px 24px' }}>
 
-        {/* Page header */}
+        {/* Page header (changes per tab) */}
         <div style={{ marginBottom:18 }}>
-          <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:500, color:DC.accent, marginBottom:6 }}>Growth Agent Dashboard</p>
+          <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:500, color:DC.accent, marginBottom:6 }}>{head.kicker}</p>
           <h1 style={{
             fontFamily:'Cormorant Garant, serif', fontWeight:400,
             fontSize:'clamp(22px,2.6vw,32px)', letterSpacing:'-.02em', lineHeight:1.1,
             color:DC.text, marginBottom:5,
           }}>
-            Autonomous growth <em style={{ fontStyle:'italic', color:DC.accent }}>optimization.</em>
+            {head.title}
           </h1>
-          <p style={{ fontSize:12, color:DC.textLight }}>Your agent analyzes, fixes and improves your website — continuously. · Auto-refreshes every 30s</p>
+          <p style={{ fontSize:12, color:DC.textLight }}>{head.sub}</p>
         </div>
 
-        {/* Two-column: main column + right sidebar */}
+        {/* ── OVERVIEW TAB ─────────────────────────────────────────────── */}
+        {tab === 'overview' && (
         <div className="dp-overview-grid" style={{ display:'flex', gap:14, alignItems:'flex-start' }}>
 
           {/* Main column */}
@@ -908,6 +950,66 @@ function AgentDashboardPreview({ navigate }) {
             </div>
           </div>
         </div>
+        )}
+
+        {/* ── INSIGHTS TAB ─────────────────────────────────────────────── */}
+        {tab === 'insights' && (
+          <div className="dp-insights-grid" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            {insights.map((ins,i) => (
+              <div key={i} style={{ background:ins.bg, border:`1px solid ${ins.border}`, borderRadius:12, padding:'18px 20px', minWidth:0 }}>
+                <div style={{ display:'flex', gap:11, alignItems:'flex-start' }}>
+                  <span style={{ fontSize:17, flexShrink:0 }}>{ins.icon}</span>
+                  <div style={{ minWidth:0 }}>
+                    <p style={{ fontSize:9.5, letterSpacing:'.08em', textTransform:'uppercase', fontWeight:600, color:ins.color, marginBottom:5 }}>{ins.label}</p>
+                    <p style={{ fontFamily:'Cormorant Garant, serif', fontSize:21, fontWeight:400, color:DC.text, marginBottom:5, lineHeight:1.15, wordBreak:'break-word' }}>{ins.value}</p>
+                    <p style={{ fontSize:12, color:DC.textMuted, lineHeight:1.5, marginBottom:5 }}>{ins.sub}</p>
+                    <p style={{ fontSize:10, color:DC.textLight }}>{ins.detail}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── FUNNEL TAB ───────────────────────────────────────────────── */}
+        {tab === 'funnel' && (
+          <div style={{ background:DC.bgCard, border:`1px solid ${DC.border}`, borderRadius:12, padding:'18px 20px' }}>
+            <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600, color:DC.textLight, marginBottom:3 }}>Drop-off by page</p>
+            <p style={{ fontSize:11.5, color:DC.textLight, marginBottom:18 }}>{funnelPages.length} pages mapped · sorted by exit rate</p>
+            {[...funnelPages].sort((a,b) => b.drop_off_score - a.drop_off_score).map((p) => {
+              const isHigh = p.drop_off_score > 50
+              const isMed  = !isHigh && p.drop_off_score > 30
+              const col    = isHigh ? DC.red : isMed ? DC.yellow : DC.green
+              return (
+                <div key={p.id} style={{ marginBottom:15 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', gap:10, marginBottom:6 }}>
+                    <span style={{ fontFamily:'DM Mono, monospace', fontSize:11.5, color:DC.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.page_path}</span>
+                    <span style={{ fontSize:11.5, color:col, fontWeight:500, flexShrink:0 }}>{p.drop_off_score}% exit · {p.views_7d} views/wk</span>
+                  </div>
+                  <div style={{ height:6, background:DC.mutedSoft, borderRadius:3, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:`${Math.min(100, p.drop_off_score)}%`, background:col, borderRadius:3 }}/>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* ── NETWORK TAB (reuses the real SiteNetwork component) ───────── */}
+        {tab === 'network' && (
+          <div>
+            <div style={{ background:DC.bgCard, border:`1px solid ${DC.border}`, borderRadius:12, overflow:'hidden' }}>
+              <SiteNetwork
+                data={mockSiteNetworkData}
+                style={{ height:420 }}
+                fonts={{ sans:'Jost, sans-serif', serif:'Cormorant Garant, serif', mono:'DM Mono, monospace' }}
+              />
+            </div>
+            <p style={{ fontSize:10.5, color:DC.textLight, marginTop:9, lineHeight:1.5 }}>
+              Every page in your repo and how visitors move between them. <span style={{ color:DC.yellow }}>Gold</span> = fix awaiting your approval · <span style={{ color:DC.green }}>green</span> = optimized and holding.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -918,11 +1020,11 @@ function AgentRequirements() {
   const [ref, visible] = useReveal()
 
   const requirements = [
-    { icon:'🐙',  title:'GitHub repo',             desc:'Your website code lives in a GitHub repository the agent can read and open PRs against.' },
-    { icon:'▲',  title:'Vercel deploy',           desc:'Your site is connected to Vercel so approved fixes auto-deploy after you reply YES.' },
-    { icon:'⚛️',  title:'React, Next.js or Vite',  desc:'The agent writes React/JSX code. Plain HTML or other frameworks are not supported.' },
-    { icon:'🔑',  title:'Admin access',             desc:'You can install GitHub Apps on the repo and merge Pull Requests.' },
-    { icon:'✈️',  title:'Telegram account',         desc:'Weekly approvals arrive on Telegram — reply YES or NO to deploy or skip each fix.' },
+    { icon:'git',      title:'GitHub repo',             desc:'Your website code lives in a GitHub repository the agent can read and open PRs against.' },
+    { icon:'triangle', title:'Vercel deploy',           desc:'Your site is connected to Vercel so approved fixes auto-deploy after you reply YES.' },
+    { icon:'code',     title:'React, Next.js or Vite',  desc:'The agent writes React/JSX code. Plain HTML or other frameworks are not supported.' },
+    { icon:'key',      title:'Admin access',             desc:'You can install GitHub Apps on the repo and merge Pull Requests.' },
+    { icon:'send',     title:'Telegram account',         desc:'Weekly approvals arrive on Telegram — reply YES or NO to deploy or skip each fix.' },
   ]
 
   return (
@@ -945,7 +1047,7 @@ function AgentRequirements() {
               transform: visible ? 'none' : 'translateY(14px)',
               transition: `all .5s ease ${0.05 + i * 0.06}s`,
             }}>
-              <div style={{ fontSize:22, marginBottom:12 }}>{r.icon}</div>
+              <div style={{ marginBottom:12 }}><CardIcon name={r.icon} size={20} /></div>
               <p style={{ fontSize:14, fontWeight:500, color:C.text, marginBottom:6, letterSpacing:'-.005em' }}>{r.title}</p>
               <p style={{ fontSize:12.5, color:C.textMuted, fontWeight:300, lineHeight:1.6 }}>{r.desc}</p>
             </div>
@@ -1204,7 +1306,7 @@ function ShowcaseSection({ navigate }) {
             See exactly what it found, fixed, <em style={{ fontStyle:'italic', color:C.warm }}>and shipped.</em>
           </h2>
           <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7 }}>
-            Every run, every fix, and the funnel the agent worked from — in one place. The figures below are example data to show the layout.
+            Every run, every fix, the funnel it worked from, and the map of your whole site — in one place. <span style={{ color:C.text }}>Click the tabs</span> to look around. Figures are example data to show the layout.
           </p>
         </div>
 
@@ -1212,31 +1314,8 @@ function ShowcaseSection({ navigate }) {
           <AgentDashboardPreview navigate={navigate} />
         </div>
         <p style={{ fontSize:11.5, color:C.textLight, fontWeight:300, marginTop:12, textAlign:'center', letterSpacing:'.02em' }}>
-          Example data — this is your dashboard after the first runs.
+          Interactive preview with example data — your real dashboard appears here after onboarding.
         </p>
-
-        <div style={{ marginTop:56 }}>
-          <div style={{ marginBottom:18, maxWidth:640 }}>
-            <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:'clamp(22px,2.6vw,30px)', letterSpacing:'-.015em', color:C.text, marginBottom:8 }}>
-              The map the agent works from
-            </h3>
-            <p style={{ fontSize:15, color:C.textMuted, fontWeight:300, lineHeight:1.65 }}>
-              Velyr maps every page in your repo and how visitors move between them, then targets the highest-leverage page to fix.
-            </p>
-          </div>
-          <div style={{ opacity:visible?1:0, transform:visible?'none':'translateY(20px)', transition:'all .6s ease .2s' }}>
-            <div style={{ background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, overflow:'hidden' }}>
-              <SiteNetwork
-                data={mockSiteNetworkData}
-                style={{ height:460 }}
-                fonts={{ sans:'Jost, sans-serif', serif:'Cormorant Garant, serif', mono:'DM Mono, monospace' }}
-              />
-            </div>
-            <p style={{ fontSize:11.5, color:C.textLight, fontWeight:300, marginTop:12, textAlign:'center', letterSpacing:'.02em' }}>
-              Example site — your real page map appears here after onboarding.
-            </p>
-          </div>
-        </div>
       </div>
     </section>
   )
@@ -1246,10 +1325,10 @@ function ShowcaseSection({ navigate }) {
 function DifferentiatorsSection() {
   const [ref, visible] = useReveal()
   const cards = [
-    { icon:'📱', title:'One-tap Telegram approval', desc:'Every Monday you get the problem, the data, the fix and the PR link in Telegram. Reply YES to ship or NO to skip — nothing goes live without you.' },
-    { icon:'🔍', title:'Competitor weekly scan', desc:"Track up to 2 competitors. The agent watches their hero, CTA and pricing each week and tells you what they shipped that you didn't." },
-    { icon:'🔥', title:'Monthly roast report', desc:'Once a month, brutal honesty: what improved, what is still embarrassingly bad versus competitors, and what you keep ignoring.' },
-    { icon:'🌐', title:'Public impact timeline', desc:'An optional shareable page at velyr.io/agent/your-slug showing every run and its result. Use it as social proof.' },
+    { icon:'chat',   title:'One-tap Telegram approval', desc:'Every Monday you get the problem, the data, the fix and the PR link in Telegram. Reply YES to ship or NO to skip — nothing goes live without you.' },
+    { icon:'scan',   title:'Competitor weekly scan', desc:"Track up to 2 competitors. The agent watches their hero, CTA and pricing each week and tells you what they shipped that you didn't." },
+    { icon:'report', title:'Monthly roast report', desc:'Once a month, brutal honesty: what improved, what is still embarrassingly bad versus competitors, and what you keep ignoring.' },
+    { icon:'share',  title:'Public impact timeline', desc:'An optional shareable page at velyr.io/agent/your-slug showing every run and its result. Use it as social proof.' },
   ]
   return (
     <section className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
@@ -1266,7 +1345,7 @@ function DifferentiatorsSection() {
               background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'30px 30px',
               opacity:visible?1:0, transform:visible?'none':'translateY(16px)', transition:`all .5s ease ${0.1 + i*0.08}s`,
             }}>
-              <div style={{ fontSize:26, marginBottom:16 }}>{c.icon}</div>
+              <div style={{ marginBottom:16 }}><CardIcon name={c.icon} /></div>
               <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:21, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{c.title}</h3>
               <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{c.desc}</p>
             </div>

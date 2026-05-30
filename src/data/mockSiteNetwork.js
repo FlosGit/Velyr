@@ -11,7 +11,7 @@ export const mockSiteNetworkData = {
     runId:          'mock-run-042',
     snapshotAt:     '2026-05-26T09:00:00Z',
     framework:      'react',
-    domain:         'ptfit.io',
+    domain:         'example.com',
     totalNodes:     20,
     totalEdges:     23,
   },
@@ -19,7 +19,7 @@ export const mockSiteNetworkData = {
   nodes: [
     // ── hub (fixed at center) ──────────────────────────────────────────────
     {
-      id: '__hub__', label: 'ptfit.io', route: '/', cluster: 'core',
+      id: '__hub__', label: 'example.com', route: '/', cluster: 'core',
       status: 'neutral', statusSource: null,
       isEntry: true, isHub: true, isGrouped: false, groupCount: 0,
       rank: null, rankReason: null, dropOffScore: null,
