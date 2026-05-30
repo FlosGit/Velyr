@@ -51,6 +51,17 @@ const CSS = `
     transition: border-color .2s, background .2s, transform .15s;
   }
   .btn-ghost:hover { border-color:rgba(28,25,23,0.35); background:rgba(28,25,23,0.03); transform:translateY(-1px); }
+  .btn-primary:focus-visible, .btn-ghost:focus-visible { outline:2px solid rgba(42,92,69,0.55); outline-offset:3px; }
+
+  /* Card hover lift — GPU-cheap (transform + shadow only), calm timing. The
+     entrance reveal lives on a wrapper, so this transition carries no stagger
+     delay and stays snappy on hover. */
+  .lift { transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s cubic-bezier(.4,0,.2,1), border-color .25s ease; }
+  .lift:hover { transform: translateY(-3px); box-shadow: 0 16px 40px rgba(28,25,23,0.09); border-color: rgba(28,25,23,0.16); }
+
+  /* Dashboard mock: fade/rise the tab content on switch (keyed remount). */
+  @keyframes tabIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  .dp-tab { animation: tabIn .3s cubic-bezier(.4,0,.2,1); }
 
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
@@ -108,10 +119,17 @@ const CSS = `
   }
 `
 
+// Reduced-motion: evaluated once at module load. Drives both useReveal (start
+// visible, skip the observer) and any inline opacity/transform reveal that keys
+// off `visible` — so nothing is animated or transiently hidden for these users.
+const PREFERS_REDUCED = typeof window !== 'undefined' &&
+  window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
 function useReveal(delay = 0) {
   const ref = useRef(null)
-  const [visible, setVisible] = useState(false)
+  const [visible, setVisible] = useState(PREFERS_REDUCED)
   useEffect(() => {
+    if (PREFERS_REDUCED) return
     const el = ref.current; if (!el) return
     const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setTimeout(() => setVisible(true), delay); obs.disconnect() } }, { threshold: 0.08 })
     obs.observe(el); return () => obs.disconnect()
@@ -719,6 +737,9 @@ function AgentDashboardPreview({ navigate }) {
           <p style={{ fontSize:12, color:DC.textLight }}>{head.sub}</p>
         </div>
 
+        {/* Tab content — keyed so each switch fades/rises in (see .dp-tab). */}
+        <div key={tab} className="dp-tab">
+
         {/* ── OVERVIEW TAB ─────────────────────────────────────────────── */}
         {tab === 'overview' && (
         <div className="dp-overview-grid" style={{ display:'flex', gap:14, alignItems:'flex-start' }}>
@@ -1010,6 +1031,7 @@ function AgentDashboardPreview({ navigate }) {
             </p>
           </div>
         )}
+        </div>{/* /.dp-tab */}
       </div>
     </div>
   )
@@ -1041,15 +1063,17 @@ function AgentRequirements() {
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:10, marginBottom:18 }}>
           {requirements.map((r, i) => (
             <div key={i} style={{
-              background:'#fff', border:`1px solid ${C.border}`, borderRadius:14,
-              padding:'22px 20px',
               opacity: visible ? 1 : 0,
               transform: visible ? 'none' : 'translateY(14px)',
-              transition: `all .5s ease ${0.05 + i * 0.06}s`,
+              transition: `opacity .5s ease ${0.05 + i * 0.06}s, transform .5s ease ${0.05 + i * 0.06}s`,
             }}>
-              <div style={{ marginBottom:12 }}><CardIcon name={r.icon} size={20} /></div>
-              <p style={{ fontSize:14, fontWeight:500, color:C.text, marginBottom:6, letterSpacing:'-.005em' }}>{r.title}</p>
-              <p style={{ fontSize:12.5, color:C.textMuted, fontWeight:300, lineHeight:1.6 }}>{r.desc}</p>
+              <div className="lift" style={{
+                height:'100%', background:'#fff', border:`1px solid ${C.border}`, borderRadius:14, padding:'22px 20px',
+              }}>
+                <div style={{ marginBottom:12 }}><CardIcon name={r.icon} size={20} /></div>
+                <p style={{ fontSize:14, fontWeight:500, color:C.text, marginBottom:6, letterSpacing:'-.005em' }}>{r.title}</p>
+                <p style={{ fontSize:12.5, color:C.textMuted, fontWeight:300, lineHeight:1.6 }}>{r.desc}</p>
+              </div>
             </div>
           ))}
         </div>
@@ -1342,12 +1366,16 @@ function DifferentiatorsSection() {
         <div className="diff-grid" style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:16 }}>
           {cards.map((c,i) => (
             <div key={i} style={{
-              background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'30px 30px',
-              opacity:visible?1:0, transform:visible?'none':'translateY(16px)', transition:`all .5s ease ${0.1 + i*0.08}s`,
+              opacity:visible?1:0, transform:visible?'none':'translateY(16px)',
+              transition:`opacity .5s ease ${0.1 + i*0.08}s, transform .5s ease ${0.1 + i*0.08}s`,
             }}>
-              <div style={{ marginBottom:16 }}><CardIcon name={c.icon} /></div>
-              <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:21, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{c.title}</h3>
-              <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{c.desc}</p>
+              <div className="lift" style={{
+                height:'100%', background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'30px 30px',
+              }}>
+                <div style={{ marginBottom:16 }}><CardIcon name={c.icon} /></div>
+                <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:21, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{c.title}</h3>
+                <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{c.desc}</p>
+              </div>
             </div>
           ))}
         </div>
