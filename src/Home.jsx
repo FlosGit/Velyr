@@ -117,6 +117,26 @@ const CSS = `
     .dash-preview-shell .dp-page-chip { max-width: 100% !important; min-width: 0 !important; font-size: 9px !important; }
     .dash-preview-shell .dp-page-chip > span:first-child { overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; min-width: 0 !important; }
   }
+
+  /* ── prefers-reduced-motion: hard static fallback ────────────────────────────
+     Nothing moves. Reveals render at final state (useReveal also returns
+     visible=true immediately), transitions/animations collapse to instant,
+     smooth scroll is disabled, and hover lifts/translations are neutralized so
+     even pointer interaction produces no movement (shadow cue only). */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto !important; }
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      transition-delay: 0ms !important;
+      scroll-behavior: auto !important;
+    }
+    .reveal { opacity: 1 !important; transform: none !important; }
+    .lift:hover { transform: none !important; }
+    .btn-primary:hover:not(:disabled) { transform: none !important; }
+    .btn-ghost:hover { transform: none !important; }
+  }
 `
 
 // Reduced-motion: evaluated once at module load. Drives both useReveal (start
