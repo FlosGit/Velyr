@@ -150,13 +150,21 @@ async function captureScreenshot(url) {
     const params = new URLSearchParams({
       access_key: apiKey, url, viewport_width: '1280', viewport_height: '800',
       device_scale_factor: '1', format: 'jpg', block_ads: 'true',
-      block_cookie_banners: 'true', cache: 'true', cache_ttl: '3600',
+      block_cookie_banners: 'true', cache: 'true', cache_ttl: '14400',
       response_type: 'json',
     })
     const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(20000) })
-    if (!res.ok) return null
+    if (!res.ok) {
+      // Surface the real cause (e.g. request_not_valid + error_details) instead
+      // of swallowing the 400 — see ScreenshotOne error response body.
+      const body = await res.text()
+      console.error('ScreenshotOne failed', res.status, body)
+      return null
+    }
     const data = await res.json()
-    return data?.cache_url || data?.store?.url || data?.url || null
+    // Canonical field for response_type=json is screenshot_url; cache_url only
+    // appears when caching kicks in, store.location only with own-S3 storage.
+    return data?.screenshot_url || data?.cache_url || data?.store?.location || null
   } catch { return null }
 }
 
