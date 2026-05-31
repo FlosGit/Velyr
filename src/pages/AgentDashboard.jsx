@@ -140,11 +140,19 @@ const CSS = `
   @media (max-width: 600px) {
     .dash-content [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
   }
+  /* Grid-blowout guard: collapsed single-column tracks default to
+     minmax(auto,1fr), so a child's min-content (nowrap text, file chips) can
+     force the card wider than the viewport — invisible only because body
+     overflow-x is hidden. min-width:0 lets the track shrink to the container.
+     Applies to every mobile grid (incl. KPI 2×2). */
+  @media (max-width: 900px) {
+    .dash-content [style*="grid-template-columns"] > * { min-width: 0 !important; }
+  }
   /* Overview: stack main column + contextual sidebar instead of crushing main
      to a sliver. The sidebar (next-run / steps / performance) drops below. */
   @media (max-width: 768px) {
     .dash-overview-row { flex-direction: column !important; }
-    .dash-overview-row > * { width: 100% !important; }
+    .dash-overview-row > * { width: 100% !important; min-width: 0 !important; }
     .dash-ctx-sidebar { width: 100% !important; position: static !important; top: auto !important; }
   }
   /* KPI tiles stay 2×2 on phones (the generic ≤600 rule above would otherwise
@@ -418,12 +426,13 @@ function PRMissionControl({run}) {
         borderBottom:`1px solid ${C.yellowMid}`,
         padding:'10px 18px',
         display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,
+        flexWrap:'wrap',
       }}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <span className="pulse-dot" style={{width:7,height:7,borderRadius:'50%',background:C.yellow,display:'inline-block'}}/>
+          <span className="pulse-dot" style={{width:7,height:7,borderRadius:'50%',background:C.yellow,display:'inline-block',flexShrink:0}}/>
           <SectionLabel style={{color:C.yellow,marginBottom:0}}>Awaiting your approval · PR #{run.pr_number||'—'}</SectionLabel>
         </div>
-        <div style={{display:'flex',gap:8}}>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
           <a href={run.pr_url} target="_blank" rel="noreferrer" style={{
             fontSize:11,color:C.accent,background:C.accentSoft,
             border:`1px solid ${C.accentMid}`,borderRadius:6,padding:'4px 10px',
