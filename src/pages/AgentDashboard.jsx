@@ -140,6 +140,18 @@ const CSS = `
   @media (max-width: 600px) {
     .dash-content [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
   }
+  /* Overview: stack main column + contextual sidebar instead of crushing main
+     to a sliver. The sidebar (next-run / steps / performance) drops below. */
+  @media (max-width: 768px) {
+    .dash-overview-row { flex-direction: column !important; }
+    .dash-overview-row > * { width: 100% !important; }
+    .dash-ctx-sidebar { width: 100% !important; position: static !important; top: auto !important; }
+  }
+  /* KPI tiles stay 2×2 on phones (the generic ≤600 rule above would otherwise
+     collapse them to a 4-tall column). Placed after it to win on source order. */
+  @media (max-width: 600px) {
+    .dash-content .dash-kpi-grid { grid-template-columns: 1fr 1fr !important; }
+  }
 `
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -511,7 +523,7 @@ function KPIBar({runs, impactMetrics}) {
   ]
 
   return (
-    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+    <div className="dash-kpi-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
       {kpis.map((k,i)=>(
         <div key={i} className="card-hover fade-up" style={{
           animationDelay:`${i*0.06}s`,
@@ -726,7 +738,7 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
   const rate     = total>0?Math.round((deployed/total)*100):0
 
   return (
-    <div style={{width:272,flexShrink:0,position:'sticky',top:20,alignSelf:'flex-start',display:'flex',flexDirection:'column',gap:10}}>
+    <div className="dash-ctx-sidebar" style={{width:272,flexShrink:0,position:'sticky',top:20,alignSelf:'flex-start',display:'flex',flexDirection:'column',gap:10}}>
 
       <Card style={{overflow:'hidden'}}>
         <div style={{
@@ -875,7 +887,7 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
   const pendingRun = runs.find(r=>r.status==='waiting_approval')
 
   return (
-    <div style={{display:'flex',gap:16,alignItems:'flex-start'}}>
+    <div className="dash-overview-row" style={{display:'flex',gap:16,alignItems:'flex-start'}}>
       <div style={{flex:1,minWidth:0,display:'flex',flexDirection:'column',gap:14}}>
 
         {pendingRun && <div className="fade-up"><PRMissionControl run={pendingRun}/></div>}
