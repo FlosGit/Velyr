@@ -27,7 +27,7 @@ const supabase = createClient(
 const LLM_CAPS = {
   // Max output tokens per call. Sonnet 4.5 charges per output token, so cap
   // them at "enough for this call's contract" not "context window".
-  MAX_TOKENS_ANALYSIS: Number(Deno.env.get('LLM_MAX_TOKENS_ANALYSIS') || '2000'),  // callAI JSON (Pass 2)
+  MAX_TOKENS_ANALYSIS: Number(Deno.env.get('LLM_MAX_TOKENS_ANALYSIS') || '6000'),  // callAI JSON (Pass 2) — find+replace can carry sizeable verbatim code blocks; 2000 truncated mid-JSON
   MAX_TOKENS_ROAST:    Number(Deno.env.get('LLM_MAX_TOKENS_ROAST')    || '1500'),  // monthly roast
   // RA3 Pass-1 component ranker. Authoritative home for the ranker cap — the
   // ranker module delegates max_tokens to the injected callAI closure, which
@@ -1752,6 +1752,12 @@ async function callLLMCapped(subscriptionId: string, system: string, user: strin
 
   const text = data.choices?.[0]?.message?.content
   if (!text) throw new Error(`${callerLabel}: AI returned empty response: ${JSON.stringify(data).slice(0, 200)}`)
+  // Distinguish truncation (hit max_tokens) from a genuinely malformed reply —
+  // both otherwise surface downstream as the opaque "invalid JSON". finish_reason
+  // 'length' means the cap was too low for this call's contract; say so.
+  if (data.choices?.[0]?.finish_reason === 'length') {
+    throw new Error(`${callerLabel}: response truncated at max_tokens=${maxTokens} (finish_reason=length) — raise the cap`)
+  }
   return text
 }
 
