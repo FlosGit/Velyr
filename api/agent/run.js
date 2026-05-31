@@ -149,8 +149,10 @@ async function captureScreenshot(url) {
   try {
     const params = new URLSearchParams({
       access_key: apiKey, url, viewport_width: '1280', viewport_height: '800',
-      device_scale_factor: '1', format: 'jpg', block_ads: 'true',
-      block_cookie_banners: 'true', cache: 'true', cache_ttl: '14400',
+      // No block_ads/block_cookie_banners: ScreenshotOne's ad-blocker blocks
+      // analytics endpoints (e.g. PostHog), which throws during a customer
+      // SPA's boot and leaves the page blank — only the CSS background paints.
+      device_scale_factor: '1', format: 'jpg', cache: 'true', cache_ttl: '14400',
       // Wait for client-side render before shooting — default `load` fires
       // before SPA/JS pages paint, producing blank/black frames.
       wait_until: 'networkidle2', delay: '3',
