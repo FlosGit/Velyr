@@ -40,4 +40,4 @@ Disallow: /agent/
 Disallow: /dashboard/
 Disallow: /api/
 
-Sitemap: https://www.velyr.io/sitemap.xml
+Sitemap: https://velyr.io/sitemap.xml

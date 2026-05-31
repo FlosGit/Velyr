@@ -88,7 +88,7 @@ export default function Faq({ navigate }) {
 
     const robots = setOrCreateMeta('robots', 'index, follow')
 
-    const pageUrl = 'https://www.velyr.io' + window.location.pathname
+    const pageUrl = 'https://velyr.io' + window.location.pathname
 
     let canonical = document.querySelector('link[rel="canonical"]')
     if (!canonical) { canonical = document.createElement('link'); canonical.setAttribute('rel', 'canonical'); document.head.appendChild(canonical) }
@@ -120,9 +120,9 @@ export default function Faq({ navigate }) {
       document.title = prevTitle
       if (robots.created) robots.tag.remove()
       else robots.tag.setAttribute('content', robots.prev || 'index, follow')
-      canonical.setAttribute('href', 'https://www.velyr.io/')
-      hreflangEn.setAttribute('href', 'https://www.velyr.io/')
-      hreflangDefault.setAttribute('href', 'https://www.velyr.io/')
+      canonical.setAttribute('href', 'https://velyr.io/')
+      hreflangEn.setAttribute('href', 'https://velyr.io/')
+      hreflangDefault.setAttribute('href', 'https://velyr.io/')
       const existing = document.getElementById('faq-jsonld')
       if (existing) existing.remove()
     }

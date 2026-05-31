@@ -50,7 +50,7 @@ export default function PrivacyPolicy({ navigate }) {
     }
     robots.setAttribute('content', 'noindex, nofollow')
 
-    const pageUrl = 'https://www.velyr.io' + window.location.pathname
+    const pageUrl = 'https://velyr.io' + window.location.pathname
 
     let canonical = document.querySelector('link[rel="canonical"]')
     if (!canonical) { canonical = document.createElement('link'); canonical.setAttribute('rel', 'canonical'); document.head.appendChild(canonical) }
@@ -68,9 +68,9 @@ export default function PrivacyPolicy({ navigate }) {
       document.title = prevTitle
       if (created) robots.remove()
       else if (prevContent != null) robots.setAttribute('content', prevContent)
-      canonical.setAttribute('href', 'https://www.velyr.io/')
-      hreflangEn.setAttribute('href', 'https://www.velyr.io/')
-      hreflangDefault.setAttribute('href', 'https://www.velyr.io/')
+      canonical.setAttribute('href', 'https://velyr.io/')
+      hreflangEn.setAttribute('href', 'https://velyr.io/')
+      hreflangDefault.setAttribute('href', 'https://velyr.io/')
     }
   }, [])
 
