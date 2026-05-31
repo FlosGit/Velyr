@@ -151,6 +151,7 @@ const CSS = `
     .dash-drawer-close { display: flex !important; }
     .dash-header-badge-d { display: none !important; } /* desktop badge hidden on mobile */
     .dash-header-badge-m { display: inline-flex !important; } /* stacked under page title */
+    .dash-header-email { display: none !important; } /* email is non-essential on mobile; freed space avoids badge/email collision */
     .dash-main { width: 100% !important; }
     .dash-main > div:first-child { padding: 0 16px !important; }
     .dash-content { padding: 16px !important; }
@@ -2630,7 +2631,7 @@ export default function AgentDashboard({ navigate }) {
                   <span style={{fontSize:11,color:C.yellow,fontWeight:500}}>{pending} awaiting approval</span>
                 </div>
               )}
-              <span style={{fontSize:11,color:C.textLight}}>{user?.email}</span>
+              <span className="dash-header-email" style={{fontSize:11,color:C.textLight}}>{user?.email}</span>
               <button className="btn" onClick={handleLogout} style={{
                 background:'none',border:`1px solid ${C.border}`,borderRadius:6,
                 padding:'4px 12px',fontSize:11,fontFamily:'DM Sans,sans-serif',
