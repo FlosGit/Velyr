@@ -116,26 +116,47 @@ const CSS = `
   input:focus, textarea:focus { border-color: rgba(42,92,69,0.4) !important; box-shadow: 0 0 0 3px rgba(42,92,69,0.08); }
   a { color: ${C.accent}; }
 
+  /* Drawer affordances are hidden on desktop; the ≤900 block reveals them. */
+  .dash-hamburger { display: none; }
+  .dash-scrim { display: none; }
+  .dash-drawer-close { display: none; }
+
   /* ── Mobile responsiveness ── */
   @media (max-width: 900px) {
-    .dash-shell { flex-direction: column !important; }
+    /* Sidebar → off-canvas slide-in drawer with the full vertical nav (no
+       horizontal scroll). Hamburger in the header opens it; scrim + close
+       button + tab-select dismiss it. */
     .dash-sidebar {
-      width: 100% !important;
-      height: auto !important;
-      position: sticky !important; top: 0 !important;
-      flex-direction: row !important; overflow-x: auto; overflow-y: hidden !important;
-      border-right: none !important;
-      border-bottom: 1px solid rgba(26,25,22,0.08) !important;
-      z-index: 60;
+      position: fixed !important; top: 0 !important; left: 0 !important;
+      height: 100vh !important; width: 270px !important; max-width: 84vw;
+      transform: translateX(-100%);
+      transition: transform .28s cubic-bezier(.4,0,.2,1);
+      z-index: 80;
+      border-right: 1px solid rgba(26,25,22,0.08) !important;
     }
-    .dash-sidebar > div:first-child { border-bottom: none !important; padding: 12px 14px !important; flex-shrink: 0; }
-    .dash-sidebar > nav { display: flex !important; gap: 4px; padding: 10px 12px !important; flex: 1; }
-    .dash-sidebar > nav .nav-item { white-space: nowrap; flex-shrink: 0; margin-bottom: 0 !important; padding: 8px 12px !important; }
-    .dash-sidebar > div:last-child { display: none !important; }
+    .dash-shell.drawer-open .dash-sidebar {
+      transform: translateX(0);
+      box-shadow: 0 12px 40px rgba(26,25,22,0.18);
+    }
+    .dash-sidebar .nav-item { min-height: 44px !important; padding: 8px 12px !important; }
+    .dash-scrim {
+      display: block; position: fixed; inset: 0; z-index: 70;
+      background: rgba(26,25,22,0.42);
+      opacity: 0; pointer-events: none;
+      transition: opacity .28s ease;
+    }
+    .dash-shell.drawer-open .dash-scrim { opacity: 1; pointer-events: auto; }
+    .dash-hamburger { display: inline-flex !important; }
+    .dash-drawer-close { display: flex !important; }
+    .dash-main { width: 100% !important; }
     .dash-main > div:first-child { padding: 0 16px !important; }
     .dash-content { padding: 16px !important; }
     .dash-content [style*="grid-template-columns"] { grid-template-columns: 1fr 1fr !important; }
     .dash-content [style*="grid-template-columns: 1fr auto auto"] { grid-template-columns: 1fr !important; gap: 6px !important; }
+  }
+  /* Drawer slide + scrim fade are instant for reduced-motion users (landing rule). */
+  @media (prefers-reduced-motion: reduce) {
+    .dash-sidebar, .dash-scrim { transition: none !important; }
   }
   @media (max-width: 600px) {
     .dash-content [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
@@ -2150,6 +2171,7 @@ export default function AgentDashboard({ navigate }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteError,    setDeleteError]    = useState(null)  // FIX #11: track deletion errors
   const [activePage,     setActivePage]     = useState('overview')
+  const [drawerOpen,     setDrawerOpen]     = useState(false)
   const [funnelPages,    setFunnelPages]    = useState([])
   const [learnings,      setLearnings]      = useState([])
   const [impactMetrics,  setImpactMetrics]  = useState([])
@@ -2203,6 +2225,16 @@ export default function AgentDashboard({ navigate }) {
       window.history.replaceState({}, '', '/agent/dashboard')
     }
   }, [])
+
+  // Mobile nav drawer: lock body scroll while open + close on Escape. The
+  // drawer is CSS-driven (≤900); this only adds the scroll-lock + key affordance.
+  useEffect(() => {
+    if (!drawerOpen) return
+    const onKey = (e) => { if (e.key === 'Escape') setDrawerOpen(false) }
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKey)
+    return () => { document.body.style.overflow = ''; window.removeEventListener('keydown', onKey) }
+  }, [drawerOpen])
 
   // Parallel Stripe verify on mount. Uses the session_id stashed in
   // localStorage during onboarding (mount gate of AgentOnboarding.jsx) with
@@ -2460,7 +2492,10 @@ export default function AgentDashboard({ navigate }) {
         loading={subscribeLoading}
       />
 
-      <div className="dash-shell" style={{minHeight:'100vh',background:C.bg,display:'flex'}}>
+      <div className={`dash-shell ${drawerOpen?'drawer-open':''}`} style={{minHeight:'100vh',background:C.bg,display:'flex'}}>
+
+        {/* Mobile drawer scrim (≤900). Tap to dismiss. */}
+        <div className="dash-scrim" onClick={()=>setDrawerOpen(false)} aria-hidden="true"/>
 
         {/* ── LEFT SIDEBAR NAV ── */}
         <div className="dash-sidebar" style={{
@@ -2470,21 +2505,35 @@ export default function AgentDashboard({ navigate }) {
           position:'sticky',top:0,height:'100vh',
           overflowY:'auto',
         }}>
-          <div onClick={()=>navigate('/')} style={{
+          <div style={{
             padding:'18px 16px 14px',
-            display:'flex',alignItems:'center',gap:9,cursor:'pointer',
+            display:'flex',alignItems:'center',gap:9,
             borderBottom:`1px solid ${C.border}`,
+            justifyContent:'space-between',
           }}>
-            <VelyrLogo size={22}/>
-            <div>
-              <p style={{fontFamily:'Instrument Serif,serif',fontSize:17,color:C.text,lineHeight:1}}>Velyr</p>
-              <p style={{fontSize:9,color:C.textLight,letterSpacing:'.06em',textTransform:'uppercase',marginTop:2}}>Growth Agent</p>
+            <div onClick={()=>navigate('/')} style={{display:'flex',alignItems:'center',gap:9,cursor:'pointer',minWidth:0}}>
+              <VelyrLogo size={22}/>
+              <div>
+                <p style={{fontFamily:'Instrument Serif,serif',fontSize:17,color:C.text,lineHeight:1}}>Velyr</p>
+                <p style={{fontSize:9,color:C.textLight,letterSpacing:'.06em',textTransform:'uppercase',marginTop:2}}>Growth Agent</p>
+              </div>
             </div>
+            <button
+              className="dash-drawer-close btn"
+              aria-label="Close navigation"
+              onClick={()=>setDrawerOpen(false)}
+              style={{
+                width:36,height:36,borderRadius:8,flexShrink:0,
+                border:`1px solid ${C.border}`,background:'transparent',
+                alignItems:'center',justifyContent:'center',
+                fontSize:20,color:C.textMuted,lineHeight:1,
+              }}
+            >×</button>
           </div>
 
           <nav style={{padding:'10px 8px',flex:1}}>
             {NAV_ITEMS.map(item=>(
-              <button key={item.id} className="nav-item" onClick={()=>setActivePage(item.id)} style={{
+              <button key={item.id} className="nav-item" onClick={()=>{setActivePage(item.id); setDrawerOpen(false)}} style={{
                 display:'flex',alignItems:'center',gap:9,
                 padding:'8px 10px',borderRadius:7,marginBottom:2,
                 background:activePage===item.id?C.accentSoft:'transparent',
@@ -2539,7 +2588,23 @@ export default function AgentDashboard({ navigate }) {
             background:'rgba(245,242,236,0.9)',backdropFilter:'blur(16px)',
             position:'sticky',top:0,zIndex:50,
           }}>
-            <div>
+            <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
+              <button
+                className="dash-hamburger btn"
+                aria-label="Open navigation"
+                onClick={()=>setDrawerOpen(true)}
+                style={{
+                  width:40,height:40,borderRadius:8,flexShrink:0,
+                  border:`1px solid ${C.border}`,background:C.bgCard,
+                  alignItems:'center',justifyContent:'center',
+                }}
+              >
+                <span style={{position:'relative',display:'block',width:16,height:11}}>
+                  <span style={{position:'absolute',left:0,right:0,top:0,height:1.5,background:C.text,borderRadius:1}}/>
+                  <span style={{position:'absolute',left:0,right:0,top:5,height:1.5,background:C.text,borderRadius:1}}/>
+                  <span style={{position:'absolute',left:0,right:0,top:10,height:1.5,background:C.text,borderRadius:1}}/>
+                </span>
+              </button>
               <p style={{fontSize:13,fontWeight:500,color:C.text,textTransform:'capitalize'}}>
                 {activePage}
               </p>
