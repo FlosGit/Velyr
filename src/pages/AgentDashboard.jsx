@@ -120,6 +120,7 @@ const CSS = `
   .dash-hamburger { display: none; }
   .dash-scrim { display: none; }
   .dash-drawer-close { display: none; }
+  .dash-header-badge-m { display: none; } /* mobile-only stacked pending badge */
 
   /* ── Mobile responsiveness ── */
   @media (max-width: 900px) {
@@ -148,6 +149,8 @@ const CSS = `
     .dash-shell.drawer-open .dash-scrim { opacity: 1; pointer-events: auto; }
     .dash-hamburger { display: inline-flex !important; }
     .dash-drawer-close { display: flex !important; }
+    .dash-header-badge-d { display: none !important; } /* desktop badge hidden on mobile */
+    .dash-header-badge-m { display: inline-flex !important; } /* stacked under page title */
     .dash-main { width: 100% !important; }
     .dash-main > div:first-child { padding: 0 16px !important; }
     .dash-content { padding: 16px !important; }
@@ -2605,13 +2608,24 @@ export default function AgentDashboard({ navigate }) {
                   <span style={{position:'absolute',left:0,right:0,top:10,height:1.5,background:C.text,borderRadius:1}}/>
                 </span>
               </button>
-              <p style={{fontSize:13,fontWeight:500,color:C.text,textTransform:'capitalize'}}>
-                {activePage}
-              </p>
+              {/* Label + pending badge stack as two lines on mobile (badge below the
+                  page title) so the header row can't overflow at ~390px. The badge
+                  here is mobile-only; the desktop badge stays in the right group. */}
+              <div style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:3,minWidth:0}}>
+                <p style={{fontSize:13,fontWeight:500,color:C.text,textTransform:'capitalize'}}>
+                  {activePage}
+                </p>
+                {pending>0&&(
+                  <div className="dash-header-badge-m" style={{alignItems:'center',gap:6,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:7,padding:'3px 9px',cursor:'pointer'}} onClick={()=>setActivePage('runs')}>
+                    <span className="pulse-dot" style={{width:5,height:5,borderRadius:'50%',background:C.yellow,display:'inline-block',flexShrink:0}}/>
+                    <span style={{fontSize:11,color:C.yellow,fontWeight:500,whiteSpace:'nowrap'}}>{pending} awaiting approval</span>
+                  </div>
+                )}
+              </div>
             </div>
             <div style={{display:'flex',alignItems:'center',gap:12}}>
               {pending>0&&(
-                <div style={{display:'flex',alignItems:'center',gap:6,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:7,padding:'4px 11px',cursor:'pointer'}} onClick={()=>setActivePage('runs')}>
+                <div className="dash-header-badge-d" style={{display:'flex',alignItems:'center',gap:6,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:7,padding:'4px 11px',cursor:'pointer'}} onClick={()=>setActivePage('runs')}>
                   <span className="pulse-dot" style={{width:5,height:5,borderRadius:'50%',background:C.yellow,display:'inline-block'}}/>
                   <span style={{fontSize:11,color:C.yellow,fontWeight:500}}>{pending} awaiting approval</span>
                 </div>
