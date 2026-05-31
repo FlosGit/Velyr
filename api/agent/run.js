@@ -151,6 +151,9 @@ async function captureScreenshot(url) {
       access_key: apiKey, url, viewport_width: '1280', viewport_height: '800',
       device_scale_factor: '1', format: 'jpg', block_ads: 'true',
       block_cookie_banners: 'true', cache: 'true', cache_ttl: '14400',
+      // Wait for client-side render before shooting — default `load` fires
+      // before SPA/JS pages paint, producing blank/black frames.
+      wait_until: 'networkidle2', delay: '3',
       response_type: 'json',
     })
     const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(20000) })
