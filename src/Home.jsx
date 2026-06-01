@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { demoData } from './data/demoData'
 import SubscribeButton from './components/SubscribeButton.jsx'
 import SiteNetwork from './components/SiteNetwork.jsx'
@@ -78,7 +78,8 @@ const CSS = `
     .nav-agent-link { display: none !important; }
     .nav-burger { display: flex !important; }
     .hero-section { padding: 96px 16px 48px !important; }
-    .hero-stats { gap: 28px !important; }
+    .hero-stats { flex-direction: column !important; align-items: stretch !important; gap: 10px !important; }
+    .hero-flow-arrow { display: none !important; }
     .section-pad { padding: 64px 16px !important; }
     .pricing-grid { grid-template-columns: 1fr !important; }
     .footer-inner { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
@@ -298,18 +299,11 @@ function Nav({ navigate }) {
 function Hero({ navigate }) {
   const [ref, visible] = useReveal()
 
-  // Stats sourced from demoData.headline (the 10-week demo dataset) — not hardcoded.
-  const h = demoData.headline
-  const convDelta   = `+${(h.conversion_rate_now - h.conversion_rate_before).toFixed(1)}pp`
-  const bounceDelta = `−${h.bounce_rate_before - h.bounce_rate_now}pp`
-  const fixes       = `${h.runs_merged} / ${h.runs_total}`
-  const weeks       = `${h.runs_total}`
-
-  const stats = [
-    { value: convDelta,   label: 'Conversion rate' },
-    { value: bounceDelta, label: 'Bounce rate' },
-    { value: fixes,       label: 'Fixes shipped' },
-    { value: weeks,       label: 'Weeks running' },
+  // The three honest steps of a weekly run — describes the product, no fabricated metrics.
+  const flow = [
+    { n: '01', text: 'Reads your analytics + repo' },
+    { n: '02', text: 'Opens a PR with the fix' },
+    { n: '03', text: 'You approve on Telegram' },
   ]
 
   const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
@@ -328,11 +322,8 @@ function Hero({ navigate }) {
           Conversion fixes, <em style={{ fontStyle:'italic', color:C.warm }}>shipped weekly</em>.
         </h1>
 
-        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 19px)', color:C.textMuted, maxWidth:660, marginTop:24, lineHeight:1.6 }}>
-          Velyr is an AI agent that connects to your GitHub repo, finds the #1 conversion problem on your site each week, and writes the fix as a Pull Request.
-        </p>
-        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(15px, 1.5vw, 18px)', color:C.textMuted, maxWidth:660, marginTop:12, lineHeight:1.6 }}>
-          You approve it with one reply on Telegram. If the numbers drop, it reverts itself.
+        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 19px)', color:C.textMuted, maxWidth:640, marginTop:24, lineHeight:1.6 }}>
+          An AI agent that finds your site's #1 conversion problem each week and writes the fix as a Pull Request. You approve it with one Telegram reply — and if the numbers drop, <em style={{ fontStyle:'italic', color:C.warm }}>it reverts itself</em>.
         </p>
 
         <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:36, flexWrap:'wrap', alignItems:'center' }}>
@@ -343,17 +334,18 @@ function Hero({ navigate }) {
           14-day free trial · You approve every change · Cancel anytime
         </p>
 
-        <div style={{ marginTop:52, maxWidth:680, border:`1px solid ${C.border}`, borderRadius:14, background:C.bgCard, padding:'20px 24px' }}>
-          <p style={{ fontSize:10.5, letterSpacing:'.14em', textTransform:'uppercase', color:C.textLight, fontWeight:400, marginBottom:16 }}>Example dashboard · illustrative 10-week run</p>
-          <div className="hero-stats" style={{ display:'flex', gap:40, flexWrap:'wrap', justifyContent:'flex-start' }}>
-            {stats.map((s, i) => (
-              <div key={i}>
-                <p style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(24px, 2.4vw, 32px)', color:C.textMuted, lineHeight:1 }}>{s.value}</p>
-                <p style={{ fontFamily:'DM Mono, monospace', fontSize:10.5, letterSpacing:'.08em', textTransform:'uppercase', color:C.textLight, marginTop:6 }}>{s.label}</p>
+        <div className="hero-stats" style={{ marginTop:52, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
+          {flow.map((s, i) => (
+            <Fragment key={s.n}>
+              <div style={{ display:'flex', alignItems:'center', gap:11, border:`1px solid ${C.border}`, borderRadius:12, background:C.bgCard, padding:'12px 16px' }}>
+                <span style={{ fontFamily:'DM Mono, monospace', fontSize:11, letterSpacing:'.06em', color:C.accent, fontWeight:400 }}>{s.n}</span>
+                <span style={{ fontFamily:'Jost, sans-serif', fontSize:14, fontWeight:300, color:C.text, whiteSpace:'nowrap' }}>{s.text}</span>
               </div>
-            ))}
-          </div>
-          <p style={{ fontSize:11, letterSpacing:'.02em', color:C.textLight, fontWeight:300, marginTop:16 }}>Sample figures showing what the dashboard tracks — not real customer results.</p>
+              {i < flow.length - 1 && (
+                <span className="hero-flow-arrow" style={{ color:C.textLight, fontSize:15, lineHeight:1 }} aria-hidden="true">→</span>
+              )}
+            </Fragment>
+          ))}
         </div>
       </div>
     </section>
