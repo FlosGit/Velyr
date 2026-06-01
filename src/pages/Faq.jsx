@@ -38,7 +38,7 @@ const FAQS = [
   },
   {
     q: 'Does it analyze my whole funnel or just the homepage?',
-    a: 'Your whole funnel. Velyr maps every page in your repo, cross-references with PostHog analytics to find where users actually drop off, and prioritizes the highest-impact fix.'
+    a: 'Your whole funnel. Velyr maps every page in your repo and cross-references them with your PostHog analytics — including how far visitors scroll on each page and what they actually click — to find where users drop off, then prioritizes the highest-impact fix.'
   },
   {
     q: 'Is there a free trial?',

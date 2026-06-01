@@ -25,6 +25,7 @@ export interface ReceiptInput {
   fixResult: FixResult
   lintInfo: LintInfo
   runId: string        // for the footer (added to the spec signature — see RA7 flag)
+  behavioralNote?: string  // scroll-depth / click signals inspected this run (or honest reason none were)
 }
 
 function byteLength(s: string): number {
@@ -50,7 +51,7 @@ function list(items: string[]): string {
 const ROLLBACK_BOUNCE_PP_THRESHOLD = 15
 
 export function buildReceipt(input: ReceiptInput): string {
-  const { mapResult, graph, rankerResult, deepContext, fixResult, lintInfo, runId } = input
+  const { mapResult, graph, rankerResult, deepContext, fixResult, lintInfo, runId, behavioralNote } = input
   const em = fixResult.expected_metric
 
   // ── Files read deeply ──
@@ -155,6 +156,8 @@ ${list(notAnalyzed)}
 
 **Imports I couldn't resolve:**
 ${list(unresolved)}
+
+**Behavioral signals inspected (scroll depth / clicks):** ${behavioralNote || 'not recorded'}
 
 ## Known blind spots
 

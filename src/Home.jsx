@@ -362,7 +362,7 @@ function GrowthAgentSection({ navigate }) {
       color: C.accent,
       steps: [
         { time:'8:00 am',  icon:'📊', text:'Weekly Executive Summary sent to Telegram — traffic, bounce rate, last week\'s impact.' },
-        { time:'9:00 am',  icon:'🔍', text:'Agent reads your PostHog analytics + scans every page in your GitHub repo.' },
+        { time:'9:00 am',  icon:'🔍', text:'Agent reads your PostHog analytics — traffic, bounce, plus how far visitors scroll and what they click — and scans every page in your GitHub repo.' },
         { time:'9:10 am',  icon:'🎯', text:'Identifies the #1 conversion problem across your full funnel.' },
         { time:'9:15 am',  icon:'✍️', text:'Writes the code fix and opens a Pull Request with a Vercel preview link.' },
         { time:'9:20 am',  icon:'📲', text:'Telegram message arrives — problem, data, solution, PR link. Reply YES to ship, NO to skip.' },
@@ -1113,7 +1113,7 @@ function Pricing({ navigate }) {
   const [allFeaturesOpen, setAllFeaturesOpen] = useState(false)
 
   const agentFeaturesTop = ['AI analyses your repo + analytics weekly','Writes the code fix automatically','Reply YES or NO via Telegram','Auto-rollback if metrics drop','Competitor weekly scan']
-  const agentFeaturesExtra = ['Identifies #1 conversion problem','Opens a GitHub Pull Request','Brand Guardrails — your rules enforced','Full funnel analysis (all pages)','Weekly summary on Telegram','Monthly roast report — brutal honesty','Business DNA — learns over time','Public impact timeline (shareable)']
+  const agentFeaturesExtra = ['Identifies #1 conversion problem','Opens a GitHub Pull Request','Brand Guardrails — your rules enforced','Full funnel analysis (all pages)','Reads scroll depth + click behavior','Weekly summary on Telegram','Monthly roast report — brutal honesty','Business DNA — learns over time','Public impact timeline (shareable)']
 
   return (
     <section id="pricing-section" className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, padding:'96px 24px' }}>
@@ -1204,7 +1204,7 @@ function FAQ() {
     { q:'Do I have to approve every change before it goes live?', a:'Yes, always. Nothing ships without your explicit approval. You receive a Telegram message with the problem, the data behind it, the solution, and the PR link. Reply YES to deploy it, or NO to skip it.' },
     { q:"What happens if the agent's change makes things worse?", a:'The agent checks your bounce rate 48 hours after every deployment. If it increased by 15+ percentage points, it automatically creates a rollback PR, merges it, and notifies you via Telegram. Your site reverts without any manual work.' },
     { q:'What are Brand Guardrails?', a:'Rules you set in your dashboard that the agent must follow on every run — tone of voice, things it can never do, elements it must never change. Any suggestion that violates your guardrails is automatically rejected.' },
-    { q:'What is Full Funnel analysis?', a:'Instead of only looking at your homepage, the agent scans every page in your GitHub repo, cross-references them with your real analytics, and identifies where visitors are dropping off. It then prioritises the highest-leverage page to fix.' },
+    { q:'What is Full Funnel analysis?', a:'Instead of only looking at your homepage, the agent scans every page in your GitHub repo and cross-references them with your real analytics — including how far visitors scroll and what they click on each page — to identify where visitors are dropping off. It then prioritises the highest-leverage page to fix.' },
   ]
 
   const items = agentItems

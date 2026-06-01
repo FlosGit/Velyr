@@ -685,6 +685,13 @@ async function fetchBrandGuardrails(subscriptionId: string) {
 // data, so we skip the queries and return null (the run continues with funnel
 // discovery only). Keep the $host filter logic in sync with the twin in
 // api/agent/run.js (getPostHogAnalytics + handleRollbackCheck).
+//
+// EDGE-ONLY ENRICHMENT: the `last7Days.engagement` block (scroll depth + click
+// map) is intentionally NOT mirrored in the api/agent/run.js twin. That twin
+// powers reporting modes (midweek / weekly_summary / rollback_check) which never
+// feed the LLM fix prompt, so the extra queries would add Vercel latency for no
+// benefit. The security-critical contract that MUST stay twinned is the $host
+// filter above — the engagement enrichment is additive and self-guarded.
 async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: string, posthogHost = 'https://us.i.posthog.com', hostFilter?: string | null) {
   if (!hostFilter) {
     console.warn('PostHog analytics skipped: no posthog_host_filter (domain) for this connection')
@@ -697,9 +704,13 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
     const today           = new Date().toISOString().split('T')[0]
     const hostWhere       = [`properties.$host = '${hostFilter.replace(/'/g, "''")}'`]
 
+    // hostWhere is ALWAYS applied (cross-customer $host isolation — never drop it).
+    // Callers may pass an extra `where: [...]` on the body; it is merged ON TOP of
+    // the host filter, never instead of it.
     const query = (body: any) =>
       fetch(`${posthogHost}/api/projects/${posthogProjectId}/query/`, {
-        method: 'POST', headers, body: JSON.stringify({ query: { ...body, where: hostWhere } }),
+        method: 'POST', headers,
+        body: JSON.stringify({ query: { ...body, where: [...hostWhere, ...(body.where || [])] } }),
       })
 
     const [pageviewsRes, sessionsRes, lastWeekRes, referrersRes, utmRes, deviceRes] = await Promise.all([
@@ -743,6 +754,48 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
     const mobilePercent = deviceBreakdown['mobile'] && totalPageviews > 0
       ? Math.round((deviceBreakdown['mobile'] / totalPageviews) * 100) : null
 
+    // ── ENGAGEMENT SIGNALS (scroll depth + click map) ─────────────────────────
+    // Behavioral data for the Pass-2 fix prompt: WHERE on a page visitors stop
+    // scrolling and WHAT they actually click. This is the "heatmap" enrichment —
+    // it lets the model ground a hypothesis ("the CTA is below the fold and 78%
+    // never reach it") instead of guessing from code structure alone.
+    //
+    // Wrapped in its OWN try/catch so a malformed engagement query can NEVER
+    // null-out the core analytics computed above (that would silently regress
+    // every run to funnel-only). Gated on real traffic — a clickmap or scroll
+    // average from a handful of sessions is noise, not signal.
+    //
+    // Data source (posthog-js default autocapture — no snippet change needed):
+    //   • Scroll: $pageleave carries $prev_pageview_max_scroll_percentage (0–1)
+    //     + $prev_pageview_pathname (the page being left). $pageleave fires even
+    //     on bounced single-page sessions, so the bounce population is covered.
+    //   • Clicks: $autocapture events with $event_type='click'; $el_text is the
+    //     visible label of the clicked element (correlatable to component source).
+    let engagement: any = null
+    if (uniqueSessions >= NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D) {
+      try {
+        const [scrollRes, clicksRes] = await Promise.all([
+          query({ kind: 'EventsQuery', event: '$pageleave',   after: sevenDaysAgo, before: today, limit: 10, orderBy: ['count() DESC'],
+                  select: ['properties.$prev_pageview_pathname', 'avg(toFloat(properties.$prev_pageview_max_scroll_percentage))', 'count()'],
+                  where:  ['properties.$prev_pageview_max_scroll_percentage is not null', 'properties.$prev_pageview_pathname is not null'] }),
+          query({ kind: 'EventsQuery', event: '$autocapture', after: sevenDaysAgo, before: today, limit: 8,  orderBy: ['count() DESC'],
+                  select: ['properties.$el_text', 'count()'],
+                  where:  ["properties.$event_type = 'click'", "properties.$el_text != ''"] }),
+        ])
+        const [scroll, clicks] = await Promise.all([scrollRes.json(), clicksRes.json()])
+        const scrollByPage = (scroll.results || [])
+          .filter((r: any) => r[0] && typeof r[1] === 'number')
+          .map((r: any) => ({ path: r[0], avgMaxScrollPct: Math.max(0, Math.min(100, Math.round(r[1] * 100))), samples: r[2] || 0 }))
+        const topClicks = (clicks.results || [])
+          .filter((r: any) => r[0])
+          .map((r: any) => ({ text: String(r[0]).replace(/\s+/g, ' ').trim().slice(0, 60), clicks: r[1] || 0 }))
+          .filter((c: any) => c.text)
+        if (scrollByPage.length || topClicks.length) engagement = { scrollByPage, topClicks }
+      } catch (err) {
+        console.warn('PostHog engagement signals skipped (core analytics unaffected):', err)
+      }
+    }
+
     return {
       last7Days: {
         totalPageviews, uniqueVisitors: uniqueSessions, bounceRate, mobilePercent, trafficChange, lastWeekSessions,
@@ -751,6 +804,7 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
         socialBreakdown, totalSocialVisits: Object.values(socialBreakdown).reduce((s, v) => s + v, 0),
         utmCampaigns:   utmData.results?.filter((row: any) => row[0] || row[2])?.map((row: any) => ({ source: row[0], medium: row[1], campaign: row[2], visits: row[3] }))?.slice(0, 5) || [],
         deviceBreakdown,
+        engagement,
       }
     }
   } catch (error) {
@@ -1816,10 +1870,15 @@ async function callAIForFix(
   ).join('\n\n')
   const allowedPaths = deepContext.components.map(c => c.path)
 
+  const eng = a?.engagement
+  const engagementLines = eng ? `
+- Scroll depth (avg max-scroll % per page, from $pageleave — low % = visitors stop before seeing the rest): ${(eng.scrollByPage || []).slice(0, 5).map((s: any) => `${s.path} → ${s.avgMaxScrollPct}% (${s.samples} leaves)`).join('; ') || 'n/a'}
+- Most-clicked elements (autocapture, by visible label): ${(eng.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks})`).join(', ') || 'n/a'}
+  Use scroll % to judge whether a section/CTA is actually seen, and clicks to see what visitors engage with vs ignore. This is real behavior — prefer it over assumptions from code layout.` : ''
   const analyticsContext = a ? `REAL ANALYTICS (last 7 days):
 - Pageviews: ${a.totalPageviews} · Sessions: ${a.uniqueVisitors} · Bounce: ${a.bounceRate}%
 - Mobile: ${a.mobilePercent != null ? `${a.mobilePercent}%` : 'unknown'} · vs last week: ${a.trafficChange != null ? `${a.trafficChange > 0 ? '+' : ''}${a.trafficChange}%` : 'first week'}
-- Top pages: ${(a.topPages || []).map((p: any) => `${p.path} (${p.views} views)`).join(', ')}` : 'No analytics data available.'
+- Top pages: ${(a.topPages || []).map((p: any) => `${p.path} (${p.views} views)`).join(', ')}${engagementLines}` : 'No analytics data available.'
 
   const funnelContext = funnelAnalysis ? `FUNNEL (${funnelAnalysis.totalPages} pages): ${Object.entries(funnelAnalysis.pageTypes).map(([t, n]) => `${t}: ${n}`).join(', ')}
 ${funnelAnalysis.funnelPages.filter((p: any) => p.views > 0).map((p: any) => `- ${p.filePath} (${p.pageType}) → ${p.views} views${p.dropOffScore ? `, ${p.dropOffScore}% drop-off` : ''}`).join('\n')}${funnelAnalysis.biggestDropOff ? `\nBIGGEST DROP-OFF: ${funnelAnalysis.biggestDropOff.filePath} (${funnelAnalysis.biggestDropOff.dropOffScore}%)` : ''}` : ''
@@ -1937,6 +1996,7 @@ interface ReceiptCtx {
   deepContext: DeepContext
   lintInfo: LintInfo
   runId: string
+  behavioralNote: string   // honest one-liner: which behavioral signals (scroll/clicks) were inspected, or why not
 }
 
 async function createPR(octokit: any, owner: string, repo: string, fixResult: FixResult, receipt: ReceiptCtx): Promise<CreatePRResult> {
@@ -1996,6 +2056,7 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
     fixResult,
     lintInfo:     receipt.lintInfo,
     runId:        receipt.runId,
+    behavioralNote: receipt.behavioralNote,
   })
 
   const { data: pr } = await octokit.rest.pulls.create({
@@ -2368,8 +2429,17 @@ async function processConnection(conn: any) {
     // Step 5: Writing fix — createPR re-fetches the file and runs the
     // whitespace-normalized find guard + Babel syntax check before committing.
     await supabase.from('agent_runs').update({ current_step: 'writing_fix' }).eq('id', run.id)
+    // Honest behavioral-signal note for the receipt: state what scroll/click
+    // data was actually inspected, or why none was (low traffic vs none returned).
+    const engForReceipt = analytics?.last7Days?.engagement
+    const visitorsForReceipt = analytics?.last7Days?.uniqueVisitors
+    const behavioralNote = engForReceipt
+      ? `scroll depth on ${engForReceipt.scrollByPage?.length || 0} page(s) and ${engForReceipt.topClicks?.length || 0} clicked element(s) inspected (PostHog autocapture, last 7 days)`
+      : (typeof visitorsForReceipt === 'number' && visitorsForReceipt >= NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D
+          ? 'none returned for the last 7 days (autocapture may be disabled)'
+          : `not available — fewer than ${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions in the last 7 days`)
     const prResult = await createPR(octokit, conn.github_repo_owner, conn.github_repo_name, fixResult, {
-      mapResult, graph, rankerResult, deepContext, lintInfo, runId: run.id,
+      mapResult, graph, rankerResult, deepContext, lintInfo, runId: run.id, behavioralNote,
     })
 
     // find_mismatch / find_ambiguous — distinct statuses (NOT generic failed),
