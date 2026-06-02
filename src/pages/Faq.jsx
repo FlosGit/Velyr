@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { FAQS } from '../data/faqs.js'
 
 const SHARED_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garant:wght@300;400;500&family=Jost:wght@300;400;500&display=swap');
@@ -18,41 +19,6 @@ const SHARED_CSS = `
     .faq-footer-links { flex-wrap: wrap !important; gap: 10px !important; }
   }
 `
-
-const FAQS = [
-  {
-    q: 'What does Velyr do?',
-    a: 'Every Monday, Velyr analyzes your repo and your analytics, identifies the #1 conversion problem, writes the code fix, and opens a GitHub Pull Request. You approve via Telegram (YES/NO).'
-  },
-  {
-    q: 'Do I have to approve every change?',
-    a: 'Yes. Nothing merges without your explicit YES reply. You see the exact code change in the PR before deciding.'
-  },
-  {
-    q: 'What happens if a change makes things worse?',
-    a: 'Velyr checks your bounce rate 48 hours after each merged fix. If site-wide bounce rate jumps +15pp or more, the agent automatically opens a revert PR.'
-  },
-  {
-    q: 'What are Brand Guardrails?',
-    a: 'Your written rules about what the agent shouldn\'t change — specific copy, design elements, claims. Suggestions that violate them are rejected before reaching you.'
-  },
-  {
-    q: 'Does it analyze my whole funnel or just the homepage?',
-    a: 'Your whole funnel. Velyr maps every page in your repo and cross-references them with your PostHog analytics — including how far visitors scroll on each page and what they actually click — to find where users drop off, then prioritizes the highest-impact fix.'
-  },
-  {
-    q: 'Is there a free trial?',
-    a: 'Yes — 14 days, all features included, credit card required to start. Cancel anytime during the trial and you\'re not charged.'
-  },
-  {
-    q: 'What happens when the trial ends?',
-    a: 'You\'re automatically charged €29 and your subscription continues monthly. If payment fails (expired card, etc.), the agent pauses and you have 7 days to update payment before the subscription cancels.'
-  },
-  {
-    q: 'Which sites are supported?',
-    a: 'React, Next.js, or Vite projects deployed on Vercel with a GitHub repo. Not supported: Shopify, Wix, Squarespace, Webflow.'
-  },
-]
 
 function Logo({ size = 24, color = '#2a5c45' }) {
   return (
@@ -102,9 +68,16 @@ export default function Faq({ navigate }) {
     if (!hreflangDefault) { hreflangDefault = document.createElement('link'); hreflangDefault.setAttribute('rel', 'alternate'); hreflangDefault.setAttribute('hreflang', 'x-default'); document.head.appendChild(hreflangDefault) }
     hreflangDefault.setAttribute('href', pageUrl)
 
-    const ld = document.createElement('script')
-    ld.type = 'application/ld+json'
-    ld.id = 'faq-jsonld'
+    // Reuse the prerendered FAQ JSON-LD (scripts/prerender.mjs) if present so we
+    // don't emit a duplicate FAQPage block; only create+remove one we own.
+    let ld = document.getElementById('faq-jsonld')
+    const ldCreated = !ld
+    if (!ld) {
+      ld = document.createElement('script')
+      ld.type = 'application/ld+json'
+      ld.id = 'faq-jsonld'
+      document.head.appendChild(ld)
+    }
     ld.textContent = JSON.stringify({
       '@context': 'https://schema.org',
       '@type': 'FAQPage',
@@ -114,7 +87,6 @@ export default function Faq({ navigate }) {
         acceptedAnswer: { '@type': 'Answer', text: f.a },
       })),
     })
-    document.head.appendChild(ld)
 
     return () => {
       document.title = prevTitle
@@ -123,8 +95,7 @@ export default function Faq({ navigate }) {
       canonical.setAttribute('href', 'https://velyr.io/')
       hreflangEn.setAttribute('href', 'https://velyr.io/')
       hreflangDefault.setAttribute('href', 'https://velyr.io/')
-      const existing = document.getElementById('faq-jsonld')
-      if (existing) existing.remove()
+      if (ldCreated) ld.remove()
     }
   }, [])
 

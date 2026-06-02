@@ -67,12 +67,40 @@
         "name": "Velyr",
         "url": "https://velyr.io",
         "email": "info@velyr.io",
-        "sameAs": ["https://github.com/FlosGit/scano"],
         "address": {
           "@type": "PostalAddress",
           "addressCountry": "DE"
         }
       }
+    }
+    </script>
+
+    <!-- Structured Data: Organization -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Velyr",
+      "url": "https://velyr.io",
+      "logo": "https://velyr.io/og-image.png",
+      "email": "info@velyr.io",
+      "description": "Velyr is an AI growth agent that ships one weekly conversion fix as a GitHub Pull Request — approved by you over Telegram and auto-rolled-back if it backfires.",
+      "address": {
+        "@type": "PostalAddress",
+        "addressCountry": "DE"
+      }
+    }
+    </script>
+
+    <!-- Structured Data: WebSite -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Velyr",
+      "url": "https://velyr.io",
+      "inLanguage": "en",
+      "publisher": { "@type": "Organization", "name": "Velyr", "url": "https://velyr.io" }
     }
     </script>
 
@@ -189,7 +217,35 @@
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!--
+        Static fallback for crawlers / answer engines that do not execute JavaScript.
+        React (createRoot) replaces this entirely on mount, so JS visitors never see it.
+        Keep the copy in sync with the hero in src/Home.jsx and /llms.txt.
+      -->
+      <main style="max-width:680px;margin:0 auto;padding:80px 24px;font-family:Jost,system-ui,sans-serif;color:#1c1917;background:#f7f4ef">
+        <p style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#2a5c45">AI Growth Agent · for React, Next.js &amp; Vite</p>
+        <h1 style="font-family:Cormorant Garant,Georgia,serif;font-weight:300;font-size:48px;line-height:1.1;letter-spacing:-.025em;margin:16px 0">Conversion fixes, shipped weekly.</h1>
+        <p style="font-size:18px;line-height:1.6;color:#6b6460;max-width:640px">
+          Velyr is an AI growth agent that finds your site's #1 conversion problem each week and writes the fix as a GitHub Pull Request. You approve it with one Telegram reply — and if the numbers drop, it reverts itself within 48 hours.
+        </p>
+        <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">How it works</h2>
+        <ol style="line-height:1.8;color:#6b6460;font-size:15px;padding-left:20px">
+          <li>Every Monday the agent reads your PostHog analytics and scans every page in your GitHub repo.</li>
+          <li>It identifies the single highest-impact conversion fix across your full funnel and opens a Pull Request with a Vercel preview.</li>
+          <li>You get a Telegram message — reply <strong>YES</strong> to ship or <strong>NO</strong> to skip. Nothing merges without your approval.</li>
+          <li>48 hours after a merge, if site-wide bounce rate spikes, Velyr auto-opens a rollback PR.</li>
+        </ol>
+        <p style="font-size:15px;color:#6b6460;margin-top:32px">
+          <strong>€29/month</strong> after a 14-day free trial. Built for React, Next.js, and Vite sites on Vercel with a GitHub repo. Cancel anytime.
+        </p>
+        <p style="margin-top:24px">
+          <a href="/agent/register" style="color:#2a5c45">Start free trial</a> ·
+          <a href="/faq" style="color:#2a5c45">FAQ</a> ·
+          <a href="/privacy" style="color:#2a5c45">Privacy</a>
+        </p>
+      </main>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
