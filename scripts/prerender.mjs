@@ -27,8 +27,11 @@ const esc = (s) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 
+// display:none so JS visitors never see a flash of the fallback before React
+// mounts; raw-HTML crawlers ignore CSS and still read the text, and Googlebot
+// renders the real React app. Keep in sync with the fallback in index.html.
 const MAIN_OPEN =
-  '<main style="max-width:680px;margin:0 auto;padding:80px 24px;font-family:Jost,system-ui,sans-serif;color:#1c1917;background:#f7f4ef">'
+  '<main style="display:none;max-width:680px;margin:0 auto;padding:80px 24px;font-family:Jost,system-ui,sans-serif;color:#1c1917;background:#f7f4ef">'
 const H1 = (t) =>
   `<h1 style="font-family:Cormorant Garant,Georgia,serif;font-weight:300;font-size:48px;line-height:1.1;letter-spacing:-.025em;margin:16px 0">${esc(t)}</h1>`
 const HOME_LINK =
