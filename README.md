@@ -1,2 +1,2 @@
 # velyr
-AI-powered business audit tool
+AI Growth Agent for React, Next.js & Vite

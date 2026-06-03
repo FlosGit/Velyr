@@ -101,7 +101,7 @@ ctx.font = '28px Arial, sans-serif'
 ctx.fillStyle = '#6b6460'
 ctx.textBaseline = 'top'
 ctx.textAlign = 'center'
-ctx.fillText('AI Business Audit & Growth Agent', W / 2, lineY + 20)
+ctx.fillText('AI Growth Agent for React, Next.js & Vite', W / 2, lineY + 20)
 
 // ── velyr.io  bottom-right ────────────────────────────────────────────────────
 ctx.font = '18px Arial, sans-serif'
