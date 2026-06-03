@@ -1,0 +1,47 @@
+name: Blog daily publish
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggers a Vercel PRODUCTION rebuild so any blog article whose `publishedAt`
+# has come due gets published. The publish gate lives at build time in
+# scripts/lib/blog.mjs (only articles with publishedAt <= today are rendered,
+# sitemapped, and emitted), so "publishing" is simply "rebuild and redeploy."
+#
+# This costs ZERO Vercel serverless functions — it only POSTs to a Vercel Deploy
+# Hook, which is a plain webhook. That keeps us under the 12-function Hobby cap.
+#
+# STATUS: MANUAL ONLY (workflow_dispatch). The daily `schedule` block below is
+# intentionally commented out. Enable it only AFTER the bulk content has staged
+# publishedAt dates assigned (see scripts/assign-publish-dates.mjs) — otherwise a
+# daily rebuild publishes nothing and just burns CI minutes.
+#
+# ── RUNBOOK: enabling automatic daily publishing ─────────────────────────────
+# 1. In Vercel → Project → Settings → Git → Deploy Hooks, create a hook on the
+#    production branch (e.g. name "blog-daily", branch "main"). Copy the URL.
+# 2. In GitHub → repo → Settings → Secrets and variables → Actions, add a secret
+#    named VERCEL_DEPLOY_HOOK_URL with that URL.
+# 3. Uncomment the `schedule:` block below (09:00 UTC daily) and merge.
+# 4. To publish on demand at any time, run this workflow manually from the
+#    Actions tab (workflow_dispatch).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   # 09:00 UTC every day — publishes the ~10 articles whose publishedAt is due.
+  #   - cron: '0 9 * * *'
+
+jobs:
+  trigger-rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel production rebuild via Deploy Hook
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "::error::VERCEL_DEPLOY_HOOK_URL secret is not set. See the runbook in this workflow file."
+            exit 1
+          fi
+          echo "Triggering Vercel production rebuild…"
+          curl -fsS -X POST "$DEPLOY_HOOK_URL"
+          echo "Deploy hook fired. Vercel will rebuild; due articles publish on the new build."

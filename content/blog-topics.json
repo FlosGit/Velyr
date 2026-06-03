@@ -1,0 +1,3236 @@
+[
+  {
+    "slug": "improve-conversion-nextjs-landing-page",
+    "title": "How to Improve Conversion Rate on a Next.js Landing Page",
+    "cluster": "framework-fixes",
+    "status": "published"
+  },
+  {
+    "slug": "fix-low-converting-react-hero-section",
+    "title": "Why Your React Hero Section Isn't Converting (and How to Fix It)",
+    "cluster": "framework-fixes",
+    "status": "published"
+  },
+  {
+    "slug": "measure-scroll-depth-posthog",
+    "title": "How to Measure Scroll Depth in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "published"
+  },
+  {
+    "slug": "build-signup-funnel-posthog",
+    "title": "How to Build a Signup Funnel in PostHog for a SaaS Site",
+    "cluster": "posthog-recipes",
+    "status": "published"
+  },
+  {
+    "slug": "track-cta-clicks-posthog",
+    "title": "How to Track CTA Clicks in PostHog with Autocapture",
+    "cluster": "posthog-recipes",
+    "status": "published"
+  },
+  {
+    "slug": "good-conversion-rate-saas-landing-page",
+    "title": "What Is a Good Conversion Rate for a SaaS Landing Page?",
+    "cluster": "benchmarks",
+    "status": "published"
+  },
+  {
+    "slug": "average-bounce-rate-developer-tools",
+    "title": "What Is the Average Bounce Rate for Developer Tools?",
+    "cluster": "benchmarks",
+    "status": "published"
+  },
+  {
+    "slug": "good-trial-to-paid-conversion-rate-saas",
+    "title": "What's a Good Free-Trial-to-Paid Conversion Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "published"
+  },
+  {
+    "slug": "what-is-conversion-rate-optimization",
+    "title": "What Is Conversion Rate Optimization (CRO)?",
+    "cluster": "concepts",
+    "status": "published"
+  },
+  {
+    "slug": "what-is-a-micro-conversion",
+    "title": "What Is a Micro-Conversion? Examples for SaaS",
+    "cluster": "concepts",
+    "status": "published"
+  },
+  {
+    "slug": "improve-conversion-nextjs-pricing-page",
+    "title": "How to Improve Conversion on a Next.js Pricing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-signup-form-abandonment-nextjs-app-router",
+    "title": "How to Reduce Signup Form Abandonment in Next.js App Router",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-hydration-delayed-cta-nextjs",
+    "title": "How to Fix a Hydration-Delayed CTA in Next.js",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-exit-intent-popup-nextjs-without-hurting-lcp",
+    "title": "How to Add an Exit-Intent Popup in Next.js Without Hurting LCP",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "make-nextjs-server-component-hero-convert-better",
+    "title": "How to Make a Next.js Server Component Hero Convert Better",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "lazy-load-below-fold-sections-nextjs-conversion",
+    "title": "How to Lazy-Load Below-the-Fold Sections in Next.js for Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-two-hero-variants-nextjs-middleware",
+    "title": "How to A/B Two Hero Variants with Next.js Middleware",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-next-font-stop-layout-shift-that-hurts-conversion",
+    "title": "How to Use next/font to Stop Layout Shift That Hurts Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-sticky-mobile-cta-nextjs-app-router",
+    "title": "How to Add a Sticky Mobile CTA in Next.js App Router",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-blog-signup-path-nextjs",
+    "title": "How to Improve the Blog-to-Signup Path in Next.js",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-slow-route-transitions-hurting-conversion-nextjs",
+    "title": "How to Fix Slow Route Transitions Hurting Conversion in Next.js",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "render-social-proof-server-side-nextjs",
+    "title": "How to Render Social Proof Server-Side in Next.js",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "gate-nextjs-cta-behind-fast-server-action",
+    "title": "How to Gate a Next.js CTA Behind a Fast Server Action",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-bounce-nextjs-marketing-page",
+    "title": "How to Reduce Bounce on a Next.js Marketing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "personalise-nextjs-hero-cookies-without-flash",
+    "title": "How to Personalise a Next.js Hero with Cookies Without a Flash",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-third-party-scripts-nextjs-lift-conversion",
+    "title": "How to Defer Third-Party Scripts in Next.js to Lift Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-below-fold-cta-react-spa",
+    "title": "How to Fix a Below-the-Fold CTA in a React SPA",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-form-abandonment-react-multi-step-signup",
+    "title": "How to Reduce Form Abandonment in a React Multi-Step Signup",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-sticky-cta-react-single-page-app",
+    "title": "How to Add a Sticky CTA in a React Single-Page App",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "lazy-load-heavy-react-hero-improve-conversion",
+    "title": "How to Lazy-Load a Heavy React Hero to Improve Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "stop-react-re-render-flickering-cta",
+    "title": "How to Stop a React Re-Render From Flickering Your CTA",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-conversion-react-pricing-toggle",
+    "title": "How to Improve Conversion on a React Pricing Toggle",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "code-split-react-landing-page-faster-first-paint",
+    "title": "How to Code-Split a React Landing Page for Faster First Paint",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "show-exit-intent-modal-react-without-annoying-users",
+    "title": "How to Show an Exit-Intent Modal in React Without Annoying Users",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-slow-react-hydration-that-delays-interaction",
+    "title": "How to Fix Slow React Hydration That Delays Interaction",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-trust-bar-react-that-converts",
+    "title": "How to Build a Trust Bar in React That Converts",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-analytics-react-so-cta-loads-first",
+    "title": "How to Defer Analytics in React So the CTA Loads First",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-mobile-tap-targets-react-landing-page",
+    "title": "How to Improve Mobile Tap Targets in a React Landing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "inline-critical-css-vite-react-app-conversion",
+    "title": "How to Inline Critical CSS in a Vite React App for Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-cta-visibility-react-intersectionobserver",
+    "title": "How to Measure CTA Visibility in React with IntersectionObserver",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-conversion-astro-landing-page-islands",
+    "title": "How to Improve Conversion on an Astro Landing Page with Islands",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-client-visible-so-astro-cta-hydrates-late",
+    "title": "How to Use client:visible So an Astro CTA Hydrates Late",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "optimise-astro-image-component-fast-hero-lcp",
+    "title": "How to Optimise the Astro Image Component for a Fast Hero LCP",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-interactive-pricing-toggle-as-astro-island",
+    "title": "How to Add an Interactive Pricing Toggle as an Astro Island",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-javascript-astro-page-cut-bounce",
+    "title": "How to Reduce JavaScript on an Astro Page to Cut Bounce",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-sticky-cta-island-astro",
+    "title": "How to Add a Sticky CTA Island in Astro",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "server-render-social-proof-astro",
+    "title": "How to Server-Render Social Proof in Astro",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-astro-page-edge-middleware",
+    "title": "How to A/B Test an Astro Page with Edge Middleware",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-newsletter-widget-as-astro-client-idle-island",
+    "title": "How to Defer a Newsletter Widget as an Astro client:idle Island",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-cumulative-layout-shift-astro-landing-page",
+    "title": "How to Fix Cumulative Layout Shift on an Astro Landing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-conversion-astro-content-collection-blog",
+    "title": "How to Improve Conversion on an Astro Content Collection Blog",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-exit-intent-island-astro",
+    "title": "How to Add an Exit-Intent Island in Astro",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "inline-critical-styles-astro-first-paint",
+    "title": "How to Inline Critical Styles in Astro for First Paint",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "turn-static-astro-hero-into-persuasive-above-fold",
+    "title": "How to Turn a Static Astro Hero Into a Persuasive Above-the-Fold",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-signup-form-abandonment-sveltekit",
+    "title": "How to Reduce Signup Form Abandonment in SvelteKit",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-sveltekit-form-action-cut-checkout-drop-off",
+    "title": "How to Use a SvelteKit Form Action to Cut Checkout Drop-Off",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "progressive-enhance-sveltekit-cta-use-enhance",
+    "title": "How to Progressive-Enhance a SvelteKit CTA with use:enhance",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-conversion-sveltekit-load-function-prefetch",
+    "title": "How to Improve Conversion with a SvelteKit Load Function Prefetch",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-sticky-cta-sveltekit-without-layout-shift",
+    "title": "How to Add a Sticky CTA in SvelteKit Without Layout Shift",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "optimise-sveltekit-hero-images-enhanced-img",
+    "title": "How to Optimise SvelteKit Hero Images with enhanced:img",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-route-sveltekit-hooks",
+    "title": "How to A/B Test a Route in SvelteKit with Hooks",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "show-inline-form-errors-sveltekit-without-reload",
+    "title": "How to Show Inline Form Errors in SvelteKit Without a Reload",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-bounce-sveltekit-marketing-page",
+    "title": "How to Reduce Bounce on a SvelteKit Marketing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-analytics-sveltekit-load-cta-first",
+    "title": "How to Defer Analytics in SvelteKit to Load the CTA First",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "personalise-sveltekit-page-server-load-function",
+    "title": "How to Personalise a SvelteKit Page in a Server Load Function",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-mobile-conversion-sveltekit-app",
+    "title": "How to Improve Mobile Conversion in a SvelteKit App",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-exit-intent-modal-sveltekit",
+    "title": "How to Add an Exit-Intent Modal in SvelteKit",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "server-render-social-proof-sveltekit",
+    "title": "How to Server-Render Social Proof in SvelteKit",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "cut-signup-abandonment-remix-action-and-usefetcher",
+    "title": "How to Cut Signup Abandonment with a Remix Action and useFetcher",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-conversion-remix-loader-prefetch",
+    "title": "How to Improve Conversion with a Remix Loader Prefetch",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "progressive-enhance-remix-form-higher-completion",
+    "title": "How to Progressive-Enhance a Remix Form for Higher Completion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-inline-validation-remix-form-without-js-reloads",
+    "title": "How to Add Inline Validation in a Remix Form Without JS Reloads",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-sticky-cta-remix-route",
+    "title": "How to Add a Sticky CTA in a Remix Route",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-remix-route-loader",
+    "title": "How to A/B Test a Remix Route in the Loader",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-bounce-remix-landing-page",
+    "title": "How to Reduce Bounce on a Remix Landing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "optimise-lcp-remix-marketing-route",
+    "title": "How to Optimise LCP on a Remix Marketing Route",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "personalise-remix-page-loader",
+    "title": "How to Personalise a Remix Page from the Loader",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-non-critical-data-remix-speed-cta",
+    "title": "How to Defer Non-Critical Data in Remix to Speed the CTA",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "show-social-proof-remix-loader",
+    "title": "How to Show Social Proof from a Remix Loader",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-mobile-conversion-remix-app",
+    "title": "How to Improve Mobile Conversion in a Remix App",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-conversion-vue-3-landing-page",
+    "title": "How to Improve Conversion on a Vue 3 Landing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-form-abandonment-vue-3-signup",
+    "title": "How to Reduce Form Abandonment in a Vue 3 Signup",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-sticky-cta-vue-3-composable",
+    "title": "How to Add a Sticky CTA in Vue 3 with a Composable",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "lazy-load-vue-3-hero-defineasynccomponent",
+    "title": "How to Lazy-Load a Vue 3 Hero with defineAsyncComponent",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-layout-shift-vue-3-landing-page",
+    "title": "How to Fix Layout Shift in a Vue 3 Landing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-vue-3-page-feature-flag",
+    "title": "How to A/B Test a Vue 3 Page with a Feature Flag",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "show-exit-intent-modal-vue-3",
+    "title": "How to Show an Exit-Intent Modal in Vue 3",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-mobile-tap-targets-vue-3-app",
+    "title": "How to Improve Mobile Tap Targets in a Vue 3 App",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-third-party-scripts-vue-3-conversion",
+    "title": "How to Defer Third-Party Scripts in Vue 3 for Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-trust-bar-component-vue-3",
+    "title": "How to Build a Trust Bar Component in Vue 3",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-conversion-nuxt-3-landing-page",
+    "title": "How to Improve Conversion on a Nuxt 3 Landing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-signup-abandonment-nuxt-3-form",
+    "title": "How to Reduce Signup Abandonment in a Nuxt 3 Form",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-useasyncdata-nuxt-3-prefetch-and-speed-cta",
+    "title": "How to Use useAsyncData in Nuxt 3 to Prefetch and Speed the CTA",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-sticky-cta-nuxt-3-without-layout-shift",
+    "title": "How to Add a Sticky CTA in Nuxt 3 Without Layout Shift",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "optimise-nuxt-image-fast-hero-lcp",
+    "title": "How to Optimise Nuxt Image for a Fast Hero LCP",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-nuxt-3-route-middleware",
+    "title": "How to A/B Test a Nuxt 3 Route with Middleware",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-plugins-nuxt-3-load-cta-first",
+    "title": "How to Defer Plugins in Nuxt 3 to Load the CTA First",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "server-render-social-proof-nuxt-3",
+    "title": "How to Server-Render Social Proof in Nuxt 3",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "personalise-nuxt-3-page-server-middleware",
+    "title": "How to Personalise a Nuxt 3 Page in Server Middleware",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-cumulative-layout-shift-nuxt-3-page",
+    "title": "How to Fix Cumulative Layout Shift on a Nuxt 3 Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-mobile-conversion-nuxt-3-app",
+    "title": "How to Improve Mobile Conversion in a Nuxt 3 App",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-exit-intent-modal-nuxt-3",
+    "title": "How to Add an Exit-Intent Modal in Nuxt 3",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-conversion-plain-html-landing-page",
+    "title": "How to Improve Conversion on a Plain HTML Landing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-sticky-cta-plain-html-and-css",
+    "title": "How to Add a Sticky CTA in Plain HTML and CSS",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-form-abandonment-plain-html-signup-form",
+    "title": "How to Reduce Form Abandonment in a Plain HTML Signup Form",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "lazy-load-images-static-html-page-faster-lcp",
+    "title": "How to Lazy-Load Images on a Static HTML Page for a Faster LCP",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-exit-intent-popup-vanilla-javascript",
+    "title": "How to Add an Exit-Intent Popup in Vanilla JavaScript",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "inline-critical-css-static-html-page",
+    "title": "How to Inline Critical CSS in a Static HTML Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-third-party-scripts-static-html-site",
+    "title": "How to Defer Third-Party Scripts on a Static HTML Site",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-native-form-validation-plain-html-cut-abandonment",
+    "title": "How to Add Native Form Validation in Plain HTML to Cut Abandonment",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-trust-bar-plain-html-and-css",
+    "title": "How to Build a Trust Bar in Plain HTML and CSS",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-layout-shift-static-html-landing-page",
+    "title": "How to Fix Layout Shift on a Static HTML Landing Page",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-layout-shift-next-image-nextjs-hero",
+    "title": "How to Reduce Layout Shift from next/image on a Next.js Hero",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "prefetch-signup-route-nextjs-speed-conversion",
+    "title": "How to Prefetch the Signup Route in Next.js to Speed Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "debounce-react-search-box-without-losing-conversions",
+    "title": "How to Debounce a React Search Box Without Losing Conversions",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "persist-half-filled-react-form-cut-abandonment",
+    "title": "How to Persist a Half-Filled React Form to Cut Abandonment",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-view-transition-astro-page-without-hurting-conversion",
+    "title": "How to Add a View Transition to an Astro Page Without Hurting Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-astro-server-islands-personalised-social-proof",
+    "title": "How to Use Astro Server Islands for Personalised Social Proof",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "prefetch-hover-sveltekit-data-sveltekit-preload-data",
+    "title": "How to Prefetch on Hover in SvelteKit with data-sveltekit-preload-data",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "stream-slow-section-sveltekit-so-cta-renders-first",
+    "title": "How to Stream a Slow Section in SvelteKit So the CTA Renders First",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-remix-fetcher-form-inline-newsletter-signup",
+    "title": "How to Use a Remix fetcher.Form for an Inline Newsletter Signup",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-slow-data-remix-defer-and-await",
+    "title": "How to Defer Slow Data in Remix with defer and Await",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-vue-suspense-keep-cta-visible-while-data-loads",
+    "title": "How to Use Vue Suspense to Keep the CTA Visible While Data Loads",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "prefetch-route-hover-vue-router-faster-conversion",
+    "title": "How to Prefetch a Route on Hover in Vue Router for Faster Conversion",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-nuxt-uselazyasyncdata-render-cta-before-data",
+    "title": "How to Use Nuxt useLazyAsyncData to Render the CTA Before Data",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-nuxt-route-middleware-redirect-that-preserves-intent",
+    "title": "How to Add a Nuxt Route Middleware Redirect That Preserves Intent",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "preload-hero-image-plain-html-faster-lcp",
+    "title": "How to Preload Your Hero Image in Plain HTML for a Faster LCP",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "add-accessible-modal-plain-html-dialog-element",
+    "title": "How to Add an Accessible Modal in Plain HTML with the dialog Element",
+    "cluster": "framework-fixes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-button-click-as-custom-event-posthog",
+    "title": "How to Track a Button Click as a Custom Event in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "create-conversion-goal-posthog",
+    "title": "How to Create a Conversion Goal in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-time-page-posthog",
+    "title": "How to Measure Time on Page in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-retention-chart-posthog-saas",
+    "title": "How to Build a Retention Chart in PostHog for a SaaS",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-posthog-paths-see-where-users-go-after-homepage",
+    "title": "How to Use PostHog Paths to See Where Users Go After the Homepage",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "create-cohort-high-intent-visitors-posthog",
+    "title": "How to Create a Cohort of High-Intent Visitors in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-most-viewed-pages-posthog-hogql",
+    "title": "How to Find Your Most-Viewed Pages in PostHog with HogQL",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-outbound-link-clicks-posthog",
+    "title": "How to Track Outbound Link Clicks in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-form-field-drop-off-posthog",
+    "title": "How to Measure Form Field Drop-Off in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "set-up-pageview-funnel-posthog-without-code",
+    "title": "How to Set Up a Pageview Funnel in PostHog Without Code",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "calculate-click-through-rate-posthog-hogql",
+    "title": "How to Calculate Click-Through Rate in PostHog with HogQL",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-pricing-page-visits-posthog",
+    "title": "How to Track Pricing Page Visits in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-posthog-feature-flags-gate-new-cta",
+    "title": "How to Use PostHog Feature Flags to Gate a New CTA",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "break-down-scroll-depth-by-page-posthog",
+    "title": "How to Break Down Scroll Depth by Page in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-rage-clicks-posthog",
+    "title": "How to Find Rage Clicks in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-sign-ups-by-traffic-source-posthog",
+    "title": "How to Track Sign-Ups by Traffic Source in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-weekly-active-users-chart-posthog",
+    "title": "How to Build a Weekly Active Users Chart in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-bounce-rate-posthog-hogql",
+    "title": "How to Measure Bounce Rate in PostHog with HogQL",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "watch-session-recordings-users-who-did-not-convert-posthog",
+    "title": "How to Watch Session Recordings of Users Who Did Not Convert in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "create-dashboard-landing-page-performance-posthog",
+    "title": "How to Create a Dashboard for Landing Page Performance in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-multi-step-checkout-funnel-posthog",
+    "title": "How to Track a Multi-Step Checkout Funnel in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "segment-conversion-by-device-posthog",
+    "title": "How to Segment Conversion by Device in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-posthog-surveys-ask-users-did-not-sign-up",
+    "title": "How to Use PostHog Surveys to Ask Why Users Did Not Sign Up",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-drop-off-between-two-events-posthog",
+    "title": "How to Find Drop-Off Between Two Events in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-video-play-events-posthog",
+    "title": "How to Track Video Play Events in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-activation-rate-posthog-hogql",
+    "title": "How to Measure Activation Rate in PostHog with HogQL",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "compare-this-week-vs-last-week-conversions-posthog",
+    "title": "How to Compare This Week vs Last Week Conversions in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-utm-campaigns-posthog",
+    "title": "How to Track UTM Campaigns in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "identify-highest-converting-referrers-posthog",
+    "title": "How to Identify Your Highest-Converting Referrers in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "set-conversion-alert-posthog",
+    "title": "How to Set a Conversion Alert in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-hogql-count-unique-visitors-per-day",
+    "title": "How to Use HogQL to Count Unique Visitors Per Day",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-cta-impression-intersectionobserver-and-posthog",
+    "title": "How to Track a CTA Impression with IntersectionObserver and PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-median-session-duration-posthog-quantile",
+    "title": "How to Measure Median Session Duration in PostHog with quantile",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-pages-high-exit-rates-posthog",
+    "title": "How to Find Pages With High Exit Rates in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-signup-activation-funnel-posthog",
+    "title": "How to Build a Signup-to-Activation Funnel in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-add-cart-events-posthog",
+    "title": "How to Track Add-to-Cart Events in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-mobile-vs-desktop-conversion-posthog",
+    "title": "How to Measure Mobile vs Desktop Conversion in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "tag-internal-traffic-so-it-not-skew-posthog-data",
+    "title": "How to Tag Internal Traffic So It Does Not Skew PostHog Data",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-posthog-group-analytics-b2b-accounts",
+    "title": "How to Use PostHog Group Analytics for B2B Accounts",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-search-queries-site-posthog",
+    "title": "How to Track Search Queries on Your Site in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-conversion-impact-deploy-posthog",
+    "title": "How to Measure the Conversion Impact of a Deploy in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-top-clicked-elements-posthog-autocapture",
+    "title": "How to Find Your Top Clicked Elements in PostHog with $autocapture",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-new-vs-returning-visitor-breakdown-posthog",
+    "title": "How to Build a New vs Returning Visitor Breakdown in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-pricing-plan-selection-posthog",
+    "title": "How to Track Pricing Plan Selection in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-email-capture-rate-posthog",
+    "title": "How to Measure Email Capture Rate in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-hogql-find-single-page-sessions",
+    "title": "How to Use HogQL to Find Single-Page Sessions",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-onboarding-step-completion-posthog",
+    "title": "How to Track Onboarding Step Completion in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-trial-starts-by-plan-posthog",
+    "title": "How to Measure Trial Starts by Plan in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-funnel-conversion-window-posthog",
+    "title": "How to Build a Funnel With a Conversion Window in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-where-mobile-users-drop-off-posthog",
+    "title": "How to Find Where Mobile Users Drop Off in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-scroll-pricing-as-micro-conversion-posthog",
+    "title": "How to Track Scroll-to-Pricing as a Micro-Conversion in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-posthog-trends-spot-conversion-dip",
+    "title": "How to Use PostHog Trends to Spot a Conversion Dip",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-form-submission-errors-posthog",
+    "title": "How to Measure Form Submission Errors in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "segment-conversion-by-landing-page-posthog",
+    "title": "How to Segment Conversion by Landing Page in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-first-click-attribution-posthog",
+    "title": "How to Track First-Click Attribution in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-hogql-rank-pages-by-conversion-rate",
+    "title": "How to Use HogQL to Rank Pages by Conversion Rate",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-repeat-visit-conversion-posthog",
+    "title": "How to Measure Repeat-Visit Conversion in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-weekly-conversion-rate-trend-posthog",
+    "title": "How to Build a Weekly Conversion-Rate Trend in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-demo-requests-posthog",
+    "title": "How to Track Demo Requests in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-pages-highest-bounce-posthog",
+    "title": "How to Find the Pages With the Highest Bounce in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-posthog-cohorts-retarget-cart-abandoners",
+    "title": "How to Use PostHog Cohorts to Retarget Cart Abandoners",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-hero-cta-vs-footer-cta-clicks-posthog",
+    "title": "How to Measure Hero CTA vs Footer CTA Clicks in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-churn-signals-like-account-deletions-posthog",
+    "title": "How to Track Churn Signals Like Account Deletions in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-daily-signups-chart-posthog-hogql",
+    "title": "How to Build a Daily Signups Chart in PostHog with HogQL",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-conversion-by-browser-posthog",
+    "title": "How to Measure Conversion by Browser in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-coupon-code-usage-posthog",
+    "title": "How to Track Coupon Code Usage in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-high-scroll-no-click-sessions-posthog",
+    "title": "How to Find High-Scroll, No-Click Sessions in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-hogql-countif-conditional-conversion-counts",
+    "title": "How to Use HogQL countIf for Conditional Conversion Counts",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-drop-off-pricing-checkout-posthog",
+    "title": "How to Measure the Drop-Off From Pricing to Checkout in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-tab-switching-pricing-page-posthog",
+    "title": "How to Track Tab Switching on a Pricing Page in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-average-pages-per-session-posthog",
+    "title": "How to Measure Average Pages Per Session in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-newsletter-signups-by-source-posthog",
+    "title": "How to Track Newsletter Signups by Source in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-best-converting-blog-posts-posthog",
+    "title": "How to Find Your Best-Converting Blog Posts in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-posthog-measure-above-fold-cta-visibility",
+    "title": "How to Use PostHog to Measure Above-the-Fold CTA Visibility",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-logged-vs-logged-out-conversion-posthog",
+    "title": "How to Track Logged-In vs Logged-Out Conversion in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-weekend-vs-weekday-conversion-posthog",
+    "title": "How to Measure Weekend vs Weekday Conversion in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-hogql-multiif-bucket-visitors-by-engagement",
+    "title": "How to Use HogQL multiIf to Bucket Visitors by Engagement",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-pricing-faq-expansions-posthog",
+    "title": "How to Track Pricing FAQ Expansions in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-conversion-rate-specific-campaign-posthog",
+    "title": "How to Measure the Conversion Rate of a Specific Campaign in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "find-pages-where-users-scroll-but-not-convert-posthog",
+    "title": "How to Find Pages Where Users Scroll But Do Not Convert in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-free-paid-upgrades-posthog",
+    "title": "How to Track Free-to-Paid Upgrades in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "build-funnel-segmented-by-country-posthog",
+    "title": "How to Build a Funnel Segmented by Country in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-cta-click-through-by-position-posthog",
+    "title": "How to Measure CTA Click-Through by Position in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "track-form-start-vs-form-submit-posthog",
+    "title": "How to Track Form Start vs Form Submit in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "use-hogql-compute-7-day-rolling-signup-count",
+    "title": "How to Use HogQL to Compute a 7-Day Rolling Signup Count",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-effect-pricing-change-posthog",
+    "title": "How to Measure the Effect of a Pricing Change in PostHog",
+    "cluster": "posthog-recipes",
+    "status": "draft"
+  },
+  {
+    "slug": "good-bounce-rate-saas-marketing-site",
+    "title": "What Is a Good Bounce Rate for a SaaS Marketing Site?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-signup-conversion-rate-developer-tool",
+    "title": "What Is a Good Signup Conversion Rate for a Developer Tool?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-click-through-rate-hero-cta",
+    "title": "What Is a Good Click-Through Rate on a Hero CTA?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-scroll-depth-landing-page",
+    "title": "What Is a Good Scroll Depth for a Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-time-page-saas-landing-page",
+    "title": "What Is the Average Time on Page for a SaaS Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-demo-request-conversion-rate-b2b-saas",
+    "title": "What Is a Good Demo-Request Conversion Rate for B2B SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-email-capture-rate-landing-page",
+    "title": "What Is a Good Email Capture Rate for a Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-activation-rate-saas-product",
+    "title": "What Is a Good Activation Rate for a SaaS Product?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-pages-per-session-saas-site",
+    "title": "What Is the Average Pages Per Session for a SaaS Site?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-pricing-page-conversion-rate",
+    "title": "What Is a Good Pricing Page Conversion Rate?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-free-trial-signup-rate-b2b-saas",
+    "title": "What Is a Good Free-Trial Signup Rate for B2B SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-checkout-completion-rate-saas",
+    "title": "What Is a Good Checkout Completion Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-conversion-rate-api-product",
+    "title": "What Is the Average Conversion Rate for an API Product?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-newsletter-signup-conversion-rate",
+    "title": "What Is a Good Newsletter Signup Conversion Rate?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-mobile-conversion-rate-saas",
+    "title": "What Is a Good Mobile Conversion Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-cart-abandonment-rate-saas-checkouts",
+    "title": "What Is the Average Cart Abandonment Rate for SaaS Checkouts?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-day-1-retention-rate-saas-product",
+    "title": "What Is a Good Day-1 Retention Rate for a SaaS Product?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-day-30-retention-rate-saas",
+    "title": "What Is a Good Day-30 Retention Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-onboarding-completion-rate-saas",
+    "title": "What Is a Good Onboarding Completion Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-cta-click-rate-pricing-page",
+    "title": "What Is a Good CTA Click Rate on a Pricing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-visitor-lead-rate-b2b-saas",
+    "title": "What Is a Good Visitor-to-Lead Rate for B2B SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-lead-customer-rate-saas",
+    "title": "What Is a Good Lead-to-Customer Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-bounce-rate-documentation-site",
+    "title": "What Is the Average Bounce Rate for a Documentation Site?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-open-source-landing-page",
+    "title": "What Is a Good Conversion Rate for an Open-Source Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-ai-product-landing-page",
+    "title": "What Is a Good Conversion Rate for an AI Product Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-developer-sdk-page",
+    "title": "What Is a Good Conversion Rate for a Developer SDK Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-session-duration-saas-marketing-site",
+    "title": "What Is the Average Session Duration for a SaaS Marketing Site?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-signup-activation-rate-saas",
+    "title": "What Is a Good Signup-to-Activation Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-trial-paid-rate-without-credit-card",
+    "title": "What Is a Good Trial-to-Paid Rate Without a Credit Card?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-trial-paid-rate-credit-card",
+    "title": "What Is a Good Trial-to-Paid Rate With a Credit Card?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-paid-search-saas",
+    "title": "What Is a Good Conversion Rate From Paid Search for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-organic-search-saas",
+    "title": "What Is a Good Conversion Rate From Organic Search for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-product-hunt-traffic",
+    "title": "What Is a Good Conversion Rate From Product Hunt Traffic?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-conversion-rate-hacker-news-traffic",
+    "title": "What Is the Average Conversion Rate From Hacker News Traffic?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-blog-signup-conversion-rate",
+    "title": "What Is a Good Blog-to-Signup Conversion Rate?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-webinar-landing-page",
+    "title": "What Is a Good Conversion Rate for a Webinar Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-waitlist-page",
+    "title": "What Is a Good Conversion Rate for a Waitlist Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-first-contentful-paint-landing-page",
+    "title": "What Is a Good First-Contentful-Paint for a Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-form-completion-rate-signup-form",
+    "title": "What Is a Good Form Completion Rate for a Signup Form?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-chrome-extension-page",
+    "title": "What Is a Good Conversion Rate for a Chrome Extension Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-upgrade-rate-free-paid-saas",
+    "title": "What Is a Good Upgrade Rate From Free to Paid in SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-fintech-landing-page",
+    "title": "What Is a Good Conversion Rate for a Fintech Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-exit-rate-pricing-page",
+    "title": "What Is the Average Exit Rate for a Pricing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-mobile-app-landing-page",
+    "title": "What Is a Good Conversion Rate for a Mobile App Landing Page?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-repeat-visitor-conversion-rate-saas",
+    "title": "What Is a Good Repeat-Visitor Conversion Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-cold-paid-social-traffic",
+    "title": "What Is a Good Conversion Rate for Cold Paid-Social Traffic?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-add-cart-rate-saas-checkout",
+    "title": "What Is a Good Add-to-Cart Rate for a SaaS Checkout?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-number-sessions-before-saas-signup",
+    "title": "What Is the Average Number of Sessions Before a SaaS Signup?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-developer-newsletter",
+    "title": "What Is a Good Conversion Rate for a Developer Newsletter?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-self-serve-saas",
+    "title": "What Is a Good Conversion Rate for a Self-Serve SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-sales-led-saas-demo",
+    "title": "What Is a Good Conversion Rate for a Sales-Led SaaS Demo?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-bounce-rate-blog",
+    "title": "What Is a Good Bounce Rate for a Blog?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-b2b-lead-gen-form",
+    "title": "What Is a Good Conversion Rate for a B2B Lead-Gen Form?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "average-conversion-rate-vertical-saas",
+    "title": "What Is the Average Conversion Rate for Vertical SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-freemium-developer-tool",
+    "title": "What Is a Good Conversion Rate for a Freemium Developer Tool?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-conversion-rate-enterprise-saas",
+    "title": "What Is a Good Conversion Rate for Enterprise SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "good-homepage-pricing-click-rate-saas",
+    "title": "What Is a Good Homepage-to-Pricing Click Rate for SaaS?",
+    "cluster": "benchmarks",
+    "status": "draft"
+  },
+  {
+    "slug": "lcp-affect-conversion-rate-evidence-shows",
+    "title": "Does LCP Affect Conversion Rate? What the Evidence Shows",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "cumulative-layout-shift-hurt-conversion",
+    "title": "Does Cumulative Layout Shift Hurt Conversion?",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "inp-affect-conversion-landing-page",
+    "title": "Does INP Affect Conversion on a Landing Page?",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-slow-lcp-nextjs-landing-page",
+    "title": "How to Fix a Slow LCP on a Next.js Landing Page",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-cumulative-layout-shift-react",
+    "title": "How to Fix Cumulative Layout Shift in React",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-inp-react-landing-page",
+    "title": "How to Improve INP on a React Landing Page",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "find-lcp-element-chrome-devtools",
+    "title": "How to Find Your LCP Element with Chrome DevTools",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-lcp-caused-by-hero-image",
+    "title": "How to Fix LCP Caused by a Hero Image",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-layout-shift-caused-by-web-fonts",
+    "title": "How to Fix Layout Shift Caused by Web Fonts",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-layout-shift-caused-by-ads-or-embeds",
+    "title": "How to Fix Layout Shift Caused by Ads or Embeds",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-ttfb-server-rendered-landing-page",
+    "title": "How to Reduce TTFB on a Server-Rendered Landing Page",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-core-web-vitals-field-web-vitalsjs",
+    "title": "How to Measure Core Web Vitals in the Field with web-vitals.js",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-lcp-image-preloading",
+    "title": "How to Improve LCP with Image Preloading",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-inp-caused-by-heavy-javascript-click",
+    "title": "How to Fix INP Caused by Heavy JavaScript on Click",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "lazy-load-below-fold-images-without-hurting-lcp",
+    "title": "How to Lazy-Load Below-the-Fold Images Without Hurting LCP",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "good-lcp-score-landing-page",
+    "title": "What Is a Good LCP Score for a Landing Page?",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "good-cls-score-conversion",
+    "title": "What Is a Good CLS Score for Conversion?",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "good-inp-score-2026",
+    "title": "What Is a Good INP Score in 2026?",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-render-blocking-css-that-slows-lcp",
+    "title": "How to Fix Render-Blocking CSS That Slows LCP",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "preconnect-third-party-origins-speed-up-lcp",
+    "title": "How to Preconnect to Third-Party Origins to Speed Up LCP",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-layout-shift-images-without-dimensions",
+    "title": "How to Fix Layout Shift From Images Without Dimensions",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-javascript-bundle-size-improve-inp",
+    "title": "How to Reduce JavaScript Bundle Size to Improve INP",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "use-fetchpriority-high-hero-image",
+    "title": "How to Use fetchpriority=high on Your Hero Image",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-slow-lcp-wordpress-landing-page",
+    "title": "How to Fix a Slow LCP on a WordPress Landing Page",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-core-web-vitals-astro-site",
+    "title": "How to Improve Core Web Vitals on an Astro Site",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-core-web-vitals-vue-3-app",
+    "title": "How to Improve Core Web Vitals in a Vue 3 App",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-lcp-caused-by-slow-api-call",
+    "title": "How to Fix LCP Caused by a Slow API Call",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-lcp-cls-and-inp-posthog",
+    "title": "How to Measure LCP, CLS, and INP in PostHog",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "set-performance-budget-that-protects-conversion",
+    "title": "How to Set a Performance Budget That Protects Conversion",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-layout-shift-cookie-consent-banner",
+    "title": "How to Fix Layout Shift From a Cookie Consent Banner",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "defer-non-critical-javascript-improve-inp",
+    "title": "How to Defer Non-Critical JavaScript to Improve INP",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-slow-lcp-caused-by-carousel",
+    "title": "How to Fix a Slow LCP Caused by a Carousel",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-lcp-mobile-landing-page",
+    "title": "How to Improve LCP on a Mobile Landing Page",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-main-thread-work-improve-inp",
+    "title": "How to Reduce Main-Thread Work to Improve INP",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "page-speed-affect-bounce-rate",
+    "title": "How Does Page Speed Affect Bounce Rate?",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-layout-shift-dynamically-injected-content",
+    "title": "How to Fix Layout Shift From Dynamically Injected Content",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "self-host-fonts-improve-lcp-and-cls",
+    "title": "How to Self-Host Fonts to Improve LCP and CLS",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "audit-core-web-vitals-lighthouse",
+    "title": "How to Audit Core Web Vitals with Lighthouse",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-slow-lcp-gatsby-site",
+    "title": "How to Fix a Slow LCP on a Gatsby Site",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "improve-inp-form-heavy-page",
+    "title": "How to Improve INP on a Form-Heavy Page",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "use-speculation-rules-api-speed-up-navigation",
+    "title": "How to Use the Speculation Rules API to Speed Up Navigation",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-layout-shift-image-gallery",
+    "title": "How to Fix Layout Shift From an Image Gallery",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "lcp-differ-mobile-vs-desktop",
+    "title": "How Does LCP Differ on Mobile vs Desktop?",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-time-interactive-react-landing-page",
+    "title": "How to Reduce Time to Interactive on a React Landing Page",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-lcp-regressions-after-deploy",
+    "title": "How to Fix LCP Regressions After a Deploy",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "prioritise-hero-cta-critical-rendering-path",
+    "title": "How to Prioritise the Hero CTA in the Critical Rendering Path",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-inp-pricing-page-many-toggles",
+    "title": "How to Fix INP on a Pricing Page With Many Toggles",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-real-user-core-web-vitals-by-page",
+    "title": "How to Measure Real-User Core Web Vitals by Page",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "fix-slow-lcp-caused-by-client-side-rendering",
+    "title": "How to Fix a Slow LCP Caused by Client-Side Rendering",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "cut-layout-shift-mobile-signup-form",
+    "title": "How to Cut Layout Shift on a Mobile Signup Form",
+    "cluster": "core-web-vitals",
+    "status": "draft"
+  },
+  {
+    "slug": "conversion-funnel",
+    "title": "What Is a Conversion Funnel?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "bounce-rate-vs-exit-rate",
+    "title": "What Is Bounce Rate vs Exit Rate?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "call-action-cta",
+    "title": "What Is a Call to Action (CTA)?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "above-fold-web-design",
+    "title": "What Is Above the Fold in Web Design?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "landing-page",
+    "title": "What Is a Landing Page?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "value-proposition",
+    "title": "What Is a Value Proposition?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "social-proof-conversion",
+    "title": "What Is Social Proof in Conversion?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-testing",
+    "title": "What Is A/B Testing?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "statistical-significance-ab-testing",
+    "title": "What Is Statistical Significance in A/B Testing?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "conversion-goal",
+    "title": "What Is a Conversion Goal?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "activation-saas",
+    "title": "What Is Activation in SaaS?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "product-led-growth",
+    "title": "What Is Product-Led Growth?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "north-star-metric",
+    "title": "What Is a North Star Metric?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "churn-rate",
+    "title": "What Is Churn Rate?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "retention-rate",
+    "title": "What Is Retention Rate?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "cohort-analytics",
+    "title": "What Is a Cohort in Analytics?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "customer-acquisition-cost-cac",
+    "title": "What Is Customer Acquisition Cost (CAC)?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "lifetime-value-ltv",
+    "title": "What Is Lifetime Value (LTV)?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "ltv-cac-ratio",
+    "title": "What Is the LTV to CAC Ratio?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "funnel-drop-off",
+    "title": "What Is a Funnel Drop-Off?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "heatmap-cro",
+    "title": "What Is a Heatmap in CRO?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "session-replay",
+    "title": "What Is Session Replay?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "scroll-depth",
+    "title": "What Is Scroll Depth?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "rage-click",
+    "title": "What Is a Rage Click?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "friction-signup-flow",
+    "title": "What Is Friction in a Signup Flow?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "hero-section",
+    "title": "What Is a Hero Section?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "sticky-cta",
+    "title": "What Is a Sticky CTA?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "exit-intent-popup",
+    "title": "What Is an Exit-Intent Popup?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "progressive-enhancement",
+    "title": "What Is Progressive Enhancement?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "reverse-trial",
+    "title": "What Is a Reverse Trial?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "freemium-vs-free-trial",
+    "title": "What Is Freemium vs Free Trial?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "time-value",
+    "title": "What Is Time to Value?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "lead-magnet",
+    "title": "What Is a Lead Magnet?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "squeeze-page",
+    "title": "What Is a Squeeze Page?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "answer-engine-optimisation-aeo",
+    "title": "What Is Answer Engine Optimisation (AEO)?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "programmatic-seo",
+    "title": "What Is Programmatic SEO?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "click-through-rate-ctr",
+    "title": "What Is Click-Through Rate (CTR)?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "control-vs-variant-experiment",
+    "title": "What Is a Control vs Variant in an Experiment?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "feature-flag",
+    "title": "What Is a Feature Flag?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "autocapture-analytics",
+    "title": "What Is Autocapture in Analytics?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "custom-event-product-analytics",
+    "title": "What Is a Custom Event in Product Analytics?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "funnel-conversion-window",
+    "title": "What Is a Funnel Conversion Window?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "first-click-vs-last-click-attribution",
+    "title": "What Is First-Click vs Last-Click Attribution?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "vanity-metric",
+    "title": "What Is a Vanity Metric?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "qualified-lead",
+    "title": "What Is a Qualified Lead?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "onboarding-saas",
+    "title": "What Is Onboarding in SaaS?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "pirate-metrics-aarrr-framework",
+    "title": "What Is the Pirate Metrics (AARRR) Framework?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "bounce-web-analytics",
+    "title": "What Is a Bounce in Web Analytics?",
+    "cluster": "concepts",
+    "status": "draft"
+  },
+  {
+    "slug": "can-ai-agent-open-pull-requests-repo-it-works",
+    "title": "Can an AI Agent Open Pull Requests on Your Repo? How It Works",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "automate-conversion-fixes-github-pull-requests",
+    "title": "How to Automate Conversion Fixes with GitHub Pull Requests",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "approval-gate-pattern-ai-code-changes",
+    "title": "What Is the Approval-Gate Pattern for AI Code Changes?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "safely-auto-roll-back-bad-deploy-using-bounce-rate",
+    "title": "How to Safely Auto-Roll-Back a Bad Deploy Using Bounce Rate",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "should-you-let-ai-auto-merge-code",
+    "title": "Should You Let an AI Auto-Merge Code?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-coding-agents-map-repo-before-making-change",
+    "title": "How AI Coding Agents Map a Repo Before Making a Change",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "review-ai-generated-pull-request-safely",
+    "title": "How to Review an AI-Generated Pull Request Safely",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "guardrails-should-ai-growth-agent-have",
+    "title": "What Guardrails Should an AI Growth Agent Have?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-picks-highest-impact-conversion-fix",
+    "title": "How an AI Agent Picks the Highest-Impact Conversion Fix",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "connect-posthog-ai-growth-agent",
+    "title": "How to Connect PostHog to an AI Growth Agent",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-grounds-fix-real-user-behaviour",
+    "title": "How an AI Agent Grounds a Fix in Real User Behaviour",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ship-conversion-fixes-as-code-instead-dashboard",
+    "title": "Why Ship Conversion Fixes as Code Instead of a Dashboard?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "keep-ai-agent-touching-protected-files",
+    "title": "How to Keep an AI Agent From Touching Protected Files",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-writes-pull-request-description-you-can-trust",
+    "title": "How an AI Agent Writes a Pull Request Description You Can Trust",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-whether-ai-shipped-fix-actually-worked",
+    "title": "How to Measure Whether an AI-Shipped Fix Actually Worked",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "receipt-style-pull-request",
+    "title": "What Is a Receipt-Style Pull Request?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-detects-conversion-regression",
+    "title": "How an AI Agent Detects a Conversion Regression",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "set-brand-guardrails-ai-growth-agent",
+    "title": "How to Set Brand Guardrails for an AI Growth Agent",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "can-ai-agent-optimise-conversion-without-human-review",
+    "title": "Can an AI Agent Optimise Conversion Without Human Review?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agents-use-telegram-approval-flow",
+    "title": "How AI Agents Use a Telegram Approval Flow",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-growth-agent-differs-ab-testing-tool",
+    "title": "How an AI Growth Agent Differs From an A/B Testing Tool",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-reads-scroll-depth-and-click-data",
+    "title": "How an AI Agent Reads Scroll Depth and Click Data",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "roll-back-ai-merged-pull-request",
+    "title": "How to Roll Back an AI-Merged Pull Request",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "repos-can-ai-growth-agent-work",
+    "title": "What Repos Can an AI Growth Agent Work On?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-discovers-routes-nextjs-app",
+    "title": "How an AI Agent Discovers Routes in a Next.js App",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-avoids-breaking-build",
+    "title": "How an AI Agent Avoids Breaking Your Build",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "trust-ai-agent-repo-access",
+    "title": "How to Trust an AI Agent With Repo Access",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-prioritises-funnel-over-homepage",
+    "title": "How an AI Agent Prioritises the Funnel Over the Homepage",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "weekly-cadence-beats-one-off-cro-audits",
+    "title": "Why Weekly Cadence Beats One-Off CRO Audits",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-handles-monorepo",
+    "title": "How an AI Agent Handles a Monorepo",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "give-ai-agent-just-enough-github-permission",
+    "title": "How to Give an AI Agent Just Enough GitHub Permission",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-uses-vercel-preview-validate-fix",
+    "title": "How an AI Agent Uses a Vercel Preview to Validate a Fix",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "happens-ai-agent-finds-no-worthwhile-fix",
+    "title": "What Happens When an AI Agent Finds No Worthwhile Fix?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-tracks-competitor-landing-pages",
+    "title": "How an AI Agent Tracks Competitor Landing Pages",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "audit-every-change-ai-agent-has-made",
+    "title": "How to Audit Every Change an AI Agent Has Made",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-decides-between-copy-and-layout-fixes",
+    "title": "How an AI Agent Decides Between Copy and Layout Fixes",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "can-ai-agent-improve-conversion-static-site",
+    "title": "Can an AI Agent Improve Conversion on a Static Site?",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-learns-rejected-pull-request",
+    "title": "How an AI Agent Learns From a Rejected Pull Request",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ai-agent-respects-design-system",
+    "title": "How an AI Agent Respects Your Design System",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "start-ai-growth-agent-under-hour",
+    "title": "How to Start With an AI Growth Agent in Under an Hour",
+    "cluster": "automation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-landing-page-without-testing-platform",
+    "title": "How to A/B Test a Landing Page Without a Testing Platform",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "my-ab-test-result-statistically-significant",
+    "title": "Is My A/B Test Result Statistically Significant?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "many-visitors-you-need-ab-test",
+    "title": "How Many Visitors Do You Need for an A/B Test?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "calculate-sample-size-ab-test",
+    "title": "How to Calculate Sample Size for an A/B Test",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-cta-button-without-flicker",
+    "title": "How to A/B Test a CTA Button Without Flicker",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "run-ab-test-posthog-feature-flags",
+    "title": "How to Run an A/B Test with PostHog Feature Flags",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "long-should-you-run-ab-test",
+    "title": "How Long Should You Run an A/B Test?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "minimum-detectable-effect-ab-testing",
+    "title": "What Is a Minimum Detectable Effect in A/B Testing?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "avoid-peeking-ab-test",
+    "title": "How to Avoid Peeking in an A/B Test",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-headline-landing-page",
+    "title": "How to A/B Test a Headline on a Landing Page",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-pricing-without-hurting-trust",
+    "title": "How to A/B Test Pricing Without Hurting Trust",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "false-positive-ab-testing",
+    "title": "What Is a False Positive in A/B Testing?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "interpret-p-value-ab-test",
+    "title": "How to Interpret a P-Value in an A/B Test",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-signup-flow",
+    "title": "How to A/B Test a Signup Flow",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "split-traffic-50-50-ab-test",
+    "title": "How to Split Traffic 50/50 for an A/B Test",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-low-traffic",
+    "title": "How to A/B Test on Low Traffic",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "bayesian-vs-frequentist-ab-testing",
+    "title": "What Is Bayesian vs Frequentist A/B Testing?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-server-rendered-page-without-layout-shift",
+    "title": "How to A/B Test a Server-Rendered Page Without Layout Shift",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "measure-conversion-lift-ab-test",
+    "title": "How to Measure the Conversion Lift From an A/B Test",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-mobile-cta",
+    "title": "How to A/B Test a Mobile CTA",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "set-up-ab-test-nextjs-middleware",
+    "title": "How to Set Up an A/B Test in Next.js with Middleware",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "run-holdout-group-conversion-change",
+    "title": "How to Run a Holdout Group for a Conversion Change",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-email-capture-form",
+    "title": "How to A/B Test an Email Capture Form",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "multivariate-testing-and-use-it",
+    "title": "What Is Multivariate Testing and When to Use It?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "avoid-sample-ratio-mismatch-ab-test",
+    "title": "How to Avoid Sample Ratio Mismatch in an A/B Test",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-pricing-page-layout",
+    "title": "How to A/B Test a Pricing Page Layout",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "decide-winner-without-significance-calculator",
+    "title": "How to Decide a Winner Without a Significance Calculator",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-social-proof-placement",
+    "title": "How to A/B Test Social Proof Placement",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-hero-image-vs-product-demo",
+    "title": "How to A/B Test a Hero Image vs a Product Demo",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "run-sequential-ab-tests-safely",
+    "title": "How to Run Sequential A/B Tests Safely",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-free-trial-length",
+    "title": "How to A/B Test a Free Trial Length",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "novelty-effect-ab-testing",
+    "title": "What Is the Novelty Effect in A/B Testing?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-cta-microcopy-change",
+    "title": "How to A/B Test a CTA Microcopy Change",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "calculate-conversion-rate-confidence-interval",
+    "title": "How to Calculate a Conversion Rate Confidence Interval",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-without-slowing-down-page",
+    "title": "How to A/B Test Without Slowing Down Your Page",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "prioritise-which-ab-test-run-first",
+    "title": "How to Prioritise Which A/B Test to Run First",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-onboarding-step",
+    "title": "How to A/B Test an Onboarding Step",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "run-conversion-experiment-feature-flag-react",
+    "title": "How to Run a Conversion Experiment With a Feature Flag in React",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "avoid-common-ab-testing-mistakes",
+    "title": "How to Avoid Common A/B Testing Mistakes",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-test-not-worth-running",
+    "title": "When Is an A/B Test Not Worth Running?",
+    "cluster": "experimentation",
+    "status": "draft"
+  },
+  {
+    "slug": "posthog-vs-google-analytics-4-conversion-tracking",
+    "title": "PostHog vs Google Analytics 4 for Conversion Tracking",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "cro-agency-vs-ai-growth-agent-solo-founder",
+    "title": "CRO Agency vs AI Growth Agent for a Solo Founder",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "ab-testing-tools-vs-shipping-fix",
+    "title": "A/B Testing Tools vs Shipping the Fix",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "posthog-vs-mixpanel-product-analytics",
+    "title": "PostHog vs Mixpanel for Product Analytics",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "posthog-vs-amplitude-saas",
+    "title": "PostHog vs Amplitude for SaaS",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "hotjar-vs-posthog-heatmaps-and-session-replay",
+    "title": "Hotjar vs PostHog for Heatmaps and Session Replay",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "optimizely-vs-posthog-feature-flags",
+    "title": "Optimizely vs PostHog Feature Flags",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "vwo-vs-posthog-ab-testing",
+    "title": "VWO vs PostHog for A/B Testing",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "google-optimize-alternatives-after-its-shutdown",
+    "title": "Google Optimize Alternatives After Its Shutdown",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "plausible-vs-posthog-privacy-friendly-analytics",
+    "title": "Plausible vs PostHog for Privacy-Friendly Analytics",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "vercel-analytics-vs-posthog-conversion",
+    "title": "Vercel Analytics vs PostHog for Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "nextjs-vs-astro-high-converting-landing-page",
+    "title": "Next.js vs Astro for a High-Converting Landing Page",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "sveltekit-vs-nextjs-marketing-sites",
+    "title": "SvelteKit vs Next.js for Marketing Sites",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "server-components-vs-client-components-conversion",
+    "title": "Server Components vs Client Components for Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "static-site-vs-ssr-landing-page-conversion",
+    "title": "Static Site vs SSR for Landing Page Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "unbounce-vs-coded-landing-page",
+    "title": "Unbounce vs a Coded Landing Page",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "webflow-vs-nextjs-saas-landing-page",
+    "title": "Webflow vs Next.js for a SaaS Landing Page",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "framer-vs-coded-landing-pages-conversion",
+    "title": "Framer vs Coded Landing Pages for Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "heatmaps-vs-funnels-finding-conversion-problems",
+    "title": "Heatmaps vs Funnels for Finding Conversion Problems",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "session-replay-vs-analytics-diagnosing-drop-off",
+    "title": "Session Replay vs Analytics for Diagnosing Drop-Off",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "email-capture-vs-free-trial-as-first-conversion",
+    "title": "Email Capture vs Free Trial as a First Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "credit-card-required-vs-no-card-free-trials",
+    "title": "Credit-Card-Required vs No-Card Free Trials",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "freemium-vs-free-trial-developer-tools",
+    "title": "Freemium vs Free Trial for Developer Tools",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "demo-led-vs-self-serve-conversion-b2b-saas",
+    "title": "Demo-Led vs Self-Serve Conversion for B2B SaaS",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "single-cta-vs-multiple-ctas-landing-page",
+    "title": "Single CTA vs Multiple CTAs on a Landing Page",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "long-form-vs-short-form-landing-pages",
+    "title": "Long-Form vs Short-Form Landing Pages",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "live-chat-vs-better-faq-conversion",
+    "title": "Live Chat vs a Better FAQ for Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "popup-vs-inline-email-capture",
+    "title": "Popup vs Inline Email Capture",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "carousel-vs-static-hero-conversion",
+    "title": "Carousel vs Static Hero for Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "video-vs-screenshot-saas-hero",
+    "title": "Video vs Screenshot in a SaaS Hero",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "manual-cro-vs-automated-conversion-fixes",
+    "title": "Manual CRO vs Automated Conversion Fixes",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "posthog-cloud-vs-self-hosted-small-team",
+    "title": "PostHog Cloud vs Self-Hosted for a Small Team",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "ga4-vs-plausible-marketing-attribution",
+    "title": "GA4 vs Plausible for Marketing Attribution",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "pricing-table-vs-pricing-calculator-conversion",
+    "title": "Pricing Table vs Pricing Calculator for Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "annual-vs-monthly-pricing-default-conversion",
+    "title": "Annual vs Monthly Pricing Default for Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "sticky-cta-vs-repeated-inline-ctas",
+    "title": "Sticky CTA vs Repeated Inline CTAs",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "dark-mode-vs-light-mode-landing-pages-conversion",
+    "title": "Dark Mode vs Light Mode Landing Pages for Conversion",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "headless-cms-vs-hardcoded-copy-landing-page",
+    "title": "Headless CMS vs Hardcoded Copy for a Landing Page",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "tailwind-vs-plain-css-fast-landing-page",
+    "title": "Tailwind vs Plain CSS for a Fast Landing Page",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "posthog-funnels-vs-hogql-custom-conversion-analysis",
+    "title": "PostHog Funnels vs HogQL for Custom Conversion Analysis",
+    "cluster": "comparisons",
+    "status": "draft"
+  },
+  {
+    "slug": "anatomy-high-converting-saas-hero-section",
+    "title": "The Anatomy of a High-Converting SaaS Hero Section",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "pricing-page-layouts-that-convert-developer-tools",
+    "title": "Pricing Page Layouts That Convert for Developer Tools",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "many-ctas-should-landing-page-have",
+    "title": "How Many CTAs Should a Landing Page Have?",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "where-put-social-proof-landing-page",
+    "title": "Where to Put Social Proof on a Landing Page",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "best-above-fold-layout-saas-landing-page",
+    "title": "The Best Above-the-Fold Layout for a SaaS Landing Page",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "structure-feature-section-that-converts",
+    "title": "How to Structure a Feature Section That Converts",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "ideal-length-saas-landing-page",
+    "title": "The Ideal Length of a SaaS Landing Page",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-pricing-toggle-that-not-confuse-users",
+    "title": "How to Design a Pricing Toggle That Does Not Confuse Users",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "best-place-demo-video-landing-page",
+    "title": "The Best Place for a Demo Video on a Landing Page",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "write-hero-headline-that-converts",
+    "title": "How to Write a Hero Headline That Converts",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-trust-bar-customer-logos",
+    "title": "How to Design a Trust Bar of Customer Logos",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "best-cta-microcopy-free-trial",
+    "title": "The Best CTA Microcopy for a Free Trial",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "lay-out-comparison-table-that-converts",
+    "title": "How to Lay Out a Comparison Table That Converts",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-faq-section-that-removes-objections",
+    "title": "How to Design an FAQ Section That Removes Objections",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "best-newsletter-signup-placement-blog",
+    "title": "The Best Newsletter Signup Placement on a Blog",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-sticky-header-cta",
+    "title": "How to Design a Sticky Header CTA",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "structure-testimonial-section-trust",
+    "title": "How to Structure a Testimonial Section for Trust",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "best-mobile-landing-page-layout-conversion",
+    "title": "The Best Mobile Landing Page Layout for Conversion",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-two-step-signup-that-converts",
+    "title": "How to Design a Two-Step Signup That Converts",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "use-whitespace-direct-attention-cta",
+    "title": "How to Use Whitespace to Direct Attention to the CTA",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "best-form-length-signup-page",
+    "title": "The Best Form Length for a Signup Page",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-pricing-page-three-tiers",
+    "title": "How to Design a Pricing Page With Three Tiers",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "add-urgency-without-dark-patterns",
+    "title": "How to Add Urgency Without Dark Patterns",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "best-way-show-free-trial-offer",
+    "title": "The Best Way to Show a Free Trial Offer",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-footer-that-recovers-lost-visitors",
+    "title": "How to Design a Footer That Recovers Lost Visitors",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "structure-case-study-page-that-converts",
+    "title": "How to Structure a Case Study Page That Converts",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "best-hero-layout-api-product",
+    "title": "The Best Hero Layout for an API Product",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-cookie-banner-that-not-kill-conversion",
+    "title": "How to Design a Cookie Banner That Does Not Kill Conversion",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "lay-out-developer-focused-landing-page",
+    "title": "How to Lay Out a Developer-Focused Landing Page",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "design-onboarding-checklist-that-drives-activation",
+    "title": "How to Design an Onboarding Checklist That Drives Activation",
+    "cluster": "patterns",
+    "status": "draft"
+  },
+  {
+    "slug": "get-first-100-saas-signups-as-solo-founder",
+    "title": "How to Get Your First 100 SaaS Signups as a Solo Founder",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "conversion-optimisation-founders-who-cannot-afford-agency",
+    "title": "Conversion Optimisation for Founders Who Cannot Afford an Agency",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "find-biggest-conversion-leak-afternoon",
+    "title": "How to Find Your Biggest Conversion Leak in an Afternoon",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "one-week-conversion-audit-you-can-run-yourself",
+    "title": "A One-Week Conversion Audit You Can Run Yourself",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "launch-product-hunt-without-wasting-traffic",
+    "title": "How to Launch on Product Hunt Without Wasting the Traffic",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "turn-blog-readers-into-signups",
+    "title": "How to Turn Blog Readers Into Signups",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "run-first-five-user-interviews-conversion",
+    "title": "How to Run Your First Five User Interviews for Conversion",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "price-saas-first-customers",
+    "title": "How to Price Your SaaS for Your First Customers",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "set-up-analytics-as-non-technical-founder",
+    "title": "How to Set Up Analytics as a Non-Technical Founder",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "write-landing-page-copy-you-are-not-copywriter",
+    "title": "How to Write Landing Page Copy When You Are Not a Copywriter",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "get-feedback-landing-page-before-launch",
+    "title": "How to Get Feedback on Your Landing Page Before Launch",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "prioritise-conversion-fixes-no-data-team",
+    "title": "How to Prioritise Conversion Fixes With No Data Team",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "build-weekly-conversion-habit-as-solo-founder",
+    "title": "How to Build a Weekly Conversion Habit as a Solo Founder",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "convert-free-users-paid-without-sales-team",
+    "title": "How to Convert Free Users to Paid Without a Sales Team",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "recover-abandoned-signups-simple-email",
+    "title": "How to Recover Abandoned Signups With a Simple Email",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "validate-landing-page-before-you-build-product",
+    "title": "How to Validate a Landing Page Before You Build the Product",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "use-waitlist-drive-early-conversions",
+    "title": "How to Use a Waitlist to Drive Early Conversions",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "reduce-churn-first-year-saas",
+    "title": "How to Reduce Churn in Your First Year of SaaS",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "find-conversion-wins-existing-analytics",
+    "title": "How to Find Conversion Wins in Your Existing Analytics",
+    "cluster": "playbooks",
+    "status": "draft"
+  },
+  {
+    "slug": "ship-conversion-fix-every-week-without-big-team",
+    "title": "How to Ship a Conversion Fix Every Week Without a Big Team",
+    "cluster": "playbooks",
+    "status": "draft"
+  }
+]

@@ -17,8 +17,17 @@ const SiteNetworkDemo = import.meta.env.DEV
   ? lazy(() => import('./pages/SiteNetworkDemo.jsx'))
   : null
 
+// Blog pages are code-split so they don't bloat the Home bundle.
+const BlogIndex    = lazy(() => import('./pages/BlogIndex.jsx'))
+const BlogCategory = lazy(() => import('./pages/BlogCategory.jsx'))
+const BlogArticle  = lazy(() => import('./pages/BlogArticle.jsx'))
+
 const RESERVED_AGENT_PATHS = new Set(['login', 'register', 'dashboard', 'onboarding', 'reset-password', 'post-signup'])
 const PUBLIC_AGENT_REGEX   = /^\/agent\/([a-z0-9][a-z0-9-]{1,28}[a-z0-9])$/
+
+const RESERVED_BLOG_PATHS  = new Set(['category'])
+const BLOG_CATEGORY_REGEX  = /^\/blog\/category\/([a-z0-9][a-z0-9-]*[a-z0-9])$/
+const BLOG_ARTICLE_REGEX   = /^\/blog\/([a-z0-9][a-z0-9-]{1,70}[a-z0-9])$/
 
 const Spinner = ({ label = 'Loading…' } = {}) => (
   <div style={{ minHeight: '100vh', background: '#f7f4ef', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, fontFamily: 'Jost, sans-serif' }}>
@@ -164,6 +173,22 @@ export default function App() {
     if (m && !RESERVED_AGENT_PATHS.has(m[1])) {
       return <AgentPublic navigate={navigate} slug={m[1]} />
     }
+  }
+
+  // Blog. Order matters: index, then /blog/category/{cluster}, then /blog/{slug}
+  // (article regex is single-segment and guarded so it can't swallow /category).
+  if (path === '/blog') return (
+    <Suspense fallback={<Spinner />}><BlogIndex navigate={navigate} /></Suspense>
+  )
+  {
+    const mc = path.match(BLOG_CATEGORY_REGEX)
+    if (mc) return (
+      <Suspense fallback={<Spinner />}><BlogCategory navigate={navigate} cluster={mc[1]} /></Suspense>
+    )
+    const ma = path.match(BLOG_ARTICLE_REGEX)
+    if (ma && !RESERVED_BLOG_PATHS.has(ma[1])) return (
+      <Suspense fallback={<Spinner />}><BlogArticle navigate={navigate} slug={ma[1]} /></Suspense>
+    )
   }
 
   // /pricing — redirects home and scrolls to pricing section

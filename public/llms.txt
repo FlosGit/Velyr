@@ -38,5 +38,12 @@ Shopify, Wix, Squarespace, and Webflow. The agent edits source code, and these s
 - https://velyr.io/faq — frequently asked questions
 - https://velyr.io/privacy — privacy policy
 
+## Blog
+Practical, sourced guides on conversion optimization, PostHog analysis, Core Web Vitals, and shipping growth fixes as code — for developers and founders.
+- https://velyr.io/blog — all articles
+- https://velyr.io/blog/category/benchmarks — conversion benchmarks (good conversion rate, bounce rate, scroll depth)
+- https://velyr.io/blog/category/concepts — CRO concepts and glossary
+- https://velyr.io/llms-full.txt — full machine-readable index of every published article
+
 ## Contact
 info@velyr.io

@@ -15,6 +15,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { FAQS } from '../src/data/faqs.js'
+import { loadArticles, toArticleJson } from './lib/blog.mjs'
+import { CLUSTERS } from '../src/data/blogClusters.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DIST = join(__dirname, '..', 'dist')
@@ -158,3 +160,246 @@ for (const r of ROUTES) {
 }
 
 console.log(`prerender: wrote ${ROUTES.length} routes`)
+
+// ── Blog ──────────────────────────────────────────────────────────────────────
+// Per-article static HTML (crawler fallback = the SAME canonical contentHtml that
+// React renders, wrapped in sentinel comments so assert-blog-parity.mjs can prove
+// byte-for-byte identity), plus blog index, cluster pages, generated sitemap, and
+// llms-full.txt. All driven by scripts/lib/blog.mjs (single source of truth).
+
+const BLOG_CONTENT_START = '<!--blog-content-start-->'
+const BLOG_CONTENT_END = '<!--blog-content-end-->'
+
+const BLOG_MAIN_OPEN =
+  '<main style="display:none;max-width:760px;margin:0 auto;padding:80px 24px;font-family:Jost,system-ui,sans-serif;color:#1c1917;background:#f7f4ef">'
+
+// Build date (date-only, UTC), overridable for deterministic tests — mirrors the
+// same logic in scripts/lib/blog.mjs so the publish gate and sitemap agree.
+const today = () => process.env.VELYR_BUILD_DATE || new Date().toISOString().slice(0, 10)
+
+// Embed a string inside a <script> safely: escape `<` so a `</script>` (or any
+// markup) inside JSON / JSON-LD can never break out of the element.
+const scriptSafe = (s) => String(s).replace(/</g, '\\u003c')
+
+// All injections below use the function form of String.replace so `$` sequences
+// in article content (HogQL `$pathname`, FAQ "$99/mo", …) are emitted literally
+// and never interpreted as replacement patterns.
+function transformPage(base, { url, title, description, headTags = [], fallback }) {
+  let html = base
+  html = html.replace(/<title>[\s\S]*?<\/title>/, () => `<title>${esc(title)}</title>`)
+  html = replaceContentAttr(html, 'name="description"', description)
+  html = replaceContentAttr(html, 'property="og:description"', description)
+  html = replaceContentAttr(html, 'name="twitter:description"', description)
+  html = replaceContentAttr(html, 'property="og:title"', title)
+  html = replaceContentAttr(html, 'name="twitter:title"', title)
+  html = setRootHref(html, 'rel="canonical"', url)
+  html = setRootHref(html, 'hreflang="en"', url)
+  html = setRootHref(html, 'hreflang="x-default"', url)
+  html = replaceContentAttr(html, 'property="og:url"', url)
+  if (headTags.length) {
+    const block = headTags.join('\n    ')
+    html = html.replace('</head>', () => `    ${block}\n  </head>`)
+  }
+  html = html.replace(/<div id="root">[\s\S]*?<\/div>/, () => fallback)
+  return html
+}
+
+const ldScript = (id, obj) =>
+  `<script type="application/ld+json" id="${id}">${scriptSafe(JSON.stringify(obj))}</script>`
+
+function articleJsonLd(a) {
+  // Organizational author ("Velyr Team"); publisher stays the Velyr Organization.
+  const author = { '@type': 'Organization', name: a.author }
+  return {
+    '@context': 'https://schema.org',
+    '@type': a.schemaType, // 'Article' | 'TechArticle' (per-cluster default)
+    headline: a.title,
+    description: a.description,
+    datePublished: a.publishedAt,
+    dateModified: a.updatedAt,
+    author,
+    publisher: {
+      '@type': 'Organization',
+      name: 'Velyr',
+      url: ORIGIN,
+      logo: { '@type': 'ImageObject', url: ORIGIN + '/og-image.png' },
+    },
+    mainEntityOfPage: { '@type': 'WebPage', '@id': a.canonical },
+    image: ORIGIN + '/og-image.png',
+    inLanguage: 'en',
+  }
+}
+
+const faqJsonLdFor = (faqs) => ({
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqs.map((f) => ({
+    '@type': 'Question',
+    name: f.q,
+    acceptedAnswer: { '@type': 'Answer', text: f.a },
+  })),
+})
+
+const breadcrumbJsonLd = (items) => ({
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: items.map((it, i) => ({
+    '@type': 'ListItem',
+    position: i + 1,
+    name: it.name,
+    item: it.url,
+  })),
+})
+
+const { published } = loadArticles()
+const clustersWithPosts = CLUSTERS.filter((c) => published.some((a) => a.cluster.slug === c.slug))
+
+// --- individual articles ---
+let blogCount = 0
+for (const article of published) {
+  const a = toArticleJson(article)
+  const url = a.canonical
+  const cluster = article.cluster
+
+  const headTags = [
+    ldScript('article-jsonld', articleJsonLd(a)),
+    a.faqs.length ? ldScript('faqpage-jsonld', faqJsonLdFor(a.faqs)) : '',
+    ldScript('breadcrumb-jsonld', breadcrumbJsonLd([
+      { name: 'Home', url: ORIGIN + '/' },
+      { name: 'Blog', url: ORIGIN + '/blog' },
+      { name: cluster.title, url: `${ORIGIN}/blog/category/${cluster.slug}` },
+      { name: a.title, url },
+    ])),
+    // Inline data so a direct landing renders instantly (no fetch waterfall);
+    // React matches on slug and falls back to fetching for in-SPA navigations.
+    `<script type="application/json" id="blog-data">${scriptSafe(JSON.stringify(a))}</script>`,
+  ].filter(Boolean)
+
+  const fallback =
+    `<div id="root">${BLOG_MAIN_OPEN}${BLOG_CONTENT_START}${a.contentHtml}${BLOG_CONTENT_END}</main></div>`
+
+  const html = transformPage(base, { url, title: `${a.title} — Velyr Blog`, description: a.description, headTags, fallback })
+  const outDir = join(DIST, 'blog', a.slug)
+  mkdirSync(outDir, { recursive: true })
+  writeFileSync(join(outDir, 'index.html'), html, 'utf8')
+  blogCount++
+}
+
+// --- blog index ---
+{
+  const url = ORIGIN + '/blog'
+  const title = 'Velyr Blog — Conversion Optimization for Developers'
+  const description =
+    'Practical, sourced guides on conversion optimization, PostHog analysis, Core Web Vitals, and shipping growth fixes as code — for developers and founders.'
+  const listByCluster = clustersWithPosts
+    .map((c) => {
+      const items = published
+        .filter((a) => a.cluster.slug === c.slug)
+        .map((a) => `<li><a href="/blog/${esc(a.slug)}">${esc(a.fm.title)}</a> — ${esc(a.fm.description)}</li>`)
+        .join('')
+      return `<h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(c.title)}</h2><ul style="line-height:1.78;color:#6b6460;font-size:15px;padding-left:20px">${items}</ul>`
+    })
+    .join('')
+  const fallback =
+    `<div id="root">${BLOG_MAIN_OPEN}` +
+    `<p style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#2a5c45">Velyr Blog</p>` +
+    H1('The Velyr Blog') +
+    `<p style="font-size:16px;color:#6b6460;max-width:640px">${esc(description)}</p>` +
+    listByCluster + HOME_LINK + `</main></div>`
+  const headTags = [ldScript('breadcrumb-jsonld', breadcrumbJsonLd([
+    { name: 'Home', url: ORIGIN + '/' },
+    { name: 'Blog', url },
+  ]))]
+  const html = transformPage(base, { url, title, description, headTags, fallback })
+  const outDir = join(DIST, 'blog')
+  mkdirSync(outDir, { recursive: true })
+  writeFileSync(join(outDir, 'index.html'), html, 'utf8')
+}
+
+// --- cluster (category) pages — only clusters that have published articles ---
+for (const c of clustersWithPosts) {
+  const url = `${ORIGIN}/blog/category/${c.slug}`
+  const title = `${c.title} — Velyr Blog`
+  const items = published
+    .filter((a) => a.cluster.slug === c.slug)
+    .map((a) => `<li><a href="/blog/${esc(a.slug)}">${esc(a.fm.title)}</a> — ${esc(a.fm.description)}</li>`)
+    .join('')
+  const fallback =
+    `<div id="root">${BLOG_MAIN_OPEN}` +
+    `<nav style="font-size:13px;color:#a09890"><a href="/" style="color:#2a5c45">Home</a> › <a href="/blog" style="color:#2a5c45">Blog</a> › ${esc(c.title)}</nav>` +
+    H1(c.title) +
+    `<p style="font-size:16px;color:#6b6460;max-width:640px">${esc(c.description)}</p>` +
+    `<ul style="line-height:1.78;color:#6b6460;font-size:15px;padding-left:20px;margin-top:24px">${items}</ul>` +
+    HOME_LINK + `</main></div>`
+  const headTags = [ldScript('breadcrumb-jsonld', breadcrumbJsonLd([
+    { name: 'Home', url: ORIGIN + '/' },
+    { name: 'Blog', url: ORIGIN + '/blog' },
+    { name: c.title, url },
+  ]))]
+  const html = transformPage(base, { url, title, description: c.description, headTags, fallback })
+  const outDir = join(DIST, 'blog', 'category', c.slug)
+  mkdirSync(outDir, { recursive: true })
+  writeFileSync(join(outDir, 'index.html'), html, 'utf8')
+}
+
+// --- generated sitemap.xml (replaces the former hand-maintained public file) ---
+const STATIC_URLS = [
+  { loc: ORIGIN + '/', lastmod: '2026-06-02', changefreq: 'weekly', priority: '1.0' },
+  { loc: ORIGIN + '/faq', lastmod: '2026-06-02', changefreq: 'weekly', priority: '0.8' },
+  { loc: ORIGIN + '/privacy', lastmod: '2026-06-02', changefreq: 'monthly', priority: '0.3' },
+  { loc: ORIGIN + '/agb', lastmod: '2026-06-02', changefreq: 'monthly', priority: '0.3' },
+  { loc: ORIGIN + '/impressum', lastmod: '2026-06-02', changefreq: 'monthly', priority: '0.3' },
+]
+const blogUrls = [
+  { loc: ORIGIN + '/blog', lastmod: today(), changefreq: 'daily', priority: '0.7' },
+  ...clustersWithPosts.map((c) => ({
+    loc: `${ORIGIN}/blog/category/${c.slug}`,
+    lastmod: today(),
+    changefreq: 'weekly',
+    priority: '0.5',
+  })),
+  ...published.map((a) => ({
+    loc: `${ORIGIN}/blog/${a.slug}`,
+    lastmod: a.fm.updatedAt || a.fm.publishedAt,
+    changefreq: 'monthly',
+    priority: '0.6',
+  })),
+]
+const allUrls = [...STATIC_URLS, ...blogUrls]
+
+// Guard: the 5 pre-existing static URLs must never silently drop out.
+const locSet = new Set(allUrls.map((u) => u.loc))
+for (const s of STATIC_URLS) {
+  if (!locSet.has(s.loc)) throw new Error(`sitemap: required static URL missing: ${s.loc}`)
+}
+
+const sitemap =
+  `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/0.9">\n` +
+  allUrls
+    .map(
+      (u) =>
+        `  <url>\n    <loc>${u.loc}</loc>\n    <lastmod>${u.lastmod}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n  </url>`
+    )
+    .join('\n') +
+  `\n</urlset>\n`
+writeFileSync(join(DIST, 'sitemap.xml'), sitemap, 'utf8')
+
+// --- llms-full.txt: machine-readable index of all published articles ---
+const llmsFull =
+  `# Velyr Blog — Full Index\n\n` +
+  `> Every published article on the Velyr blog. Velyr is an AI growth agent that ships one weekly conversion fix as a GitHub Pull Request. These guides cover conversion optimization, PostHog analysis, Core Web Vitals, and shipping growth fixes as code.\n\n` +
+  clustersWithPosts
+    .map((c) => {
+      const items = published
+        .filter((a) => a.cluster.slug === c.slug)
+        .map((a) => `- [${a.fm.title}](${ORIGIN}/blog/${a.slug}): ${a.fm.description}`)
+        .join('\n')
+      return `## ${c.title}\n${items}`
+    })
+    .join('\n\n') +
+  `\n`
+writeFileSync(join(DIST, 'llms-full.txt'), llmsFull, 'utf8')
+
+console.log(
+  `prerender: wrote ${blogCount} blog articles, blog index, ${clustersWithPosts.length} cluster pages, sitemap.xml (${allUrls.length} urls), llms-full.txt`
+)
