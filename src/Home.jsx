@@ -222,6 +222,13 @@ function Nav({ navigate }) {
           <Logo size={24} />
           <span className="nav-logo-text" style={{ fontFamily:'Cormorant Garant, serif', fontWeight:500, fontSize:20, color:C.text, letterSpacing:'-.01em' }}>Velyr</span>
         </div>
+        {/* Centered link — absolutely positioned so the left logo and right group stay put.
+            Hidden on mobile via .nav-agent-link; appears in the mobile panel below. */}
+        <button className="nav-agent-link" onClick={() => navigate('/blog')}
+          style={{ position:'absolute', left:'50%', top:'50%', transform:'translate(-50%,-50%)', background:'none', border:'none', cursor:'pointer', fontSize:13, color:C.textLight, fontFamily:'Jost,sans-serif', fontWeight:300, letterSpacing:'.01em', transition:'color .2s' }}
+          onMouseEnter={e => e.currentTarget.style.color=C.textMuted}
+          onMouseLeave={e => e.currentTarget.style.color=C.textLight}
+        >Blog</button>
         <div style={{ display:'flex', alignItems:'center', gap:20 }}>
           <button className="nav-agent-link" onClick={() => document.getElementById('pricing-section')?.scrollIntoView({ behavior:'smooth' })}
             style={{ background:'transparent', border:'1px solid rgba(42,92,69,0.35)', borderRadius:8, cursor:'pointer', fontSize:13, color:C.accent, fontFamily:'Jost,sans-serif', fontWeight:400, letterSpacing:'.01em', padding:'7px 14px', transition:'all .2s', display:'flex', alignItems:'center', gap:6 }}
@@ -287,6 +294,9 @@ function Nav({ navigate }) {
         >
           Growth Agent — €29/mo
         </button>
+        <button onClick={goAndClose(() => navigate('/blog'))}
+          style={{ width:'100%', background:'transparent', color:C.textMuted, border:'none', borderRadius:10, padding:'12px 16px', fontSize:13, fontFamily:'Jost,sans-serif', fontWeight:300, cursor:'pointer', textAlign:'left' }}
+        >Blog →</button>
         <button onClick={goAndClose(() => navigate('/agent/login'))}
           style={{ width:'100%', background:'transparent', color:C.textMuted, border:'none', borderRadius:10, padding:'12px 16px', fontSize:13, fontFamily:'Jost,sans-serif', fontWeight:300, cursor:'pointer', textAlign:'left' }}
         >Log in →</button>
