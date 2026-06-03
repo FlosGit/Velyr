@@ -26,9 +26,9 @@ name: Blog daily publish
 
 on:
   workflow_dispatch: {}
-  # schedule:
-  #   # 09:00 UTC every day — publishes the ~10 articles whose publishedAt is due.
-  #   - cron: '0 9 * * *'
+  schedule:
+    # 09:00 UTC every day — publishes the ~10 articles whose publishedAt is due.
+    - cron: '0 9 * * *'
 
 jobs:
   trigger-rebuild:
