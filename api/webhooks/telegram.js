@@ -265,6 +265,47 @@ async function findPendingRunForChat(chatId) {
   return run?.id || null
 }
 
+// ─── FIND LATEST REJECTED CONVERSION-FIX RUN FOR CHAT ────────────────────────
+// Anchor for the ID-less `note <reason>` flow. The note prompt only ever
+// appears AFTER a NO, by which point handleReject has already flipped the run
+// OUT of waiting_approval into 'rejected' — so findPendingRunForChat would
+// return null here. We instead target the most recently rejected run for the
+// subscription that owns this chat. Chat-bound via getActiveSubId (the same B3
+// trust gate every command uses): a note can never land on another chat_id's
+// run.
+//
+// SCOPE: run_type = 'conversion_fix' ONLY. A note is a *fix* learning
+// (outcome:'negative' in agent_learnings). Setup-PR rejects (setup_posthog /
+// setup_posthog_foreign_choice) and legacy ab_test rows are not fix proposals
+// the user weighed — and during onboarding a setup reject can be the youngest
+// rejected run, which would steal the note. Same spirit as the honest-skip
+// exclusion: only runs the user saw as a rejectable fix qualify. run_type is
+// NOT NULL DEFAULT 'conversion_fix' and (subscription_id, run_type, status) is
+// indexed, so this filter is both correct and cheap.
+//
+// Ordering: handleReject now stamps completed_at on rejection, so we sort by
+// that (most recent rejection first), with created_at as a tiebreaker. Legacy
+// rejected rows predating the completed_at-on-reject change have a null
+// completed_at and sort LAST (nullsFirst: false), so they never shadow a
+// freshly-skipped run.
+async function findLatestRejectedRunForChat(chatId) {
+  const subscriptionId = await getActiveSubId(chatId)
+  if (!subscriptionId) return null
+
+  const { data: run } = await supabase
+    .from('agent_runs')
+    .select('id')
+    .eq('subscription_id', subscriptionId)
+    .eq('status', 'rejected')
+    .eq('run_type', 'conversion_fix')
+    .order('completed_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  return run?.id || null
+}
+
 // ─── APPROVE ────────────────────────────────────────────────────────────────
 async function handleApprove(runId, chatId) {
   const subscriptionId = await getActiveSubId(chatId)
@@ -489,9 +530,15 @@ async function handleReject(runId, chatId) {
     }
   }
 
+  // Stamp completed_at on rejection. handleApprove already sets it on deploy;
+  // reject didn't. The ID-less `note <reason>` flow orders rejected runs by
+  // *when they were skipped* — without this it could only fall back to
+  // created_at and would pick the youngest-CREATED run, not the most recently
+  // skipped one (matters only when several rejected runs coexist, e.g. testing).
   await supabase.from('agent_runs').update({
     status: 'rejected',
     rollback_reason: 'user_rejected',
+    completed_at: new Date().toISOString(),
   }).eq('id', runId)
 
   // ── Setup-PR NO: retry once, then permanently decline ────────────────────
@@ -525,7 +572,7 @@ async function handleReject(runId, chatId) {
 
   await sendMessage(
     chatId,
-    `❌ <b>PR skipped.</b> The agent will analyze again on the next scheduled run.\n\n<i>Optionally add context: <b>note ${escapeHtml(runId)} &lt;reason&gt;</b></i>`
+    `❌ <b>PR skipped.</b> The agent will analyze again on the next scheduled run.\n\n<i>Optionally tell me why — reply <b>note &lt;reason&gt;</b> and I'll attach it to this run.</i>`
   )
 }
 
@@ -777,8 +824,22 @@ export default async function handler(req, res) {
     } else if (cmd === 'status') {
       await handleStatus(chatId)
 
-    } else if (cmd === 'note' && parts.length >= 3) {
-      await handleNote(parts[1], parts.slice(2).join(' '), chatId)
+    } else if (cmd === 'note' && parts.length >= 2) {
+      // `note <reason>` (preferred, ID-less) attaches to the most recently
+      // skipped run in THIS chat — resolved chat-bound via getActiveSubId, so a
+      // note can never land on another chat_id's run. `note <run-id> <reason>`
+      // (explicit UUID as first arg) stays as a SILENT power-user fallback:
+      // still works, no longer advertised. We disambiguate purely on whether
+      // the first arg is a UUID — a reason word being a full UUID by accident
+      // is not a real case.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      if (UUID_RE.test(parts[1]) && parts.length >= 3) {
+        await handleNote(parts[1], parts.slice(2).join(' '), chatId)
+      } else {
+        const runId = await findLatestRejectedRunForChat(chatId)
+        if (!runId) await sendMessage(chatId, '⚠️ No recently skipped run to attach a note to.')
+        else        await handleNote(runId, parts.slice(1).join(' '), chatId)
+      }
 
     } else if (cmd === 'competitor' && parts.length >= 3) {
       const subCmd = parts[1].toLowerCase()
@@ -800,7 +861,7 @@ export default async function handler(req, res) {
         `<b>NO</b> — skip the pending PR\n` +
         `<b>approve &lt;run-id&gt;</b> — deploy a specific run (power users)\n` +
         `<b>reject &lt;run-id&gt;</b> — skip a specific run (power users)\n` +
-        `<b>note &lt;run-id&gt; &lt;reason&gt;</b> — add a manual learning\n` +
+        `<b>note &lt;reason&gt;</b> — add context to the last skipped PR\n` +
         `<b>dna</b> — view your Business DNA\n` +
         `<b>status</b> — last runs &amp; tracked competitors\n` +
         `<b>competitor add &lt;url&gt;</b> — track a competitor site\n` +

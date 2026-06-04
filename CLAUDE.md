@@ -70,7 +70,7 @@ Telegram bot commands (handled in `api/webhooks/telegram.js`):
 - `approve <run-id>` / `reject <run-id>` — power-user override by run ID
 - `status` — last 5 runs + tracked competitors
 - `dna` — view Business DNA learnings
-- `note <run-id> <reason>` — add a manual learning
+- `note <reason>` — add context to the last skipped PR (explicit `note <run-id> <reason>` still works as an unadvertised fallback)
 - `competitor add <url>` / `competitor remove <url>` — manage tracked competitor sites (max 2)
 - `/start` — onboarding; generates a `VELYR-XXXXXX` verification code (30-min TTL)
 
