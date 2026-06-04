@@ -649,22 +649,50 @@ function buildFunnelAnalysis(allPages: any, analytics: any) {
 }
 
 // ─── SAVE FUNNEL PAGES ───────────────────────────────────────────────────────
+// Persists the per-run funnel snapshot for the dashboard Funnel tab — the ONLY
+// reader of agent_funnel_pages. The agent's target selection runs off the
+// in-memory `funnelAnalysis`, never this table, so what we store here is purely
+// display state and cannot change which page gets a PR.
+//
+// ALL detected pages are stored, including views=0 ("detected, no traffic yet").
+// The per-page view count is preserved as-is (real 0 for no-traffic pages — not
+// a fabricated default; `?? 0` only guards a missing field).
+//
+// Replace semantics WITHOUT an empty-table window (insert-first, then prune):
+//   1. insert this run's rows (each carries the new run_id)
+//   2. only AFTER the insert succeeds, delete the OTHER runs' rows
+// If the insert fails, or the run crashes between the two calls, the previous
+// snapshot survives — worst case two runs' rows coexist briefly and the tab's
+// page_path dedup (newest wins) hides it until the next run prunes. A
+// delete-first approach would risk leaving the tab empty; this ordering cannot.
 async function saveFunnelPages(subscriptionId: string, runId: string, funnelAnalysis: any) {
   if (!funnelAnalysis?.funnelPages?.length) return
 
   const rows = funnelAnalysis.funnelPages
-    .filter((p: any) => p.views > 0 || p.pageType === 'landing')
-    .slice(0, 20)
+    .slice(0, 50)
     .map((p: any) => ({
       subscription_id: subscriptionId,
       run_id:          runId,
       page_path:       p.filePath,
       page_type:       p.pageType,
-      views_7d:        p.views || 0,
+      views_7d:        p.views ?? 0,
       drop_off_score:  p.dropOffScore,
     }))
 
-  if (rows.length > 0) await supabase.from('agent_funnel_pages').insert(rows)
+  if (!rows.length) return
+
+  const { error: insErr } = await supabase.from('agent_funnel_pages').insert(rows)
+  if (insErr) {
+    slog('warn', 'funnel_pages_insert_failed', { runId, error: insErr.message })
+    return   // keep the previous snapshot — never leave the tab empty
+  }
+
+  // Insert succeeded → safe to drop prior runs' rows for this subscription.
+  const { error: delErr } = await supabase
+    .from('agent_funnel_pages').delete()
+    .eq('subscription_id', subscriptionId)
+    .neq('run_id', runId)
+  if (delErr) slog('warn', 'funnel_pages_prune_failed', { runId, error: delErr.message })
 }
 
 // ─── BRAND GUARDRAILS ────────────────────────────────────────────────────────

@@ -1251,6 +1251,39 @@ function InsightsPage({runs, impactMetrics, learnings, funnelPages}) {
 // ─── FUNNEL PAGE ──────────────────────────────────────────────────────────────
 // FIX #6: removed internal Supabase fetch — data already fetched by parent fetchData(),
 //         passed via props to avoid double network requests and state inconsistency
+// Stufe 2: saveFunnelPages now persists EVERY detected page (incl. views_7d=0), so the
+//   tab splits into two groups — "With traffic" (views_7d>0, full render) and
+//   "Detected · no traffic yet" (views_7d=0, greyed, "no traffic yet" label). Landing
+//   floats to the top of whichever group it falls in; on a fresh/low-traffic site every
+//   page is no-traffic, so the landing page leads the only group that renders.
+function FunnelRow({page, muted, maxScore, showBorder}) {
+  const dropColor = page.drop_off_score>=60?C.red:page.drop_off_score>=30?C.yellow:C.green
+  const barW = Math.round(((page.drop_off_score||0)/maxScore)*100)
+  return (
+    <div style={{padding:'12px 18px',borderBottom:showBorder?`1px solid ${C.border}`:'none',opacity:muted?0.55:1}}>
+      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:!muted&&page.drop_off_score>0?6:0}}>
+        <span style={{fontSize:15,flexShrink:0}}>{PAGE_TYPE_EMOJI[page.page_type]||'📄'}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <p style={{fontSize:12,color:muted?C.textLight:C.text,fontFamily:'DM Mono,monospace',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{page.page_path}</p>
+        </div>
+        <div style={{textAlign:'right',flexShrink:0}}>
+          {muted
+            ? <p style={{fontSize:10,color:C.textLight,fontStyle:'italic'}}>no traffic yet</p>
+            : <>
+                {page.views_7d>0&&<p style={{fontSize:11,color:C.text,fontWeight:400}}>{page.views_7d} views</p>}
+                {page.drop_off_score>0&&<p style={{fontSize:10,color:dropColor,marginTop:1}}>{page.drop_off_score}% drop-off</p>}
+              </>}
+        </div>
+      </div>
+      {!muted&&page.drop_off_score>0&&(
+        <div style={{height:3,background:'rgba(26,25,22,0.07)',borderRadius:2}}>
+          <div style={{height:'100%',width:`${barW}%`,background:dropColor,borderRadius:2,opacity:0.6}}/>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FunnelPage({funnelPages, loading}) {
   if(loading) return <div style={{padding:'48px',display:'flex',justifyContent:'center'}}><Spinner/></div>
   if(!funnelPages.length) return (
@@ -1263,6 +1296,19 @@ function FunnelPage({funnelPages, loading}) {
 
   const biggestOpp = [...funnelPages].filter(p=>p.drop_off_score>0).sort((a,b)=>b.drop_off_score-a.drop_off_score)[0]
   const maxScore = Math.max(...funnelPages.map(p=>p.drop_off_score||0),1)
+
+  // Landing floats to the top of its group; traffic pages then sort by drop-off (the
+  // opportunity signal) then views, no-traffic pages alphabetically for stable order.
+  const landingFirst = (a,b)=>(b.page_type==='landing')-(a.page_type==='landing')
+  const withTraffic = funnelPages.filter(p=>p.views_7d>0)
+    .sort((a,b)=>landingFirst(a,b)||(b.drop_off_score||0)-(a.drop_off_score||0)||b.views_7d-a.views_7d)
+  const noTraffic = funnelPages.filter(p=>!(p.views_7d>0))
+    .sort((a,b)=>landingFirst(a,b)||a.page_path.localeCompare(b.page_path))
+
+  const groups = [
+    withTraffic.length && {key:'traffic',   label:'With traffic',             rows:withTraffic, muted:false},
+    noTraffic.length   && {key:'notraffic', label:'Detected · no traffic yet', rows:noTraffic,   muted:true },
+  ].filter(Boolean)
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
@@ -1277,31 +1323,19 @@ function FunnelPage({funnelPages, loading}) {
 
       <Card style={{overflow:'hidden'}}>
         <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.border}`}}>
-          <p style={{fontSize:12,fontWeight:500,color:C.text}}>{funnelPages.length} pages in funnel</p>
+          <p style={{fontSize:12,fontWeight:500,color:C.text}}>{funnelPages.length} pages detected{withTraffic.length>0?` · ${withTraffic.length} with traffic`:''}</p>
         </div>
-        {funnelPages.map((page,i)=>{
-          const dropColor = page.drop_off_score>=60?C.red:page.drop_off_score>=30?C.yellow:C.green
-          const barW = Math.round(((page.drop_off_score||0)/maxScore)*100)
-          return (
-            <div key={page.id} style={{padding:'12px 18px',borderBottom:i<funnelPages.length-1?`1px solid ${C.border}`:'none'}}>
-              <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6}}>
-                <span style={{fontSize:15,flexShrink:0}}>{PAGE_TYPE_EMOJI[page.page_type]||'📄'}</span>
-                <div style={{flex:1,minWidth:0}}>
-                  <p style={{fontSize:12,color:C.text,fontFamily:'DM Mono,monospace',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{page.page_path}</p>
-                </div>
-                <div style={{textAlign:'right',flexShrink:0}}>
-                  {page.views_7d>0&&<p style={{fontSize:11,color:C.text,fontWeight:400}}>{page.views_7d} views</p>}
-                  {page.drop_off_score>0&&<p style={{fontSize:10,color:dropColor,marginTop:1}}>{page.drop_off_score}% drop-off</p>}
-                </div>
-              </div>
-              {page.drop_off_score>0&&(
-                <div style={{height:3,background:'rgba(26,25,22,0.07)',borderRadius:2}}>
-                  <div style={{height:'100%',width:`${barW}%`,background:dropColor,borderRadius:2,opacity:0.6}}/>
-                </div>
-              )}
+        {groups.map((g,gi)=>(
+          <div key={g.key}>
+            <div style={{padding:'7px 18px',background:'rgba(26,25,22,0.02)',borderBottom:`1px solid ${C.border}`}}>
+              <p style={{fontSize:10,fontWeight:600,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.4}}>{g.label} · {g.rows.length}</p>
             </div>
-          )
-        })}
+            {g.rows.map((page,ri)=>(
+              <FunnelRow key={page.id} page={page} muted={g.muted} maxScore={maxScore}
+                showBorder={!(gi===groups.length-1&&ri===g.rows.length-1)}/>
+            ))}
+          </div>
+        ))}
       </Card>
     </div>
   )
@@ -2744,7 +2778,7 @@ export default function AgentDashboard({ navigate }) {
                 {activePage==='funnel'&&(
                   <div className="fade-up">
                     <p style={{fontSize:12,color:C.textMuted,lineHeight:1.7,marginBottom:14}}>
-                      The agent automatically detects all pages in your repo and maps the conversion funnel. Pages with high drop-off are prioritized on the next run.
+                      The agent detects every page in your repo and maps the conversion funnel. Pages with visitors show live drop-off; pages with none yet are listed as detected. High-drop-off pages are prioritized on the next run.
                     </p>
                     {/* FIX #6: funnelPages + loading passed from parent, no second fetch */}
                     <FunnelPage funnelPages={funnelPages} loading={loading}/>
