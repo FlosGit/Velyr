@@ -491,10 +491,11 @@ Deno.serve(async (req) => {
     // task registered, the runtime reaps the isolate the instant that connection
     // drops → Shutdown reason "EarlyDrop". Hand the work to EdgeRuntime.waitUntil
     // so it outlives the disconnect, and return 202 immediately.
+    console.log('[run] full-run branch entered — dispatching background task')
     const work = handleFullRun().catch((err: any) =>
       // Nothing awaits this anymore, so log rejections explicitly instead of
       // letting them vanish as an unhandledrejection.
-      console.error('handleFullRun (backgrounded) failed:', err?.message || err)
+      console.error('[run] FAILED', err?.message, err?.stack)
     )
     EdgeRuntime.waitUntil(work)
     return new Response(JSON.stringify({ accepted: true }), {
@@ -1607,15 +1608,20 @@ async function captureScreenshot(url: string): Promise<string | null> {
       // analytics endpoints (e.g. PostHog), which throws during a customer
       // SPA's boot and leaves the page blank — only the CSS background paints.
       device_scale_factor: '1', format: 'png', cache: 'true', cache_ttl: '14400',
-      // PNG (not jpg): JPEG has no alpha, so an unpainted SPA frame flattens to
-      // solid BLACK; PNG keeps it transparent/white — a bad capture stays
-      // diagnosable instead of masquerading as a "real" black screenshot.
-      // Wait hard for the client-side render: networkidle0 + 5s + a body
-      // selector, because SPA/JS pages paint after `load` fired blank frames.
-      wait_until: 'networkidle0', delay: '5', wait_for_selector: 'body',
+      // The real lever for SPAs is waiting for the app to MOUNT, not the format:
+      // a dark-themed site (body{background:#0a0a0a}) paints an opaque near-black
+      // frame before React renders, so an unpainted capture is solid black in any
+      // format. Wait for a child of the mount node (#root > *) — OR'd with common
+      // landmark tags as a cross-framework fallback — and fail loudly if nothing
+      // mounts (error_on_selector_not_found) instead of returning a black frame.
+      wait_until: 'networkidle0', delay: '5',
+      wait_for_selector: '#root > *, nav, header, h1, main',
+      error_on_selector_not_found: 'true', timeout: '30',
       response_type: 'json',
     })
-    const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(20000) })
+    // Abort must exceed ScreenshotOne's `timeout` (the selector wait, 30s) above,
+    // or the fetch aborts first and returns null before the selector resolves.
+    const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(40000) })
     if (!res.ok) {
       // Surface the real cause (e.g. request_not_valid + error_details) instead
       // of swallowing the 400 — see ScreenshotOne error response body.
@@ -2638,6 +2644,7 @@ async function releaseRunLock(subscriptionId: string) {
 }
 
 async function handleFullRun() {
+  console.log('[run] handleFullRun start')
   await cleanupStaleRuns()
 
   const { data: connections } = await supabase
@@ -2645,6 +2652,7 @@ async function handleFullRun() {
     .eq('agent_subscriptions.status', 'active')
     .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
 
+  console.log(`[run] active connections: ${connections?.length ?? 0}`)
   if (!connections || connections.length === 0) {
     return { success: true, message: 'No active connections' }
   }
@@ -2662,9 +2670,11 @@ async function handleFullRun() {
       // Stage 4.6: acquire lock; skip if already running elsewhere.
       const got = await acquireRunLock(conn.subscription_id)
       if (!got) {
+        console.log(`[run] lock held for ${conn.subscription_id} — skipped (another run owns it; not released until TTL or completion)`)
         console.warn(`[run-lock] skipping ${conn.subscription_id} — already locked`)
         continue
       }
+      console.log(`[run] lock acquired for ${conn.subscription_id} — processing`)
       try {
         await processConnection(conn)
       } catch (err: any) {
