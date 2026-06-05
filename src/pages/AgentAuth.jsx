@@ -57,6 +57,16 @@ const CSS = `
   }
   .auth-btn:hover:not(:disabled) { background: #2a5c45; transform: translateY(-1px); }
   .auth-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .auth-btn-google {
+    width: 100%; background: #fff; color: #1c1917;
+    border: 1px solid rgba(28,25,23,0.14); border-radius: 10px;
+    padding: 14px; font-family: 'Jost', sans-serif; font-weight: 400; font-size: 15px;
+    cursor: pointer; transition: border-color .2s, background .2s, transform .15s;
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    letter-spacing: .02em;
+  }
+  .auth-btn-google:hover:not(:disabled) { border-color: rgba(28,25,23,0.28); background: #faf8f4; transform: translateY(-1px); }
+  .auth-btn-google:disabled { opacity: 0.6; cursor: not-allowed; }
 `
 
 function Logo({ size = 24, color = '#2a5c45' }) {
@@ -69,6 +79,17 @@ function Logo({ size = 24, color = '#2a5c45' }) {
       <line x1="16" y1="25" x2="16" y2="30" stroke={color} strokeWidth="1.1" strokeLinecap="round" opacity="0.45"/>
       <line x1="2"  y1="16" x2="7"  y2="16" stroke={color} strokeWidth="1.1" strokeLinecap="round" opacity="0.45"/>
       <line x1="25" y1="16" x2="30" y2="16" stroke={color} strokeWidth="1.1" strokeLinecap="round" opacity="0.45"/>
+    </svg>
+  )
+}
+
+function GoogleIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
+      <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/>
+      <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/>
+      <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571l6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/>
     </svg>
   )
 }
@@ -157,6 +178,38 @@ export default function AgentAuth({ navigate, mode = 'login' }) {
     setLoading(false)
     if (err) { setError(err.message); return }
     setSuccess('If an account exists for this email, a reset link has been sent.')
+  }
+
+  async function handleGoogle() {
+    setError('')
+    setSuccess('')
+    // Persist any pending Stripe checkout intent BEFORE redirecting, so it
+    // survives the OAuth round-trip — same `postLoginCheckout` key
+    // SubscribeButton/beginCheckout use, and the same one App.jsx's hash
+    // handler reads on return to route a confirmed login to /agent/post-signup.
+    const urlIntent = (() => {
+      try { return new URLSearchParams(window.location.search).get('intent') } catch { return null }
+    })()
+    const intent = urlIntent || readPendingIntent()
+    if (intent === 'subscription') {
+      try { localStorage.setItem('postLoginCheckout', 'subscription') } catch {}
+      try { sessionStorage.setItem('postLoginCheckout', 'subscription') } catch {}
+    }
+
+    setLoading(true)
+    // Implicit flow: Supabase sends the user to Google and back to the site
+    // origin with the session in the URL hash (#access_token=…). App.jsx's
+    // existing on-mount hash handler is the return path — no callback route.
+    const { error: err } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    })
+    // On success the browser has already navigated to Google; we only get here
+    // if the redirect could not be started.
+    if (err) {
+      setError(err.message || 'Could not start Google sign-in. Please try again.')
+      setLoading(false)
+    }
   }
 
   return (
@@ -266,6 +319,18 @@ export default function AgentAuth({ navigate, mode = 'login' }) {
 
               <button className="auth-btn" onClick={handleSubmit} disabled={loading}>
                 {loading ? 'Please wait…' : tab === 'login' ? 'Log in →' : 'Create account →'}
+              </button>
+
+              {/* OAuth — shared by both Log in and Create account tabs */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '8px 0 2px' }}>
+                <div style={{ flex: 1, height: 1, background: C.border }} />
+                <span style={{ fontSize: 12, color: C.textLight, fontWeight: 300 }}>or</span>
+                <div style={{ flex: 1, height: 1, background: C.border }} />
+              </div>
+
+              <button className="auth-btn-google" onClick={handleGoogle} disabled={loading}>
+                <GoogleIcon size={18} />
+                Continue with Google
               </button>
             </div>
           </div>
