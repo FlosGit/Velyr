@@ -134,7 +134,11 @@ export default function App() {
         window.history.replaceState({}, '', `/agent/post-signup?next=${encodeURIComponent(pending)}` + hash)
         setPath('/agent/post-signup')
       } else {
-        window.history.replaceState({}, '', '/agent/dashboard')
+        // Keep the hash so supabase-js (detectSessionInUrl, implicit flow) can
+        // still exchange the #access_token into a session — mirrors the intent
+        // branch above. Stripping it here loses the session before _initialize
+        // reads window.location.href.
+        window.history.replaceState({}, '', '/agent/dashboard' + hash)
         setPath('/agent/dashboard')
       }
     }
