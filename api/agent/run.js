@@ -153,30 +153,23 @@ async function captureScreenshot(url) {
       // analytics endpoints (e.g. PostHog), which throws during a customer
       // SPA's boot and leaves the page blank — only the CSS background paints.
       device_scale_factor: '1', format: 'png', cache: 'true', cache_ttl: '14400',
-      // The real lever for SPAs is waiting for the app to MOUNT, not the format:
-      // a dark-themed site (body{background:#0a0a0a}) paints an opaque near-black
-      // frame before React renders, so an unpainted capture is solid black in any
-      // format. Wait for a child of the mount node (#root > *) — OR'd with common
-      // landmark tags as a cross-framework fallback — and fail loudly if nothing
-      // mounts (error_on_selector_not_found) instead of returning a black frame.
-      // wait_until 'load' (the load event), NOT networkidle: wait_for_selector
-      // below already proves the SPA mounted, so we don't need network idle —
-      // and networkidle0/2 wait on the target's persistent PostHog + Google Fonts
-      // sockets, which never settle and previously burned the whole budget.
+      // No wait_for_selector / error_on_selector_not_found: '#root > *' never
+      // matched in ScreenshotOne's headless and caused FALSE timeouts even though
+      // the page renders perfectly (proven by a manual load + delay + no-selector
+      // capture). wait_until 'load' settles fast — the SPA's persistent PostHog +
+      // Google Fonts sockets don't block the load event the way they stalled
+      // networkidle — then a fixed delay (5s) lets React paint after mount.
       wait_until: 'load', delay: '5',
-      wait_for_selector: '#root > *, nav, header, h1, main',
-      error_on_selector_not_found: 'true',
-      // Budgets in seconds, kept TIGHT so a slow capture fails fast instead of
-      // eating the Edge wall-clock (a 60s capture reaped the isolate mid-run):
-      // navigation_timeout 20 (<=30) for page load, timeout 25 (<=90) overall.
-      // A missing screenshot is fine; a screenshot that kills the run is not.
-      navigation_timeout: '20', timeout: '25',
+      // Budgets in seconds: navigation_timeout 20 (page load), timeout 30 (overall,
+      // <=90). Comfortable now that no selector wait burns the budget; capture
+      // stays inline and completes well under the ~150s edge wall-clock.
+      navigation_timeout: '20', timeout: '30',
       response_type: 'json',
     })
-    // Abort must exceed ScreenshotOne's `timeout` (25s) but stay well under the
-    // edge wall-clock — 30s. On trip, captureScreenshot returns null and the run
-    // continues (call site assigns the result and proceeds; never blocks).
-    const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(30000) })
+    // Abort exceeds ScreenshotOne's `timeout` (30s) — 35s — so the fetch can't cut
+    // off a capture that's still finishing. On failure captureScreenshot returns
+    // null and the run continues (non-blocking).
+    const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(35000) })
     if (!res.ok) {
       // Surface the real cause (e.g. request_not_valid + error_details) instead
       // of swallowing the 400 — see ScreenshotOne error response body.
