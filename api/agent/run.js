@@ -1143,9 +1143,16 @@ async function handlePublicTimeline(req, res) {
 
   const { data: sub } = await supabase
     .from('agent_subscriptions')
-    .select('id, website_url, created_at, public_slug, is_public')
+    .select('id, created_at, public_slug, is_public')
     .eq('public_slug', slug).eq('is_public', true).maybeSingle()
   if (!sub) return res.status(404).json({ error: 'Not found' })
+
+  // website_url lives on agent_connections, not agent_subscriptions.
+  const { data: conn } = await supabase
+    .from('agent_connections')
+    .select('website_url')
+    .eq('subscription_id', sub.id)
+    .maybeSingle()
 
   // Stage 4.11: explicit field projection on the public timeline. We used to
   // select `analysis_result` wholesale and then dereference one field from it
@@ -1193,7 +1200,7 @@ async function handlePublicTimeline(req, res) {
   }
 
   return res.status(200).json({
-    website_url: sub.website_url,
+    website_url: conn?.website_url || null,
     created_at:  sub.created_at,
     runs,
     business_dna: Object.values(dnaByType),
@@ -1261,8 +1268,15 @@ async function handleReenableSnippet(req, res, user) {
 async function handleExportDNA(req, res, user) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
   const { data: sub } = await supabase
-    .from('agent_subscriptions').select('id, website_url').eq('auth_user_id', user.id).single()
+    .from('agent_subscriptions').select('id').eq('auth_user_id', user.id).single()
   if (!sub) return res.status(404).json({ error: 'No subscription found' })
+
+  // website_url lives on agent_connections, not agent_subscriptions.
+  const { data: conn } = await supabase
+    .from('agent_connections')
+    .select('website_url')
+    .eq('subscription_id', sub.id)
+    .maybeSingle()
 
   const [dnaRes, snapsRes] = await Promise.all([
     supabase.from('agent_business_dna')
@@ -1287,7 +1301,7 @@ async function handleExportDNA(req, res, user) {
 
   const prompt = `You are a senior conversion strategist. Based on this website's 90-day agent history, write a Website Playbook.
 
-WEBSITE: ${sub.website_url}
+WEBSITE: ${conn?.website_url || ''}
 
 WHAT HAS WORKED (${wins.length} successes):
 ${wins.map(d => `- ${d.fix_type}: ${d.notes || ''}`).join('\n') || 'none yet'}
