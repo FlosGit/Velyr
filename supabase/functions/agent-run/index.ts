@@ -1596,10 +1596,13 @@ async function captureScreenshot(url: string): Promise<string | null> {
       // No block_ads/block_cookie_banners: ScreenshotOne's ad-blocker blocks
       // analytics endpoints (e.g. PostHog), which throws during a customer
       // SPA's boot and leaves the page blank — only the CSS background paints.
-      device_scale_factor: '1', format: 'jpg', cache: 'true', cache_ttl: '14400',
-      // Wait for client-side render before shooting — default `load` fires
-      // before SPA/JS pages paint, producing blank/black frames.
-      wait_until: 'networkidle2', delay: '3',
+      device_scale_factor: '1', format: 'png', cache: 'true', cache_ttl: '14400',
+      // PNG (not jpg): JPEG has no alpha, so an unpainted SPA frame flattens to
+      // solid BLACK; PNG keeps it transparent/white — a bad capture stays
+      // diagnosable instead of masquerading as a "real" black screenshot.
+      // Wait hard for the client-side render: networkidle0 + 5s + a body
+      // selector, because SPA/JS pages paint after `load` fired blank frames.
+      wait_until: 'networkidle0', delay: '5', wait_for_selector: 'body',
       response_type: 'json',
     })
     const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(20000) })
