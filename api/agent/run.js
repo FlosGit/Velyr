@@ -159,7 +159,11 @@ async function captureScreenshot(url) {
       // format. Wait for a child of the mount node (#root > *) — OR'd with common
       // landmark tags as a cross-framework fallback — and fail loudly if nothing
       // mounts (error_on_selector_not_found) instead of returning a black frame.
-      wait_until: 'networkidle0', delay: '5',
+      // wait_until networkidle2 (tolerates <=2 open sockets), not networkidle0:
+      // the target keeps PostHog + Google Fonts connections open, so networkidle0
+      // (zero sockets) never settles and burns the whole timeout. wait_for_selector
+      // below already proves the SPA mounted, so full network idle isn't needed.
+      wait_until: 'networkidle2', delay: '5',
       wait_for_selector: '#root > *, nav, header, h1, main',
       error_on_selector_not_found: 'true',
       // Budgets in seconds: navigation_timeout (max 30) for page load, timeout
