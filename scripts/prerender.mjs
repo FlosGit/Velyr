@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path'
 import { FAQS } from '../src/data/faqs.js'
 import { loadArticles, toArticleJson } from './lib/blog.mjs'
 import { CLUSTERS } from '../src/data/blogClusters.js'
+import { submitToIndexNow } from '../src/utils/indexNow.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DIST = join(__dirname, '..', 'dist')
@@ -256,9 +257,11 @@ const clustersWithPosts = CLUSTERS.filter((c) => published.some((a) => a.cluster
 
 // --- individual articles ---
 let blogCount = 0
+const indexNowUrls = []
 for (const article of published) {
   const a = toArticleJson(article)
   const url = a.canonical
+  indexNowUrls.push(url)
   const cluster = article.cluster
 
   const headTags = [
@@ -284,6 +287,11 @@ for (const article of published) {
   writeFileSync(join(outDir, 'index.html'), html, 'utf8')
   blogCount++
 }
+
+// Notify IndexNow (Bing/Yandex) about all published articles once per deploy.
+// Fire-and-forget: never awaited and errors are swallowed so it can't block or
+// break the build. The blog index itself is included so the listing re-crawls too.
+submitToIndexNow([ORIGIN + '/blog', ...indexNowUrls]).catch(() => {})
 
 // --- blog index ---
 {
