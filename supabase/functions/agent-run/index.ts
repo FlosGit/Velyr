@@ -1616,12 +1616,16 @@ async function captureScreenshot(url: string): Promise<string | null> {
       // mounts (error_on_selector_not_found) instead of returning a black frame.
       wait_until: 'networkidle0', delay: '5',
       wait_for_selector: '#root > *, nav, header, h1, main',
-      error_on_selector_not_found: 'true', timeout: '30',
+      error_on_selector_not_found: 'true',
+      // Budgets in seconds: navigation_timeout (max 30) for page load, timeout
+      // (max 90) for the whole operation — 60 gives navigation + selector wait +
+      // 5s delay + capture the room a slow SPA needs (30 timed the whole op out).
+      navigation_timeout: '30', timeout: '60',
       response_type: 'json',
     })
-    // Abort must exceed ScreenshotOne's `timeout` (the selector wait, 30s) above,
-    // or the fetch aborts first and returns null before the selector resolves.
-    const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(40000) })
+    // Abort must exceed ScreenshotOne's `timeout` (60s) above, or the fetch
+    // aborts first and returns null before ScreenshotOne finishes.
+    const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(70000) })
     if (!res.ok) {
       // Surface the real cause (e.g. request_not_valid + error_details) instead
       // of swallowing the 400 — see ScreenshotOne error response body.
