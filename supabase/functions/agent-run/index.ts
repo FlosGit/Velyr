@@ -486,9 +486,19 @@ Deno.serve(async (req) => {
       })
     }
 
-    const result = await handleFullRun()
-    return new Response(JSON.stringify(result), {
-      headers: { 'Content-Type': 'application/json' },
+    // Full run is fire-and-forget from Vercel: a 2s AbortController closes the
+    // caller's connection long before this pipeline finishes. With no background
+    // task registered, the runtime reaps the isolate the instant that connection
+    // drops → Shutdown reason "EarlyDrop". Hand the work to EdgeRuntime.waitUntil
+    // so it outlives the disconnect, and return 202 immediately.
+    const work = handleFullRun().catch((err: any) =>
+      // Nothing awaits this anymore, so log rejections explicitly instead of
+      // letting them vanish as an unhandledrejection.
+      console.error('handleFullRun (backgrounded) failed:', err?.message || err)
+    )
+    EdgeRuntime.waitUntil(work)
+    return new Response(JSON.stringify({ accepted: true }), {
+      status: 202, headers: { 'Content-Type': 'application/json' },
     })
   } catch (err) {
     console.error('Edge function top-level error:', err)
