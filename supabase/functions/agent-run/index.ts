@@ -1614,22 +1614,24 @@ async function captureScreenshot(url: string): Promise<string | null> {
       // format. Wait for a child of the mount node (#root > *) — OR'd with common
       // landmark tags as a cross-framework fallback — and fail loudly if nothing
       // mounts (error_on_selector_not_found) instead of returning a black frame.
-      // wait_until networkidle2 (tolerates <=2 open sockets), not networkidle0:
-      // the target keeps PostHog + Google Fonts connections open, so networkidle0
-      // (zero sockets) never settles and burns the whole timeout. wait_for_selector
-      // below already proves the SPA mounted, so full network idle isn't needed.
-      wait_until: 'networkidle2', delay: '5',
+      // wait_until 'load' (the load event), NOT networkidle: wait_for_selector
+      // below already proves the SPA mounted, so we don't need network idle —
+      // and networkidle0/2 wait on the target's persistent PostHog + Google Fonts
+      // sockets, which never settle and previously burned the whole budget.
+      wait_until: 'load', delay: '5',
       wait_for_selector: '#root > *, nav, header, h1, main',
       error_on_selector_not_found: 'true',
-      // Budgets in seconds: navigation_timeout (max 30) for page load, timeout
-      // (max 90) for the whole operation — 60 gives navigation + selector wait +
-      // 5s delay + capture the room a slow SPA needs (30 timed the whole op out).
-      navigation_timeout: '30', timeout: '60',
+      // Budgets in seconds, kept TIGHT so a slow capture fails fast instead of
+      // eating the Edge wall-clock (a 60s capture reaped the isolate mid-run):
+      // navigation_timeout 20 (<=30) for page load, timeout 25 (<=90) overall.
+      // A missing screenshot is fine; a screenshot that kills the run is not.
+      navigation_timeout: '20', timeout: '25',
       response_type: 'json',
     })
-    // Abort must exceed ScreenshotOne's `timeout` (60s) above, or the fetch
-    // aborts first and returns null before ScreenshotOne finishes.
-    const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(70000) })
+    // Abort must exceed ScreenshotOne's `timeout` (25s) but stay well under the
+    // edge wall-clock — 30s. On trip, captureScreenshot returns null and the run
+    // continues (call site assigns the result and proceeds; never blocks).
+    const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(30000) })
     if (!res.ok) {
       // Surface the real cause (e.g. request_not_valid + error_details) instead
       // of swallowing the 400 — see ScreenshotOne error response body.
