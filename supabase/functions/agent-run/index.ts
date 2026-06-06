@@ -1630,6 +1630,7 @@ async function captureScreenshot(url: string): Promise<string | null> {
     // Abort exceeds ScreenshotOne's `timeout` (30s) — 35s — so the fetch can't cut
     // off a capture that's still finishing. On failure captureScreenshot returns
     // null and the run continues (non-blocking).
+    console.log('[screenshot] request url', `https://api.screenshotone.com/take?${params}`.replace(encodeURIComponent(apiKey), 'REDACTED'))
     const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(35000) })
     if (!res.ok) {
       // Surface the real cause (e.g. request_not_valid + error_details) instead
@@ -2516,14 +2517,12 @@ async function processConnection(conn: any) {
     }
     const { pr, filesEdited } = prResult
 
-    // 3a: capture before-screenshot of the edited page.
-    const targetUrl = (() => {
-      if (!conn.website_url) return null
-      const route = fileToRoutePath(fixResult.file_to_edit || '')   // Stage 2: App-Router-aware
-      const base  = conn.website_url.replace(/\/$/, '')
-      return route && route !== '/' ? `${base}${route}` : base
-    })()
-    const screenshotBefore = await captureScreenshot(targetUrl || conn.website_url)
+    // 3a: capture before-screenshot. Always shoot the site ROOT, never a route
+    // derived from file_to_edit: fileToRoutePath maps e.g. src/pages/Home.jsx →
+    // "/home", but customer sites are client-rendered SPAs where only "/" is a real
+    // route — an invented path like /home loads the empty shell and shoots solid
+    // black. Root always renders; the PR receipt already names the edited file.
+    const screenshotBefore = await captureScreenshot(conn.website_url)
 
     // Step 6: approval notification.
     await supabase.from('agent_runs').update({ current_step: 'sending_notification' }).eq('id', run.id)

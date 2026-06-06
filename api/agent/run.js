@@ -175,6 +175,7 @@ async function captureScreenshot(url) {
     // Abort exceeds ScreenshotOne's `timeout` (30s) — 35s — so the fetch can't cut
     // off a capture that's still finishing. On failure captureScreenshot returns
     // null and the run continues (non-blocking).
+    console.log('[screenshot] request url', `https://api.screenshotone.com/take?${params}`.replace(encodeURIComponent(apiKey), 'REDACTED'))
     const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(35000) })
     if (!res.ok) {
       // Surface the real cause (e.g. request_not_valid + error_details) instead
@@ -713,17 +714,12 @@ async function handleRollbackCheck(res) {
       const bounceDelta    = bounceAfter - bounceBefore
       const shouldRollback = bounceDelta >= ROLLBACK_BOUNCE_PP_THRESHOLD
 
-      // 3a: capture after-screenshot at the same URL targeted by the original run
-      const targetUrl = (() => {
-        if (!conn?.website_url) return null
-        const editPath = run.analysis_result?.is_multi_page
-          ? run.analysis_result?.multi_file_changes?.[0]?.file_to_edit
-          : run.analysis_result?.file_to_edit
-        const route = fileToRoutePath(editPath || '')   // Stage 2: App-Router-aware
-        const base  = conn.website_url.replace(/\/$/, '')
-        return route && route !== '/' ? `${base}${route}` : base
-      })()
-      const screenshotAfter = await captureScreenshot(targetUrl)
+      // 3a: capture after-screenshot at the site ROOT — the same target as the
+      // before-shot. Not a fileToRoutePath-derived route: that maps e.g.
+      // src/pages/Home.jsx → "/home", a non-existent route in a client-rendered
+      // SPA (loads the empty shell → black). Root always renders and keeps
+      // before/after comparable.
+      const screenshotAfter = await captureScreenshot(conn.website_url)
 
       // Stage 3.6: the metric is the SITE-WIDE bounce rate (PostHog $pageview
       // counts across every route, not filtered to the edited page). Storing
