@@ -1607,14 +1607,17 @@ async function captureScreenshot(url: string): Promise<string | null> {
       // No block_ads/block_cookie_banners: ScreenshotOne's ad-blocker blocks
       // analytics endpoints (e.g. PostHog), which throws during a customer
       // SPA's boot and leaves the page blank — only the CSS background paints.
-      device_scale_factor: '1', format: 'png', cache: 'true', cache_ttl: '14400',
+      // cache 'false' (not 'true' + cache_ttl): an early broken run cached a solid
+      // black frame under the shared cache-key, and every later run was served that
+      // stale image with NO error. Render fresh every time so it can't recur.
+      device_scale_factor: '1', format: 'png', cache: 'false',
       // No wait_for_selector / error_on_selector_not_found: '#root > *' never
       // matched in ScreenshotOne's headless and caused FALSE timeouts even though
       // the page renders perfectly (proven by a manual load + delay + no-selector
       // capture). wait_until 'load' settles fast — the SPA's persistent PostHog +
       // Google Fonts sockets don't block the load event the way they stalled
-      // networkidle — then a fixed delay (5s) lets React paint after mount.
-      wait_until: 'load', delay: '5',
+      // networkidle — then a fixed delay (8s) lets React paint after mount.
+      wait_until: 'load', delay: '8',
       // Budgets in seconds: navigation_timeout 20 (page load), timeout 30 (overall,
       // <=90). Comfortable now that no selector wait burns the budget; capture
       // stays inline and completes well under the ~150s edge wall-clock.
