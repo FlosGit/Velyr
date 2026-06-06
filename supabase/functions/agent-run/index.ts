@@ -1630,7 +1630,6 @@ async function captureScreenshot(url: string): Promise<string | null> {
     // Abort exceeds ScreenshotOne's `timeout` (30s) — 35s — so the fetch can't cut
     // off a capture that's still finishing. On failure captureScreenshot returns
     // null and the run continues (non-blocking).
-    console.log('[screenshot] request url', `https://api.screenshotone.com/take?${params}`.replace(encodeURIComponent(apiKey), 'REDACTED'))
     const res = await fetch(`https://api.screenshotone.com/take?${params}`, { signal: AbortSignal.timeout(35000) })
     if (!res.ok) {
       // Surface the real cause (e.g. request_not_valid + error_details) instead
