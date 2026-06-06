@@ -167,7 +167,10 @@ async function captureScreenshot(url) {
       // <=90). Comfortable now that no selector wait burns the budget; capture
       // stays inline and completes well under the ~150s edge wall-clock.
       navigation_timeout: '20', timeout: '30',
-      response_type: 'json',
+      // NO response_type=json: that returns a cache_url REFERENCE to a CDN cache
+      // object (stale/empty with cache=false → the black frame), not the render.
+      // Omitting it (default by_format) makes /take stream the freshly-rendered
+      // PNG bytes — the exact path the manual call proved correct — hosted below.
     })
     // Abort exceeds ScreenshotOne's `timeout` (30s) — 35s — so the fetch can't cut
     // off a capture that's still finishing. On failure captureScreenshot returns
@@ -180,10 +183,16 @@ async function captureScreenshot(url) {
       console.error('ScreenshotOne failed', res.status, body)
       return null
     }
-    const data = await res.json()
-    // Canonical field for response_type=json is screenshot_url; cache_url only
-    // appears when caching kicks in, store.location only with own-S3 storage.
-    return data?.screenshot_url || data?.cache_url || data?.store?.location || null
+    // Live PNG bytes (not a cache reference) → upload to Supabase Storage and
+    // return a durable public URL. Requires a PUBLIC bucket named 'screenshots'.
+    // Service-role key bypasses storage RLS; a unique key per run rules out any
+    // stale CDN/cache collision.
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    const path = `${crypto.randomUUID()}.png`
+    const { error: upErr } = await supabase.storage.from('screenshots')
+      .upload(path, bytes, { contentType: 'image/png', upsert: true })
+    if (upErr) { console.error('Screenshot upload failed', upErr.message); return null }
+    return supabase.storage.from('screenshots').getPublicUrl(path).data?.publicUrl || null
   } catch { return null }
 }
 
