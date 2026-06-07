@@ -1088,18 +1088,29 @@ async function detectSnippetState(
   return { state: 'missing', targetPath, hasDep }
 }
 
+// Discriminates the dependency situation for the Setup-PR receipt + Telegram.
+//  present         — posthog-js already in package.json (no action)
+//  auto_added      — no dep + no frozen lockfile → we add it to package.json in this PR
+//  manual_lockfile — no dep but a frozen lockfile exists → user must install + commit it
+type DepAction = 'present' | 'auto_added' | 'manual_lockfile'
+
 function buildSnippetReceipt(opts: {
   framework: string; targetPath: string; filesChanged: string[];
-  hasDep: boolean; coexist: boolean; hostFilter: string;
+  depAction: DepAction; coexist: boolean; hostFilter: string;
 }): string {
-  const { framework, targetPath, filesChanged, hasDep, coexist, hostFilter } = opts
+  const { framework, targetPath, filesChanged, depAction, coexist, hostFilter } = opts
 
   const whatChanged = framework === 'nextjs-app'
     ? `- Created \`${filesChanged.find(f => f.includes('velyr-analytics'))}\` (client component with PostHog init)\n- Added \`<VelyrAnalytics/>\` inside \`<body>\` in \`${targetPath}\``
     : `- Added PostHog snippet to \`${targetPath}\``
 
-  const depWarning = hasDep ? '' :
-    '\n\n## ⚠️ Action required — install before merging\n\n```\nnpm install posthog-js\n```\n\nBuild will fail if this step is skipped.'
+  // Dependency messaging: auto-added needs no action; lockfile repos need a manual install.
+  const depNote =
+    depAction === 'auto_added'
+      ? '\n\nposthog-js has been added to your package.json automatically.'
+      : depAction === 'manual_lockfile'
+      ? '\n\n## ⚠️ Your repo uses a lockfile\n\nBefore merging, run:\n\n```\nnpm install posthog-js   # or: yarn add posthog-js / pnpm add posthog-js\n```\n\nand commit the updated lockfile.'
+      : ''
 
   const coexistNote = coexist
     ? '\n\n**Note:** your existing `posthog.init` is left untouched — this is a separate top-level call; both instances will fire.'
@@ -1122,13 +1133,18 @@ Standard pageview events (URL, session, device type, referrer). No PII beyond wh
 ### Next steps
 
 1. Review the changes — this is a mechanical snippet add with no conversion logic.
-2. Merge when ready.${hasDep ? '' : '\n3. Run `npm install posthog-js` first (see warning above).'}${depWarning}
+2. Merge when ready.${depNote}
 
 _Once merged, the agent will read real visitor data on its next weekly run._`
 }
 
-async function sendSnippetTelegram(chatId: string, prUrl: string, hasDep: boolean) {
-  const depNote = hasDep ? '' : '\n\n⚠️ <b>Requires <code>npm install posthog-js</code> before merge</b> — build will fail otherwise.'
+async function sendSnippetTelegram(chatId: string, prUrl: string, depAction: DepAction) {
+  const depNote =
+    depAction === 'auto_added'
+      ? '\n\n<code>posthog-js</code> has been added to your <code>package.json</code> automatically.'
+      : depAction === 'manual_lockfile'
+      ? '\n\n⚠️ <b>Your repo uses a lockfile.</b> Before merging, run <code>npm install posthog-js</code> (or yarn add / pnpm add) and commit the updated lockfile.'
+      : ''
   await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1178,6 +1194,26 @@ async function createSnippetPR(
   const filesChanged: string[] = []
 
   try {
+    // PART 1 (dep fix): detect a frozen lockfile in the package.json directory.
+    // If one exists we must NOT hand-edit package.json — it would desync the
+    // lockfile and break `npm ci` / frozen installs — so the receipt tells the
+    // user to install + commit the lockfile instead. Only relevant when the dep
+    // is missing, so we skip the lookups when hasDep is already true.
+    const pkgDir = mapResult.siteRoot ? `${mapResult.siteRoot}/` : ''
+    let hasFrozenLockfile = false
+    if (!hasDep) {
+      for (const lf of ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']) {
+        try {
+          await octokit.rest.repos.getContent({ owner, repo, path: `${pkgDir}${lf}`, ref: defaultBranch })
+          hasFrozenLockfile = true
+          break
+        } catch { /* lockfile absent → keep checking */ }
+      }
+    }
+    const depAction: DepAction = hasDep
+      ? 'present'
+      : hasFrozenLockfile ? 'manual_lockfile' : 'auto_added'
+
     const { data: refData } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` })
     const baseSha = refData.object.sha
     await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: baseSha })
@@ -1275,8 +1311,30 @@ async function createSnippetPR(
       filesChanged.push(targetPath)
     }
 
+    // PART 2 (dep fix): when there's no frozen lockfile, add posthog-js to
+    // package.json in this same PR so the merge is self-contained and the build
+    // won't fail on a missing import. NARROW, mechanical exception scoped to the
+    // Setup-PR only — package.json stays in FORBIDDEN_EDIT_PATHS for the LLM fix
+    // pipeline (that guard is untouched).
+    if (depAction === 'auto_added') {
+      const pkgPath = `${pkgDir}package.json`
+      const { data: pkgFile } = await octokit.rest.repos.getContent({
+        owner, repo, path: pkgPath, ref: defaultBranch,
+      })
+      const pkg = JSON.parse(base64Decode(pkgFile.content))
+      pkg.dependencies = pkg.dependencies || {}
+      pkg.dependencies['posthog-js'] = '^1.160.0'
+      await octokit.rest.repos.createOrUpdateFileContents({
+        owner, repo, path: pkgPath,
+        message: 'setup: add posthog-js dependency',
+        content: base64Encode(JSON.stringify(pkg, null, 2) + '\n'),
+        sha: pkgFile.sha, branch: branchName,
+      })
+      filesChanged.push(pkgPath)
+    }
+
     const receipt = buildSnippetReceipt({
-      framework: mapResult.framework, targetPath, filesChanged, hasDep, coexist, hostFilter,
+      framework: mapResult.framework, targetPath, filesChanged, depAction, coexist, hostFilter,
     })
 
     const { data: pr } = await octokit.rest.pulls.create({
@@ -1295,7 +1353,7 @@ async function createSnippetPR(
       pages_fixed:  filesChanged,
     }).eq('id', run.id)
 
-    if (chatId) await sendSnippetTelegram(chatId, pr.html_url, hasDep)
+    if (chatId) await sendSnippetTelegram(chatId, pr.html_url, depAction)
 
   } catch (err: any) {
     slog('error', 'snippet_pr_failed', {
