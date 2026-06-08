@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 
 import { supabase } from '../lib/supabase.js'
+import { MOTION_CSS } from '../lib/motion.jsx'
 import { startCheckout } from '../utils/startCheckout.js'
 import { SiteNetwork } from '../components/SiteNetwork.jsx'
 import { buildNetworkData, hubDomainFromUrl } from '../lib/siteNetworkData.js'
@@ -51,10 +52,10 @@ const CSS = `
     padding: 14px; font-family: 'Jost', sans-serif; font-weight: 400; font-size: 15px;
     cursor: pointer; transition: all .2s; letter-spacing: .03em;
   }
-  .ob-btn-ghost:hover { border-color: rgba(28,25,23,git diff src/pages/AgentOnboarding.jsx0.3); background: rgba(28,25,23,0.03); }
+  .ob-btn-ghost:hover { border-color: rgba(28,25,23,0.3); background: rgba(28,25,23,0.03); }
   .req-item { transition: all .3s ease; }
   .code-display {
-    font-family: 'DM Mono', monospace;git diff src/pages/AgentOnboarding.jsx
+    font-family: 'DM Mono', monospace;
     font-size: 22px;
     letter-spacing: .15em;
     color: #2a5c45;
@@ -1146,7 +1147,7 @@ export default function AgentOnboarding({ navigate }) {
   if (!user || !gateChecked) {
     return (
       <>
-        <style>{CSS}</style>
+        <style>{CSS + MOTION_CSS}</style>
         <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
           <div style={{ width: 32, height: 32, border: '2px solid rgba(28,25,23,0.15)', borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
           <p style={{ fontSize: 13, color: C.textLight, fontWeight: 300 }}>Checking your subscription…</p>
@@ -1160,7 +1161,7 @@ export default function AgentOnboarding({ navigate }) {
   if (step === 5) {
     return (
       <>
-        <style>{CSS}</style>
+        <style>{CSS + MOTION_CSS}</style>
         <OnboardingBuild subscriptionId={subscriptionId} websiteUrl={formData.websiteUrl} navigate={navigate} />
       </>
     )

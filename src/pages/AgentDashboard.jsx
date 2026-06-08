@@ -5,6 +5,7 @@ import { startCheckout } from '../utils/startCheckout.js'
 import CheckoutConfirmModal from '../components/CheckoutConfirmModal.jsx'
 import { SiteNetwork } from '../components/SiteNetwork.jsx'
 import { buildNetworkData, hubDomainFromUrl } from '../lib/siteNetworkData.js'
+import { MOTION_CSS, CountUp } from '../lib/motion.jsx'
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const C = {
@@ -351,22 +352,10 @@ function RunHistoryBar({runs}) {
 function LiveActivityStream({runs, activeRun}) {
   const streamItems = []
 
-  if (activeRun) {
-    const stepIdx = deriveAgentStep(activeRun)
-    AGENT_STEPS.forEach((step, i) => {
-      const done = i < stepIdx
-      const current = i === stepIdx
-      streamItems.push({
-        id: `step-${i}`,
-        type: 'step',
-        done, current,
-        label: step.label,
-        desc: current ? step.desc : null,
-        time: current ? 'now' : done ? '✓' : null,
-      })
-    })
-  }
-
+  // Activity stream = real run-outcome timeline rows only. The live step-by-step
+  // progress lives in the sidebar stepper, so it is no longer duplicated here.
+  // Fallback label is the status (not a repeated "Run completed") per the
+  // real-timeline rule.
   runs.slice(0,8).forEach(run => {
     if (run.status==='running') return
     const analysis = run.analysis_result||{}
@@ -374,7 +363,7 @@ function LiveActivityStream({runs, activeRun}) {
       id: run.id,
       type: 'run',
       status: run.status,
-      label: analysis.problem || 'Run completed',
+      label: analysis.problem || (STATUS[run.status]?.label || 'Run'),
       sub: analysis.expected_improvement ? `Expected: ${analysis.expected_improvement}` : null,
       time: timeAgo(run.created_at),
       file: analysis.file_to_edit?.split('/').pop(),
@@ -435,8 +424,10 @@ function LiveActivityStream({runs, activeRun}) {
 // ─── PR MISSION CONTROL ───────────────────────────────────────────────────────
 function PRMissionControl({run}) {
   const analysis = run.analysis_result || {}
-  const confidence = analysis.confidence_score || analysis.confidence || 'High'
-  const confNum = typeof confidence === 'number' ? confidence : 88
+  // Only show a confidence figure when the agent actually returned one — no
+  // fabricated default (the old code hardcoded 88).
+  const rawConf = analysis.confidence_score ?? analysis.confidence
+  const confNum = typeof rawConf === 'number' ? rawConf : null
 
   return (
     <div style={{
@@ -444,7 +435,7 @@ function PRMissionControl({run}) {
       border:`1px solid ${C.yellowMid}`,
       borderRadius:12,
       overflow:'hidden',
-      boxShadow:`0 0 0 3px ${C.yellowSoft}`,
+      boxShadow:`0 10px 34px rgba(196,125,14,0.13), 0 0 0 3px ${C.yellowSoft}`,
     }}>
       <div style={{
         background:C.yellowSoft,
@@ -458,7 +449,7 @@ function PRMissionControl({run}) {
           <SectionLabel style={{color:C.yellow,marginBottom:0}}>Awaiting your approval · PR #{run.pr_number||'—'}</SectionLabel>
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-          <a href={run.pr_url} target="_blank" rel="noreferrer" style={{
+          <a href={run.pr_url} target="_blank" rel="noreferrer" className="v-press" style={{
             fontSize:11,color:C.accent,background:C.accentSoft,
             border:`1px solid ${C.accentMid}`,borderRadius:6,padding:'4px 10px',
             textDecoration:'none',fontWeight:500,
@@ -494,21 +485,27 @@ function PRMissionControl({run}) {
 
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
           <SectionLabel style={{marginBottom:0}}>Expected impact</SectionLabel>
-          <div style={{display:'flex',alignItems:'baseline',gap:6}}>
-            <span style={{fontFamily:'Instrument Serif,serif',fontSize:32,color:C.green,lineHeight:1}}>
-              {analysis.expected_improvement || '+?%'}
-            </span>
-            <span style={{fontSize:11,color:C.textMuted}}>conversion</span>
-          </div>
-          <div>
-            <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
-              <span style={{fontSize:10,color:C.textLight}}>Confidence</span>
-              <span style={{fontSize:10,fontWeight:500,color:C.text}}>{confNum}%</span>
+          {analysis.expected_improvement ? (
+            <div style={{display:'flex',alignItems:'baseline',gap:6}}>
+              <span style={{fontFamily:'Instrument Serif,serif',fontSize:32,color:C.green,lineHeight:1}}>
+                {analysis.expected_improvement}
+              </span>
+              <span style={{fontSize:11,color:C.textMuted}}>conversion</span>
             </div>
-            <div style={{height:4,background:'rgba(26,25,22,0.08)',borderRadius:2}}>
-              <div style={{height:'100%',width:`${confNum}%`,background:confNum>75?C.green:confNum>50?C.yellow:C.red,borderRadius:2,transition:'width .5s'}}/>
+          ) : (
+            <p style={{fontSize:12,color:C.textMuted,lineHeight:1.5}}>Measured after deploy.</p>
+          )}
+          {confNum!=null && (
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                <span style={{fontSize:10,color:C.textLight}}>Confidence</span>
+                <span style={{fontSize:10,fontWeight:500,color:C.text}}>{confNum}%</span>
+              </div>
+              <div style={{height:4,background:'rgba(26,25,22,0.08)',borderRadius:2}}>
+                <div className="v-bar-fill" style={{height:'100%',width:`${confNum}%`,'--v-w':`${confNum}%`,background:confNum>75?C.green:confNum>50?C.yellow:C.red,borderRadius:2}}/>
+              </div>
             </div>
-          </div>
+          )}
           <div style={{display:'flex',justifyContent:'space-between',fontSize:10}}>
             <span style={{color:C.textLight}}>Auto-rollback</span>
             <span style={{color:C.textMuted}}>48h if no uplift</span>
@@ -520,57 +517,57 @@ function PRMissionControl({run}) {
 }
 
 // ─── KPI BAR ──────────────────────────────────────────────────────────────────
-function KPIBar({runs, impactMetrics}) {
+// Outcomes only — leads with what shipped, not process/failure rates. Deploy-rate
+// and failed/rejected are demoted to the sidebar "Performance" detail panel; the
+// bounce-Δ tile (which showed "—" / "No data yet") was removed. Tiles render only
+// when their datum exists — never a hollow placeholder.
+function KPIBar({runs, learnings}) {
   const total    = runs.length
   const deployed = runs.filter(r=>r.status==='deployed'||r.status==='approved').length
-  const pending  = runs.filter(r=>r.status==='waiting_approval').length
-  const rate     = total>0?Math.round((deployed/total)*100):0
-
-  const bounceImprove = impactMetrics.filter(m=>m.metric_type==='bounce_rate'&&m.value_before&&m.value_after)
-  const avgDelta = bounceImprove.length>0
-    ? Math.round(bounceImprove.reduce((s,m)=>s+(m.value_before-m.value_after),0)/bounceImprove.length)
-    : null
-
-  const sparkData = [...runs].slice(0,8).reverse().map(r=>r.status==='deployed'||r.status==='approved'?1:0)
 
   // FIX #12: proper Date object comparison instead of fragile ISO string comparison
   const oneWeekAgo = new Date(Date.now() - 7 * 86400000)
+  const thisWeek = runs.filter(r=>new Date(r.created_at)>oneWeekAgo&&(r.status==='deployed'||r.status==='approved')).length
+
+  const wins    = (learnings||[]).filter(l=>l.outcome==='positive'&&l.delta)
+  const avgLift = wins.length>0 ? Math.round(wins.reduce((s,l)=>s+(l.delta||0),0)/wins.length) : null
+
+  const sparkData = [...runs].slice(0,8).reverse().map(r=>r.status==='deployed'||r.status==='approved'?1:0)
 
   const kpis = [
     {
-      label:'Total Runs', value:total, sub:`${pending>0?`${pending} awaiting`:'All processed'}`,
-      accent:false, sparkData:null,
-    },
-    {
-      label:'Fixes Deployed', value:deployed,
-      sub:`+${runs.filter(r=>new Date(r.created_at)>oneWeekAgo&&(r.status==='deployed'||r.status==='approved')).length} this week`,
+      label:'Fixes Live', num:deployed, format:n=>Math.round(n),
+      sub: thisWeek>0?`+${thisWeek} this week`:'Shipped to production',
       accent:true, sparkData,
     },
-    {
-      label:'Deploy Rate', value:`${rate}%`, sub:rate>=70?'On track':'Needs review',
+    avgLift!=null && {
+      label:'Avg Uplift on Wins', num:avgLift, format:n=>`+${Math.round(n)}%`,
+      sub:`across ${wins.length} winning fix${wins.length===1?'':'es'}`,
       accent:false, sparkData:null,
     },
     {
-      label:'Avg. Bounce Δ', value:avgDelta!=null?`−${avgDelta}%`:'—', sub:avgDelta!=null?'After agent fixes':'No data yet',
+      label:'Runs', num:total, format:n=>Math.round(n),
+      sub:'Analyzed since launch',
       accent:false, sparkData:null,
     },
-  ]
+  ].filter(Boolean)
 
   return (
-    <div className="dash-kpi-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+    <div className="dash-kpi-grid" style={{display:'grid',gridTemplateColumns:`repeat(${kpis.length},1fr)`,gap:10}}>
       {kpis.map((k,i)=>(
         <div key={i} className="card-hover fade-up" style={{
           animationDelay:`${i*0.06}s`,
           background:k.accent?C.accentSoft:C.bgCard,
           border:`1px solid ${k.accent?C.accentMid:C.border}`,
           borderRadius:12, padding:'16px 18px',
+          boxShadow:k.accent?'0 4px 18px rgba(42,92,69,0.10)':'none',
         }}>
           <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:8}}>
             <SectionLabel style={{color:k.accent?C.accent:C.textLight,marginBottom:0}}>{k.label}</SectionLabel>
             {k.sparkData && <Sparkline data={k.sparkData} color={k.accent?C.accent:C.textLight} height={24} width={50}/>}
           </div>
           <p style={{fontFamily:'Instrument Serif,serif',fontSize:36,fontWeight:400,color:k.accent?C.accent:C.text,lineHeight:1,marginBottom:4}}>
-            {k.value}
+            <CountUp value={k.num} format={k.format}/>
           </p>
           <p style={{fontSize:10,color:C.textLight,fontWeight:300}}>{k.sub}</p>
         </div>
@@ -612,13 +609,8 @@ function TopInsights({runs, funnelPages, learnings, impactMetrics}) {
       sub: `Bounce −${Math.round(bestImpact.value_before-bestImpact.value_after)}% after deployment`,
       detail: timeAgo(bestRun.completed_at),
     },
-    pending.length>0 && {
-      icon:'🔔', color:C.yellow, bg:C.yellowSoft, border:C.yellowMid,
-      label:'Awaiting Review',
-      value:`${pending.length} PR${pending.length>1?'s':''}`,
-      sub: pending[0]?.analysis_result?.problem?.slice(0,55)||'Fix ready to deploy',
-      detail: 'Reply YES or NO on Telegram',
-    },
+    /* "Awaiting Review" card removed — the pending PR is surfaced by
+       PRMissionControl + the header badge (shown once). */
     avgConvNum!=null && {
       icon:'💡', color:C.accent, bg:C.accentSoft, border:C.accentMid,
       label:'Top Recommendation',
@@ -701,7 +693,7 @@ function RevenueEstimator({runs, impactMetrics}) {
   }
 
   return (
-    <Card style={{padding:'20px'}}>
+    <Card style={{padding:'22px',boxShadow:'0 6px 26px rgba(26,25,22,0.07)',borderColor:C.borderMed}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
         <SectionLabel style={{marginBottom:0}}>Revenue Impact Estimator</SectionLabel>
         <span style={{fontSize:10,color:C.textLight,background:'rgba(26,25,22,0.06)',padding:'2px 6px',borderRadius:4}}>
@@ -856,21 +848,8 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
           </div>
         )}
 
-        {pending.length>0&&(
-          <div style={{padding:'12px 16px',borderBottom:`1px solid ${C.border}`,background:C.yellowSoft}}>
-            <SectionLabel style={{color:C.yellow,marginBottom:8}}>🔔 {pending.length} awaiting approval</SectionLabel>
-            {pending.slice(0,2).map(run=>(
-              <div key={run.id} onClick={()=>onSelectRun(run)} style={{cursor:'pointer',padding:'6px 0',borderBottom:`1px solid rgba(196,125,14,0.1)`}}>
-                <p style={{fontSize:11,color:C.text,fontWeight:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:1}}>
-                  {run.analysis_result?.problem||'Fix pending review'}
-                </p>
-                <p style={{fontSize:10,color:C.textMuted,fontFamily:'DM Mono,monospace'}}>
-                  {run.pr_url?`PR #${run.pr_number}`:''} · {timeAgo(run.created_at)}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Pending-approval block removed — the pending PR is shown once, in
+            PRMissionControl (main column) + the header badge. */}
 
         <div style={{padding:'12px 16px'}}>
           <button className="btn" onClick={onTogglePause} disabled={actionLoading} style={{
@@ -887,15 +866,15 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
 
       <Card style={{padding:'14px 16px'}}>
         <SectionLabel style={{marginBottom:12}}>Performance</SectionLabel>
+        {/* Process detail — the demoted deploy-rate + failure metrics (kept out of
+            the outcome-led KPIs). Fixes/awaiting counts live in the KPIs/header. */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
           {[
-            {label:'Deploy rate',value:`${rate}%`,color:C.green},
-            {label:'Fixes merged',value:deployed,color:C.accent},
-            {label:'Awaiting',value:pending.length,color:pending.length>0?C.yellow:C.textLight},
-            {label:'Failed/rejected',value:runs.filter(r=>r.status==='failed'||r.status==='rejected').length,color:C.textLight},
+            {label:'Deploy rate',num:rate,format:n=>`${Math.round(n)}%`,color:C.green},
+            {label:'Failed / rejected',num:runs.filter(r=>r.status==='failed'||r.status==='rejected').length,format:n=>Math.round(n),color:C.textLight},
           ].map((s,i)=>(
             <div key={i}>
-              <p style={{fontFamily:'Instrument Serif,serif',fontSize:24,fontWeight:400,color:s.color,lineHeight:1}}>{s.value}</p>
+              <p style={{fontFamily:'Instrument Serif,serif',fontSize:24,fontWeight:400,color:s.color,lineHeight:1}}><CountUp value={s.num} format={s.format}/></p>
               <p style={{fontSize:10,color:C.textLight,marginTop:3}}>{s.label}</p>
             </div>
           ))}
@@ -927,7 +906,7 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
         {pendingRun && <div className="fade-up"><PRMissionControl run={pendingRun}/></div>}
 
         <div className="fade-up" style={{animationDelay:'.05s'}}>
-          <KPIBar runs={runs} impactMetrics={impactMetrics}/>
+          <KPIBar runs={runs} learnings={learnings}/>
         </div>
 
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
@@ -955,10 +934,8 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
           </div>
         </div>
 
-        <div className="fade-up" style={{animationDelay:'.15s'}}>
-          <RevenueEstimator runs={runs} impactMetrics={impactMetrics}/>
-        </div>
-
+        {/* RevenueEstimator removed from Overview — it now lives only on the
+            Insights tab (interactive calculator belongs in the analysis view). */}
         <AgentLearningStrip learnings={learnings}/>
       </div>
 
@@ -995,19 +972,19 @@ function AgentLearningStrip({learnings}) {
       </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
         <div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.accent,lineHeight:1}}>{learnings.length}</p>
+          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.accent,lineHeight:1}}><CountUp value={learnings.length}/></p>
           <p style={{fontSize:10,color:C.textMuted,marginTop:3}}>total learnings</p>
         </div>
         <div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.green,lineHeight:1}}>{rate}%</p>
+          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.green,lineHeight:1}}><CountUp value={rate} format={n=>`${Math.round(n)}%`}/></p>
           <p style={{fontSize:10,color:C.textMuted,marginTop:3}}>win rate</p>
         </div>
         <div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.green,lineHeight:1}}>{avgLift!=null?`+${avgLift}%`:'—'}</p>
+          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.green,lineHeight:1}}>{avgLift!=null?<CountUp value={avgLift} format={n=>`+${Math.round(n)}%`}/>:'—'}</p>
           <p style={{fontSize:10,color:C.textMuted,marginTop:3}}>avg improvement on wins</p>
         </div>
         <div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.textMuted,lineHeight:1}}>{losses}</p>
+          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.textMuted,lineHeight:1}}><CountUp value={losses}/></p>
           <p style={{fontSize:10,color:C.textMuted,marginTop:3}}>rolled back / avoided</p>
         </div>
       </div>
@@ -1027,7 +1004,8 @@ function AgentLearningStrip({learnings}) {
 // ─── RUNS PAGE ────────────────────────────────────────────────────────────────
 function RunsPage({runs, loading, onSelect}) {
   const [filter, setFilter] = useState('all')
-  const filters = ['all','deployed','waiting_approval','failed','rejected','rolled_back']
+  // Outcomes lead; error/rejection states trail (don't headline failure).
+  const filters = ['all','deployed','waiting_approval','rejected','rolled_back','failed']
 
   const filtered = filter==='all'?runs:runs.filter(r=>r.status===filter)
 
@@ -1170,7 +1148,7 @@ function InsightsPage({runs, impactMetrics, learnings, funnelPages}) {
   }).filter(m=>m.run&&m.value_before&&m.value_after)
 
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:14}}>
+    <div className="v-stagger" style={{display:'flex',flexDirection:'column',gap:14}}>
 
       <RevenueEstimator runs={runs} impactMetrics={impactMetrics}/>
 
@@ -1206,7 +1184,7 @@ function InsightsPage({runs, impactMetrics, learnings, funnelPages}) {
                     border:`1px solid ${isGood?'rgba(30,122,60,0.2)':C.redMid}`,
                     borderRadius:5,padding:'3px 8px',whiteSpace:'nowrap',
                   }}>
-                    {isGood?'−':'+'}{ Math.abs(Math.round(improvement))}%
+                    {isGood?'−':'+'}<CountUp value={Math.abs(Math.round(improvement))} format={n=>Math.round(n)}/>%
                   </span>
                 </div>
               )
@@ -1215,8 +1193,8 @@ function InsightsPage({runs, impactMetrics, learnings, funnelPages}) {
         </Card>
       )}
 
-      <AgentLearningStrip learnings={learnings}/>
-
+      {/* AgentLearningStrip removed here — it duplicated the detailed list below
+          and the Overview strip. The full learnings list stays. */}
       {learnings.length>0&&(
         <Card style={{overflow:'hidden'}}>
           <div style={{padding:'14px 18px',borderBottom:`1px solid ${C.border}`}}>
@@ -1270,14 +1248,14 @@ function FunnelRow({page, muted, maxScore, showBorder}) {
           {muted
             ? <p style={{fontSize:10,color:C.textLight,fontStyle:'italic'}}>no traffic yet</p>
             : <>
-                {page.views_7d>0&&<p style={{fontSize:11,color:C.text,fontWeight:400}}>{page.views_7d} views</p>}
+                {page.views_7d>0&&<p style={{fontSize:11,color:C.text,fontWeight:400}}><CountUp value={page.views_7d} format={n=>Math.round(n).toLocaleString()}/> views</p>}
                 {page.drop_off_score>0&&<p style={{fontSize:10,color:dropColor,marginTop:1}}>{page.drop_off_score}% drop-off</p>}
               </>}
         </div>
       </div>
       {!muted&&page.drop_off_score>0&&(
         <div style={{height:3,background:'rgba(26,25,22,0.07)',borderRadius:2}}>
-          <div style={{height:'100%',width:`${barW}%`,background:dropColor,borderRadius:2,opacity:0.6}}/>
+          <div className="v-bar-fill" style={{height:'100%',width:`${barW}%`,'--v-w':`${barW}%`,background:dropColor,borderRadius:2,opacity:0.6}}/>
         </div>
       )}
     </div>
@@ -1313,7 +1291,7 @@ function FunnelPage({funnelPages, loading}) {
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
       {biggestOpp&&(
-        <div style={{background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:10,padding:'14px 18px'}}>
+        <div className="fade-up" style={{background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:10,padding:'16px 20px',boxShadow:'0 4px 18px rgba(196,125,14,0.12)'}}>
           <SectionLabel style={{color:C.yellow,marginBottom:6}}>⚠️ Biggest Opportunity</SectionLabel>
           <p style={{fontSize:14,color:C.text,fontWeight:500,marginBottom:3}}>{PAGE_TYPE_EMOJI[biggestOpp.page_type]} {biggestOpp.page_path}</p>
           <p style={{fontSize:11,color:C.textMuted}}>{biggestOpp.drop_off_score}% drop-off · {biggestOpp.views_7d||0} views/week</p>
@@ -1489,7 +1467,7 @@ function NetworkPage({ runs, siteNetwork, websiteUrl }) {
               </div>
 
               {prUrl && (
-                <a href={prUrl} target="_blank" rel="noreferrer" style={{
+                <a href={prUrl} target="_blank" rel="noreferrer" className="v-press" style={{
                   display: 'inline-flex', alignItems: 'center', gap: 7,
                   background: C.yellowSoft, border: `1px solid ${C.yellowMid}`, borderRadius: 8,
                   padding: '9px 13px', fontSize: 12, color: C.yellow, fontWeight: 500, textDecoration: 'none',
@@ -1566,10 +1544,12 @@ function GuardrailsPage({subscriptionId}) {
           <label style={lbl}>Additional rules</label>
           <textarea value={customRules} onChange={e=>setCustomRules(e.target.value)} placeholder="Any other instructions for the agent..." rows={3} style={{...inp,resize:'vertical',lineHeight:1.6}}/>
         </div>
-        <button className="btn" onClick={handleSave} disabled={saving} style={{
+        <button className="btn v-press" onClick={handleSave} disabled={saving} style={{
           background:saved?C.green:C.accent,color:'#fff',borderRadius:8,
           padding:'12px',fontSize:14,fontFamily:'DM Sans,sans-serif',fontWeight:500,
           opacity:saving?0.7:1,transition:'background .25s',
+          boxShadow:saved?'none':'0 3px 14px rgba(42,92,69,0.22)',
+          alignSelf:'flex-start',minWidth:170,
         }}>
           {saving?'Saving…':saved?'✓ Saved':'Save Guardrails'}
         </button>
@@ -1665,17 +1645,18 @@ function DNAPage({ subscriptionId }) {
       </p>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
-        <button onClick={generatePlaybook} disabled={dna.length === 0} style={{
-          background: C.accent, color: '#fff', border: 'none', borderRadius: 7,
-          padding: '8px 16px', fontSize: 12, fontFamily: 'DM Sans,sans-serif', fontWeight: 400,
+        <button className="v-press" onClick={generatePlaybook} disabled={dna.length === 0} style={{
+          background: C.accent, color: '#fff', border: 'none', borderRadius: 8,
+          padding: '10px 18px', fontSize: 13, fontFamily: 'DM Sans,sans-serif', fontWeight: 500,
           cursor: dna.length === 0 ? 'not-allowed' : 'pointer', opacity: dna.length === 0 ? 0.5 : 1,
+          boxShadow: dna.length === 0 ? 'none' : '0 3px 14px rgba(42,92,69,0.22)',
         }}>
           📖 Generate Website Playbook
         </button>
       </div>
 
       {dna.length === 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
+        <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
           <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300 }}>
             No DNA recorded yet. Entries appear after the agent's fixes are deployed, evaluated, or rolled back.
           </p>
@@ -1687,7 +1668,7 @@ function DNAPage({ subscriptionId }) {
       {renderGroup('Pending',                  C.yellow,C.yellowSoft,grouped.pending, true)}
 
       {dna.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '16px 18px', marginTop: 18 }}>
+        <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: '16px 18px', marginTop: 18 }}>
           <p style={{ fontSize: 12, fontWeight: 500, color: C.text, marginBottom: 12 }}>Timeline</p>
           {dna.slice(0, 30).map(d => {
             const badgeColor = d.outcome === 'success' ? C.green : d.outcome === 'rollback' ? C.red : C.yellow
@@ -1890,7 +1871,7 @@ function StripeSubscriptionPanel({ navigate }) {
           <div style={{ background:'rgba(26,25,22,0.03)', border:`1px solid ${C.border}`, borderRadius:9, padding:'14px', textAlign:'center' }}>
             <p style={{ fontSize:13, color:C.textMuted, fontWeight:500, marginBottom:4 }}>Subscription ended</p>
             <p style={{ fontSize:12, color:C.textMuted, fontWeight:300, marginBottom:12 }}>Your agent is paused. Start a new subscription to resume weekly improvements.</p>
-            <button onClick={subscribeNow} disabled={subscribeLoading} className="btn" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, opacity: subscribeLoading ? 0.7 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer' }}>
+            <button onClick={subscribeNow} disabled={subscribeLoading} className="btn v-press" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, opacity: subscribeLoading ? 0.7 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer' }}>
               {subscribeLoading ? 'Opening Stripe…' : 'Restart subscription →'}
             </button>
           </div>
@@ -1900,7 +1881,7 @@ function StripeSubscriptionPanel({ navigate }) {
           <div style={{ background:'rgba(26,25,22,0.03)', border:`1px solid ${C.border}`, borderRadius:9, padding:'14px', textAlign:'center' }}>
             <p style={{ fontSize:13, color:C.textMuted, fontWeight:300, marginBottom:12 }}>No active subscription. Unlock the Growth Agent to start getting weekly improvements.</p>
             <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
-              <button onClick={subscribeNow} disabled={subscribeLoading} className="btn" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, opacity: subscribeLoading ? 0.7 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer' }}>
+              <button onClick={subscribeNow} disabled={subscribeLoading} className="btn v-press" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, opacity: subscribeLoading ? 0.7 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer' }}>
                 {subscribeLoading ? 'Opening Stripe…' : 'Start free trial — €29/mo after →'}
               </button>
             </div>
@@ -2005,7 +1986,7 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
         </div>
 
         <div style={{display:'flex',alignItems:'center',gap:12,marginTop:12,flexWrap:'wrap'}}>
-          <button className="btn" onClick={savePublic} disabled={savingPublic} style={{
+          <button className="btn v-press" onClick={savePublic} disabled={savingPublic} style={{
             background:C.accent,color:'#fff',border:'none',borderRadius:7,padding:'8px 16px',
             fontSize:12,fontFamily:'DM Sans,sans-serif',fontWeight:400,opacity:savingPublic?0.6:1,
           }}>{savingPublic?'Saving…':'Save'}</button>
@@ -2030,7 +2011,7 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
               border:`1px solid ${C.border}`,borderRadius:6,background:'#fff',outline:'none',marginBottom:8,display:'block'}} />
         ))}
         <div style={{display:'flex',alignItems:'center',gap:12,marginTop:8,flexWrap:'wrap'}}>
-          <button className="btn" onClick={saveCompetitors} disabled={savingComp} style={{
+          <button className="btn v-press" onClick={saveCompetitors} disabled={savingComp} style={{
             background:C.accent,color:'#fff',border:'none',borderRadius:7,padding:'8px 16px',
             fontSize:12,fontFamily:'DM Sans,sans-serif',fontWeight:400,opacity:savingComp?0.6:1,
           }}>{savingComp?'Saving…':'Save competitors'}</button>
@@ -2492,14 +2473,14 @@ export default function AgentDashboard({ navigate }) {
 
   if(authLoading) return (
     <>
-      <style>{CSS}</style>
+      <style>{CSS + MOTION_CSS}</style>
       <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center'}}><Spinner size={24}/></div>
     </>
   )
 
   return (
     <>
-      <style>{CSS}</style>
+      <style>{CSS + MOTION_CSS}</style>
       {selected&&<RunDetail run={selected} onClose={()=>setSelected(null)}/>}
       {showDeleteConfirm&&(
         <DeleteConfirmModal
@@ -2590,28 +2571,20 @@ export default function AgentDashboard({ navigate }) {
             ))}
           </nav>
 
+          {/* Global agent-status chip. Pause/Resume lives on Overview's sidebar +
+              Settings; it was removed from here to keep one control per surface. */}
           <div style={{padding:'12px 16px',borderTop:`1px solid ${C.border}`}}>
-            {subscription ? (
+            {subscription && (
               <div style={{display:'flex',alignItems:'center',gap:7}}>
                 <span className={runs.some(r=>r.status==='running')?'pulse-dot':''} style={{
                   width:6,height:6,borderRadius:'50%',display:'inline-block',
                   background:subscription.status==='paused'?C.yellow:runs.some(r=>r.status==='running')?C.blue:C.accent,
                   flexShrink:0,
                 }}/>
-                <div>
-                  <p style={{fontSize:11,color:C.text,fontWeight:400}}>Agent {subscription.status==='paused'?'paused':runs.some(r=>r.status==='running')?'running':'active'}</p>
-                  <p style={{fontSize:9,color:C.textLight}}>Autonomous mode</p>
-                </div>
+                <p style={{fontSize:11,color:C.textMuted,fontWeight:400}}>
+                  Agent {subscription.status==='paused'?'paused':runs.some(r=>r.status==='running')?'running':'active'}
+                </p>
               </div>
-            ) : null}
-            {subscription&&(
-              <button className="btn" onClick={handleTogglePause} disabled={actionLoading} style={{
-                width:'100%',marginTop:8,padding:'6px',borderRadius:6,fontSize:10,
-                background:'transparent',color:C.textMuted,border:`1px solid ${C.border}`,
-                fontFamily:'DM Sans,sans-serif',
-              }}>
-                {subscription.status==='paused'?'▶ Resume':'⏸ Pause'}
-              </button>
             )}
           </div>
         </div>
@@ -2732,15 +2705,8 @@ export default function AgentDashboard({ navigate }) {
                     </button>
                   </div>
                 )}
-                {activePage==='overview'&&(
-                  <div className="fade-up" style={{marginBottom:20}}>
-                    <SectionLabel style={{color:C.accent,marginBottom:6}}>Growth Agent Dashboard</SectionLabel>
-                    <h1 style={{fontFamily:'Instrument Serif,serif',fontWeight:400,fontSize:'clamp(24px,3vw,38px)',letterSpacing:'-.02em',lineHeight:1.1,color:C.text,marginBottom:4}}>
-                      Autonomous growth <em style={{fontStyle:'italic',color:C.accent}}>optimization.</em>
-                    </h1>
-                    <p style={{fontSize:12,color:C.textLight}}>Your agent analyzes, fixes and improves your website — continuously. · Auto-refreshes every 30s</p>
-                  </div>
-                )}
+                {/* Marketing hero ("Autonomous growth optimization.") removed from
+                    the logged-in Overview — the header bar already labels the view. */}
 
                 {activePage==='overview'&&(
                   <OverviewPage
@@ -2793,9 +2759,8 @@ export default function AgentDashboard({ navigate }) {
 
                 {activePage==='guardrails'&&(
                   <div className="fade-up">
-                    <p style={{fontSize:12,color:C.textMuted,lineHeight:1.7,marginBottom:14}}>
-                      These rules are enforced on every run — the agent will not make changes that violate them.
-                    </p>
+                    {/* Intro copy lives inside GuardrailsPage; the duplicate that
+                        used to sit here was removed. */}
                     <GuardrailsPage subscriptionId={subscription?.id}/>
                   </div>
                 )}

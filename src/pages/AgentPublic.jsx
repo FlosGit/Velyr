@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { MOTION_CSS, CountUp } from '../lib/motion.jsx'
 
 const C = {
   bg:        '#f7f4ef',
@@ -199,7 +200,7 @@ export default function AgentPublic({ navigate, slug }) {
         <div style={{ textAlign: 'center', maxWidth: 420 }}>
           <p style={{ fontFamily: 'Cormorant Garant, serif', fontSize: 36, fontWeight: 300, color: C.text, marginBottom: 12 }}>Not found</p>
           <p style={{ fontSize: 14, color: C.textLight, fontWeight: 300, marginBottom: 24 }}>This public agent timeline doesn't exist or has been made private.</p>
-          <button onClick={() => navigate('/')} style={{ background: C.text, color: '#fff', border: 'none', borderRadius: 10, padding: '12px 24px', fontSize: 13, fontFamily: 'Jost, sans-serif', fontWeight: 500, cursor: 'pointer' }}>
+          <button className="v-press" onClick={() => navigate('/')} style={{ background: C.text, color: '#fff', border: 'none', borderRadius: 10, padding: '12px 24px', fontSize: 13, fontFamily: 'Jost, sans-serif', fontWeight: 500, cursor: 'pointer' }}>
             ← Back to Velyr
           </button>
         </div>
@@ -223,6 +224,7 @@ export default function AgentPublic({ navigate, slug }) {
           .ap-nav-cta { font-size: 11px !important; padding: 7px 12px !important; }
           .ap-main { padding: 40px 16px 64px !important; }
         }
+        ${MOTION_CSS}
       `}</style>
 
       {/* Sticky nav */}
@@ -234,7 +236,7 @@ export default function AgentPublic({ navigate, slug }) {
         <a href="/" onClick={(e) => { e.preventDefault(); navigate('/') }} style={{ fontFamily: 'Cormorant Garant, serif', fontSize: 18, fontWeight: 400, color: C.text, textDecoration: 'none', letterSpacing: '-.01em' }}>
           Velyr
         </a>
-        <button className="ap-nav-cta" onClick={() => navigate('/agent/register')} style={{
+        <button className="ap-nav-cta v-press" onClick={() => navigate('/agent/register')} style={{
           background: C.accent, color: '#fff', border: 'none', borderRadius: 8,
           padding: '8px 16px', fontSize: 12, fontFamily: 'Jost, sans-serif', fontWeight: 500, cursor: 'pointer',
           whiteSpace: 'nowrap',
@@ -262,9 +264,9 @@ export default function AgentPublic({ navigate, slug }) {
         {bounceSeries.length >= 2 && <LineChart data={bounceSeries} label="Site-wide bounce rate over time" color={C.accent} suffix="%" invertColor />}
 
         {/* Runs */}
-        <div style={{ marginTop: 36, marginBottom: 36 }}>
+        <div className="v-stagger" style={{ marginTop: 36, marginBottom: 36 }}>
           <p style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: C.textFaint, fontWeight: 500, marginBottom: 16 }}>
-            Activity ({data?.runs?.length || 0} runs)
+            Activity (<CountUp value={data?.runs?.length || 0} /> runs)
           </p>
           {(!data?.runs || data.runs.length === 0)
             ? <p style={{ fontSize: 13, color: C.textLight, fontWeight: 300 }}>No runs yet — check back after the next Monday run.</p>
@@ -317,7 +319,7 @@ export default function AgentPublic({ navigate, slug }) {
               €29 / month · cancel anytime
             </p>
           </div>
-          <button onClick={() => navigate('/agent/register')} style={{
+          <button className="v-press" onClick={() => navigate('/agent/register')} style={{
             background: C.bg, color: C.text, border: 'none', borderRadius: 10,
             padding: '14px 26px', fontSize: 14, fontFamily: 'Jost, sans-serif', fontWeight: 500, cursor: 'pointer', letterSpacing: '.02em',
           }}>
