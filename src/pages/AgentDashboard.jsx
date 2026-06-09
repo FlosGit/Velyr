@@ -1573,6 +1573,15 @@ function GuardrailsPage({subscriptionId}) {
 
 // ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
 // ─── BUSINESS DNA PAGE (Part 5) ──────────────────────────────────────────────
+// Rotating status lines shown while the playbook is being written.
+const PLAYBOOK_STEPS = [
+  'Reading your Business DNA…',
+  'Finding what works for your site…',
+  'Learning from past rollbacks…',
+  'Drafting your 90-day plan…',
+  'Polishing the recommendations…',
+]
+
 function DNAPage({ subscriptionId }) {
   const [dna, setDna]               = useState([])
   const [loading, setLoading]       = useState(true)
@@ -1581,6 +1590,7 @@ function DNAPage({ subscriptionId }) {
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError]     = useState(null)
   const [copied, setCopied]         = useState(false)
+  const [genStep, setGenStep]       = useState(0)
 
   useEffect(() => {
     if (!subscriptionId) return
@@ -1591,6 +1601,13 @@ function DNAPage({ subscriptionId }) {
       .order('created_at', { ascending: false }).limit(100)
       .then(({ data }) => { setDna(data || []); setLoading(false) })
   }, [subscriptionId])
+
+  // Cycle the "what's happening" status line every ~2.2s while generating.
+  useEffect(() => {
+    if (!generating) { setGenStep(0); return }
+    const id = setInterval(() => setGenStep(s => (s + 1) % PLAYBOOK_STEPS.length), 2200)
+    return () => clearInterval(id)
+  }, [generating])
 
   const grouped = useMemo(() => {
     const out = { success: {}, rollback: {}, pending: {} }
@@ -1716,14 +1733,35 @@ function DNAPage({ subscriptionId }) {
             <p style={{ fontFamily: 'Instrument Serif,serif', fontSize: 26, fontWeight: 400, color: C.text, marginBottom: 18, letterSpacing: '-.01em' }}>
               90-day strategic recommendations
             </p>
-            {generating && <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300 }}>Generating playbook…</p>}
+            {generating && (
+              <div>
+                {/* "Writing" skeleton — shimmering placeholder lines. */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginBottom: 18 }}>
+                  {['94%','100%','82%','97%','68%','90%'].map((w, i) => (
+                    <div key={i} className="v-shimmer" style={{ height: 11, width: w, borderRadius: 6 }} />
+                  ))}
+                </div>
+                {/* Rotating status line — re-keyed so it fades in on each change. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <Spinner size={13} />
+                  <p key={genStep} className="v-rise" style={{ fontSize: 13, color: C.textMuted, fontWeight: 400 }}>
+                    {PLAYBOOK_STEPS[genStep]}
+                  </p>
+                </div>
+              </div>
+            )}
             {genError   && <p style={{ fontSize: 13, color: C.red }}>{genError}</p>}
             {playbook && (
               <>
-                <div style={{ background: 'rgba(26,25,22,0.02)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '20px 22px', fontSize: 13, color: C.text, lineHeight: 1.75, whiteSpace: 'pre-wrap', marginBottom: 14 }}>
-                  {playbook}
+                <div style={{ background: 'rgba(26,25,22,0.02)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '20px 22px', fontSize: 13, color: C.text, lineHeight: 1.75, marginBottom: 14 }}>
+                  {/* Reveal line-by-line (staggered fade-up) instead of one block. */}
+                  {playbook.split('\n').map((line, i) => (
+                    <div key={i} className="v-rise" style={{ whiteSpace: 'pre-wrap', animationDelay: `${Math.min(i * 0.045, 1.4)}s` }}>
+                      {line === '' ? ' ' : line}
+                    </div>
+                  ))}
                 </div>
-                <button onClick={copyPlaybook} style={{
+                <button className="v-press" onClick={copyPlaybook} style={{
                   background: copied ? C.green : C.text, color: '#fff', border: 'none', borderRadius: 7,
                   padding: '8px 16px', fontSize: 12, fontFamily: 'DM Sans,sans-serif', fontWeight: 400, cursor: 'pointer',
                 }}>
@@ -2084,23 +2122,22 @@ function RunDetail({run, onClose}) {
         )}
         <div style={{background:'rgba(26,25,22,0.02)',border:`1px solid ${C.border}`,borderRadius:10,padding:'13px 15px',marginBottom:16}}>
           <SectionLabel style={{marginBottom:12}}>What the agent did</SectionLabel>
-          <div style={{display:'flex',gap:0,overflowX:'auto',paddingBottom:4}}>
+          {/* Wrapping grid (never scrolls horizontally) — stages flow
+              left-to-right then wrap; checkmarks show how far the run got. */}
+          <div style={{display:'flex',flexWrap:'wrap',gap:'12px 12px'}}>
             {AGENT_STEPS.map((step,i)=>{
               const stepI=deriveAgentStep(run), done=i<=stepI, failed=run.status==='failed'&&i===stepI
               return (
-                <div key={step.id} style={{display:'flex',alignItems:'center',gap:0,flexShrink:0}}>
-                  <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
-                    <div style={{
-                      width:24,height:24,borderRadius:'50%',fontSize:11,
-                      background:failed?C.red:done?C.accent:'rgba(26,25,22,0.07)',
-                      border:`1px solid ${failed?C.red:done?C.accent:C.border}`,
-                      display:'flex',alignItems:'center',justifyContent:'center',color:done?'#fff':C.textLight,
-                    }}>
-                      {failed?'✕':done?'✓':''}
-                    </div>
-                    <p style={{fontSize:9,color:done?C.accent:C.textLight,textAlign:'center',maxWidth:54,lineHeight:1.3}}>{step.label}</p>
+                <div key={step.id} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,width:58}}>
+                  <div style={{
+                    width:24,height:24,borderRadius:'50%',fontSize:11,flexShrink:0,
+                    background:failed?C.red:done?C.accent:'rgba(26,25,22,0.07)',
+                    border:`1px solid ${failed?C.red:done?C.accent:C.border}`,
+                    display:'flex',alignItems:'center',justifyContent:'center',color:done?'#fff':C.textLight,
+                  }}>
+                    {failed?'✕':done?'✓':''}
                   </div>
-                  {i<AGENT_STEPS.length-1&&<div style={{width:20,height:1,background:done?C.accent:C.border,opacity:0.35,flexShrink:0,marginBottom:18}}/>}
+                  <p style={{fontSize:9,color:done?C.accent:C.textLight,textAlign:'center',lineHeight:1.3}}>{step.label}</p>
                 </div>
               )
             })}

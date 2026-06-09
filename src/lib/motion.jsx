@@ -23,6 +23,9 @@ export function prefersReducedMotion() {
 export const MOTION_CSS = `
   @keyframes vBarGrow { from { width: 0; } to { width: var(--v-w, 100%); } }
   @keyframes vFadeUp  { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes vShimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+  /* Skeleton "writing" shimmer — a green sweep across a placeholder bar. */
+  .v-shimmer { background: linear-gradient(90deg, rgba(42,92,69,0.06) 25%, rgba(42,92,69,0.16) 37%, rgba(42,92,69,0.06) 63%); background-size: 400% 100%; animation: vShimmer 1.35s ease infinite; }
   /* Bar fill-on-appear: set --v-w to the target width, add .v-bar-fill. */
   .v-bar-fill { animation: vBarGrow .8s cubic-bezier(.22,.61,.36,1) both; }
   .v-rise     { animation: vFadeUp .45s cubic-bezier(.22,.61,.36,1) both; }
