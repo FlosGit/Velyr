@@ -166,17 +166,16 @@ const CSS = `
   @media (max-width: 600px) {
     .dash-content [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
   }
-  /* Grid-blowout guard: collapsed single-column tracks default to
-     minmax(auto,1fr), so a child's min-content (nowrap text, file chips) can
-     force the card wider than the viewport — invisible only because body
-     overflow-x is hidden. min-width:0 lets the track shrink to the container.
-     Applies to every mobile grid (incl. KPI 2×2). */
-  @media (max-width: 900px) {
-    .dash-content [style*="grid-template-columns"] > * { min-width: 0 !important; }
-  }
-  /* Overview: stack main column + contextual sidebar instead of crushing main
-     to a sliver. The sidebar (next-run / steps / performance) drops below. */
-  @media (max-width: 768px) {
+  /* Grid-blowout guard (ALL widths): grid tracks default to min-content, so a
+     child's min-content (nowrap text, file chips, insight cards) can force the
+     grid wider than its container and make .dash-content scroll sideways.
+     min-width:0 lets every track shrink to fit. */
+  .dash-content [style*="grid-template-columns"] > * { min-width: 0; }
+  /* Overview: below ~1100px the 2-col main grid + 272px sidebar no longer fit
+     side-by-side (it caused a horizontal scroll + clipped Top Insights), so
+     stack them — the sidebar (next-run / steps / performance) drops full-width
+     below the main column. */
+  @media (max-width: 1100px) {
     .dash-overview-row { flex-direction: column !important; }
     .dash-overview-row > * { width: 100% !important; min-width: 0 !important; }
     .dash-ctx-sidebar { width: 100% !important; position: static !important; top: auto !important; }
