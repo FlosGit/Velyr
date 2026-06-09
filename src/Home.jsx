@@ -3,6 +3,8 @@ import { demoData } from './data/demoData'
 import SubscribeButton from './components/SubscribeButton.jsx'
 import SiteNetwork from './components/SiteNetwork.jsx'
 import { mockSiteNetworkData } from './data/mockSiteNetwork.js'
+import { CountUp, MOTION_CSS } from './lib/motion.jsx'
+import HeroLoop from './components/HeroLoop.jsx'
 
 const C = {
   bg:          '#f7f4ef',
@@ -20,7 +22,7 @@ const C = {
 }
 
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garant:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&family=DM+Mono:wght@400&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Instrument+Serif:ital@0;1&family=Jost:wght@300;400;500&family=DM+Mono:wght@400&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; }
   body { background: #f7f4ef; color: #1c1917; font-family: 'Jost', sans-serif; font-weight: 300; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
@@ -63,6 +65,10 @@ const CSS = `
   @keyframes tabIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
   .dp-tab { animation: tabIn .3s cubic-bezier(.4,0,.2,1); }
 
+  /* "How it works" scrollytelling anchor — pins the value/CTA column while the
+     schedule scrolls beside it (native sticky, no scroll-jacking). */
+  .hiw-anchor { position: sticky; top: 84px; align-self: start; }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -97,6 +103,9 @@ const CSS = `
 
   @media (max-width: 900px) {
     .agent-bottom-grid { grid-template-columns: 1fr !important; }
+    .hero-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
+    .hero-visual { order: 2; max-width: 360px; margin: 8px auto 0 !important; }
+    .hiw-anchor { position: static !important; top: auto !important; }
   }
   @media (max-width: 768px) {
     .dash-preview-shell .dp-leftnav { display: none !important; }
@@ -106,6 +115,7 @@ const CSS = `
     .dash-preview-shell .dp-rightsb { width: 100% !important; min-width: 0 !important; max-width: none !important; flex-basis: auto !important; }
     .dash-preview-shell .dp-kpis { grid-template-columns: repeat(2, 1fr) !important; }
     .dash-preview-shell .dp-2col { flex-direction: column !important; }
+    .dash-preview-shell .dp-mc-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
     .dash-preview-shell .dp-2col > div { flex: 1 1 100% !important; width: 100% !important; max-width: 100% !important; }
     .dash-preview-shell code { display: none !important; }
   }
@@ -138,6 +148,7 @@ const CSS = `
     .btn-primary:hover:not(:disabled) { transform: none !important; }
     .btn-ghost:hover { transform: none !important; }
   }
+  ${MOTION_CSS}
 `
 
 // Reduced-motion: evaluated once at module load. Drives both useReveal (start
@@ -220,7 +231,7 @@ function Nav({ navigate }) {
       }}>
         <div onClick={() => navigate('/')} style={{ display:'flex', alignItems:'center', gap:9, cursor:'pointer', minWidth:0, flexShrink:1 }}>
           <Logo size={24} />
-          <span className="nav-logo-text" style={{ fontFamily:'Cormorant Garant, serif', fontWeight:500, fontSize:20, color:C.text, letterSpacing:'-.01em' }}>Velyr</span>
+          <span className="nav-logo-text" style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:500, fontSize:20, color:C.text, letterSpacing:'-.01em' }}>Velyr</span>
         </div>
         {/* Centered link — absolutely positioned so the left logo and right group stay put.
             Hidden on mobile via .nav-agent-link; appears in the mobile panel below. */}
@@ -322,29 +333,40 @@ function Hero({ navigate }) {
     <section className="hero-section" style={{ paddingTop:120, paddingBottom:64, paddingLeft:24, paddingRight:24, background:C.bg }}>
       <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ maxWidth:1060, margin:'0 auto' }}>
 
-        {/* Brand eyebrow — calm, static (no live-activity implication) */}
-        <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:18 }}>
-          <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
-          <span style={{ fontSize:11, letterSpacing:'.16em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>AI Growth Agent · for React, Next.js & Vite</span>
+        <div className="hero-grid" style={{ display:'grid', gridTemplateColumns:'1.05fr 0.95fr', gap:48, alignItems:'center' }}>
+
+          {/* LEFT — copy */}
+          <div className="hero-copy">
+            {/* Brand eyebrow — calm, static (no live-activity implication) */}
+            <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:18 }}>
+              <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
+              <span style={{ fontSize:11, letterSpacing:'.16em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>AI Growth Agent · for React, Next.js & Vite</span>
+            </div>
+
+            <h1 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(36px, 5.4vw, 60px)', lineHeight:1.08, letterSpacing:'-.025em', color:C.text }}>
+              Conversion fixes, <em style={{ fontStyle:'italic', color:C.warm }}>shipped weekly</em>.
+            </h1>
+
+            <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 18px)', color:C.textMuted, maxWidth:520, marginTop:22, lineHeight:1.6 }}>
+              An AI agent that finds your site's #1 conversion problem each week and writes the fix as a Pull Request. You approve it with one Telegram reply — and if the numbers drop, <em style={{ fontStyle:'italic', color:C.warm }}>it reverts itself</em>.
+            </p>
+
+            <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:32, flexWrap:'wrap', alignItems:'center' }}>
+              <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
+              <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>See how it works</button>
+            </div>
+            <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:14, letterSpacing:'.01em' }}>
+              14-day free trial · You approve every change · Cancel anytime
+            </p>
+          </div>
+
+          {/* RIGHT — the living growth loop (echoes the dashboard's SiteNetwork) */}
+          <div className="hero-visual" style={{ display:'flex', justifyContent:'center', alignItems:'center' }}>
+            <HeroLoop />
+          </div>
         </div>
 
-        <h1 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(36px, 6vw, 64px)', lineHeight:1.1, letterSpacing:'-.025em', color:C.text }}>
-          Conversion fixes, <em style={{ fontStyle:'italic', color:C.warm }}>shipped weekly</em>.
-        </h1>
-
-        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 19px)', color:C.textMuted, maxWidth:640, marginTop:24, lineHeight:1.6 }}>
-          An AI agent that finds your site's #1 conversion problem each week and writes the fix as a Pull Request. You approve it with one Telegram reply — and if the numbers drop, <em style={{ fontStyle:'italic', color:C.warm }}>it reverts itself</em>.
-        </p>
-
-        <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:36, flexWrap:'wrap', alignItems:'center' }}>
-          <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
-          <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>See how it works</button>
-        </div>
-        <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:14, letterSpacing:'.01em' }}>
-          14-day free trial · You approve every change · Cancel anytime
-        </p>
-
-        <div className="hero-stats" style={{ marginTop:52, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
+        <div className="hero-stats" style={{ marginTop:44, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
           {flow.map((s, i) => (
             <Fragment key={s.n}>
               <div style={{ display:'flex', alignItems:'center', gap:11, border:`1px solid ${C.border}`, borderRadius:12, background:C.bgCard, padding:'12px 16px' }}>
@@ -359,6 +381,44 @@ function Hero({ navigate }) {
         </div>
       </div>
     </section>
+  )
+}
+
+// One phase block of the weekly schedule, revealing as it scrolls into view.
+// Used by the "How it works" sticky scrollytelling (each phase advances as you
+// scroll past the pinned value/CTA anchor).
+function SchedulePhase({ phase }) {
+  const [ref, vis] = useReveal()
+  return (
+    <div ref={ref} style={{
+      background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'22px 26px',
+      opacity: vis ? 1 : 0, transform: vis ? 'none' : 'translateY(20px)',
+      transition: 'opacity .6s cubic-bezier(.22,.61,.36,1), transform .6s cubic-bezier(.22,.61,.36,1)',
+    }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
+        <div style={{ width:8, height:8, borderRadius:'50%', background:phase.color, flexShrink:0 }} />
+        <span style={{ fontSize:13, fontWeight:500, color:phase.color, letterSpacing:'.02em' }}>{phase.phase}</span>
+        <div style={{ flex:1, height:1, background:C.border }} />
+      </div>
+      <div style={{ paddingLeft:18, display:'flex', flexDirection:'column', gap:0 }}>
+        {phase.steps.map((step, si) => (
+          <div key={si} style={{
+            display:'flex', gap:14, alignItems:'flex-start',
+            paddingBottom: si < phase.steps.length - 1 ? 14 : 0,
+            marginBottom: si < phase.steps.length - 1 ? 14 : 0,
+            borderBottom: si < phase.steps.length - 1 ? `1px dashed rgba(28,25,23,0.07)` : 'none',
+          }}>
+            <div style={{ width:56, flexShrink:0, paddingTop:1 }}>
+              <span style={{ fontSize:11, color:C.textLight, fontWeight:300, fontFamily:'DM Mono, monospace' }}>{step.time}</span>
+            </div>
+            <div style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
+              <span style={{ fontSize:14, lineHeight:1, marginTop:1 }}>{step.icon}</span>
+              <p style={{ fontSize:13, color:C.text, fontWeight:300, lineHeight:1.55 }}>{step.text}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -403,7 +463,7 @@ function GrowthAgentSection({ navigate }) {
             <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
             <span style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>How it works</span>
           </div>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(32px, 5vw, 60px)', letterSpacing:'-.025em', lineHeight:1.08, color:C.text, marginBottom:20 }}>
+          <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(32px, 5vw, 60px)', letterSpacing:'-.025em', lineHeight:1.08, color:C.text, marginBottom:20 }}>
             Your website,<br />
             <em style={{ fontStyle:'italic', color:C.warm }}>always improving.</em>
           </h2>
@@ -418,48 +478,18 @@ function GrowthAgentSection({ navigate }) {
         {/* How it works + CTA side by side */}
         <div className="agent-bottom-grid" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
 
-          <div style={{
-            background:'#fff', border:`1px solid ${C.border}`,
-            borderRadius:16, padding:'32px 36px',
-            opacity: visible ? 1 : 0,
-            transform: visible ? 'none' : 'translateY(16px)',
-            transition: 'all .6s ease .3s',
-          }}>
-            <p style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:C.textLight, fontWeight:400, marginBottom:28 }}>Weekly schedule</p>
+          <div className="hiw-schedule" style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            <p style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:C.textLight, fontWeight:400, marginBottom:2 }}>Weekly schedule</p>
             {timelinePhases.map((phase, pi) => (
-              <div key={pi} style={{ marginBottom: pi < timelinePhases.length - 1 ? 28 : 0 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
-                  <div style={{ width:8, height:8, borderRadius:'50%', background:phase.color, flexShrink:0 }} />
-                  <span style={{ fontSize:13, fontWeight:500, color:phase.color, letterSpacing:'.02em' }}>{phase.phase}</span>
-                  <div style={{ flex:1, height:1, background:C.border }} />
-                </div>
-                <div style={{ paddingLeft:18, display:'flex', flexDirection:'column', gap:0 }}>
-                  {phase.steps.map((step, si) => (
-                    <div key={si} style={{
-                      display:'flex', gap:14, alignItems:'flex-start',
-                      paddingBottom: si < phase.steps.length - 1 ? 14 : 0,
-                      marginBottom: si < phase.steps.length - 1 ? 14 : 0,
-                      borderBottom: si < phase.steps.length - 1 ? `1px dashed rgba(28,25,23,0.07)` : 'none',
-                    }}>
-                      <div style={{ width:56, flexShrink:0, paddingTop:1 }}>
-                        <span style={{ fontSize:11, color:C.textLight, fontWeight:300, fontFamily:'DM Mono, monospace' }}>{step.time}</span>
-                      </div>
-                      <div style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
-                        <span style={{ fontSize:14, lineHeight:1, marginTop:1 }}>{step.icon}</span>
-                        <p style={{ fontSize:13, color:C.text, fontWeight:300, lineHeight:1.55 }}>{step.text}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <SchedulePhase key={pi} phase={phase} />
             ))}
           </div>
 
-          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          <div className="hiw-anchor" style={{ display:'flex', flexDirection:'column', gap:12 }}>
             {[
               { value:'Every Monday', label:'Agent runs automatically', sub:'no manual work needed' },
-              { value:'48h', label:'Auto-rollback window', sub:'reverts if metrics drop' },
-              { value:'100%', label:'Approval stays with you', sub:'nothing ships without your OK' },
+              { value:'48h', num:48, format:(n)=>`${Math.round(n)}h`, label:'Auto-rollback window', sub:'reverts if metrics drop' },
+              { value:'100%', num:100, format:(n)=>`${Math.round(n)}%`, label:'Approval stays with you', sub:'nothing ships without your OK' },
             ].map((stat, i) => (
               <div key={i} style={{
                 background:'#fff', border:`1px solid ${C.border}`, borderRadius:14,
@@ -468,7 +498,7 @@ function GrowthAgentSection({ navigate }) {
                 transform: visible ? 'none' : 'translateX(16px)',
                 transition: `all .5s ease ${0.35 + i * 0.1}s`,
               }}>
-                <p style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:30, color:C.accent, letterSpacing:'-.02em', lineHeight:1, marginBottom:6 }}>{stat.value}</p>
+                <p style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:30, color:C.accent, letterSpacing:'-.02em', lineHeight:1, marginBottom:6 }}>{stat.num != null ? <CountUp value={visible ? stat.num : 0} format={stat.format} /> : stat.value}</p>
                 <p style={{ fontSize:13, fontWeight:400, color:C.text, marginBottom:2 }}>{stat.label}</p>
                 <p style={{ fontSize:12, color:C.textLight, fontWeight:300 }}>{stat.sub}</p>
               </div>
@@ -480,7 +510,7 @@ function GrowthAgentSection({ navigate }) {
               transform: visible ? 'none' : 'translateY(12px)',
               transition: 'all .6s ease .65s',
             }}>
-              <p style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:24, color:'#fff', letterSpacing:'-.015em', marginBottom:6 }}>Ready to let the agent work?</p>
+              <p style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:24, color:'#fff', letterSpacing:'-.015em', marginBottom:6 }}>Ready to let the agent work?</p>
               <p style={{ fontSize:13, color:'rgba(247,244,239,0.6)', fontWeight:300, marginBottom:20 }}>Set up in a few minutes. 14-day free trial, then €29/month. Cancel anytime.</p>
               <div style={{ display:'flex', gap:8, flexDirection:'column' }}>
                 <button onClick={() => navigate('/agent/register')} style={{
@@ -509,6 +539,80 @@ function GrowthAgentSection({ navigate }) {
   )
 }
 
+// ─── Mock "mission control" ───────────────────────────────────────────────────
+// The elevated pending-PR star — mirrors the real dashboard's PRMissionControl
+// (Awaiting approval · Problem / Fix / Expected impact + confidence + rollback).
+// Serif numerals use Instrument Serif to match the live dashboard exactly.
+function MockMissionControl({ run, DC }) {
+  const a = run.analysis_result || {}
+  const conf = a.confidence_score
+  const lbl = { fontSize:9.5, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600, color:DC.textLight, marginBottom:6 }
+  return (
+    <div style={{
+      background:DC.bgCard, border:`1px solid ${DC.yellowMid}`, borderRadius:12, overflow:'hidden',
+      boxShadow:`0 10px 34px rgba(196,125,14,0.13), 0 0 0 3px ${DC.yellowSoft}`,
+    }}>
+      <div style={{ background:DC.yellowSoft, borderBottom:`1px solid ${DC.yellowMid}`, padding:'9px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ width:7, height:7, borderRadius:'50%', background:DC.yellow, display:'inline-block', flexShrink:0, animation:'pulse 2s ease-in-out infinite' }}/>
+          <span style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600, color:DC.yellow }}>Awaiting your approval · PR #{run.pr_number}</span>
+        </div>
+        <div style={{ display:'flex', gap:7, flexWrap:'wrap' }}>
+          <span style={{ fontSize:10.5, color:DC.accent, background:DC.accentSoft, border:`1px solid ${DC.accentMid}`, borderRadius:6, padding:'3px 9px', fontWeight:500 }}>View on GitHub ↗</span>
+          <span style={{ fontSize:10.5, color:DC.yellow, background:DC.yellowSoft, border:`1px solid ${DC.yellowMid}`, borderRadius:6, padding:'3px 9px' }}>Reply <code style={{ fontFamily:'DM Mono,monospace', fontSize:9.5 }}>YES</code> / <code style={{ fontFamily:'DM Mono,monospace', fontSize:9.5 }}>NO</code> on Telegram</span>
+        </div>
+      </div>
+      <div className="dp-mc-grid" style={{ padding:'15px 16px', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16 }}>
+        <div>
+          <p style={lbl}>Problem identified</p>
+          <p style={{ fontSize:12.5, fontWeight:500, color:DC.text, lineHeight:1.45, marginBottom:5 }}>{a.problem}</p>
+          <p style={{ fontSize:10.5, color:DC.textMuted, lineHeight:1.5 }}>{a.data_insight}</p>
+        </div>
+        <div>
+          <p style={lbl}>Fix applied</p>
+          <p style={{ fontSize:11.5, color:DC.text, lineHeight:1.45, marginBottom:8 }}>{a.solution}</p>
+          <code style={{ fontSize:10, color:DC.accent, background:DC.accentSoft, padding:'3px 7px', borderRadius:5, border:`1px solid ${DC.accentMid}`, display:'block', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontFamily:'DM Mono,monospace' }}>{a.file_to_edit}</code>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:9 }}>
+          <p style={{ ...lbl, marginBottom:0 }}>Expected impact</p>
+          <div style={{ display:'flex', alignItems:'baseline', gap:6 }}>
+            <span style={{ fontFamily:'Instrument Serif, serif', fontSize:30, color:DC.green, lineHeight:1 }}>{a.expected_improvement}</span>
+            <span style={{ fontSize:10.5, color:DC.textMuted }}>conversion</span>
+          </div>
+          {conf != null && (
+            <div>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                <span style={{ fontSize:9.5, color:DC.textLight }}>Confidence</span>
+                <span style={{ fontSize:9.5, fontWeight:500, color:DC.text }}>{conf}%</span>
+              </div>
+              <div style={{ height:4, background:'rgba(26,25,22,0.08)', borderRadius:2 }}>
+                <div className="v-bar-fill" style={{ height:'100%', width:`${conf}%`, '--v-w':`${conf}%`, background:conf>75?DC.green:conf>50?DC.yellow:DC.red, borderRadius:2 }}/>
+              </div>
+            </div>
+          )}
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:9.5 }}>
+            <span style={{ color:DC.textLight }}>Auto-rollback</span>
+            <span style={{ color:DC.textMuted }}>48h if no uplift</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Tiny trend sparkline for the accent KPI tile (echoes the real KPIBar's spark).
+function MiniSpark({ data, color, w = 46, h = 20 }) {
+  if (!data || !data.length) return null
+  const max = Math.max(...data, 1)
+  const step = w / Math.max(1, data.length - 1)
+  const pts = data.map((d, i) => `${(i * step).toFixed(1)},${(h - (d / max) * h * 0.8 - 2).toFixed(1)}`).join(' ')
+  return (
+    <svg width={w} height={h} style={{ display:'block', overflow:'visible' }} aria-hidden="true">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+    </svg>
+  )
+}
+
 // ─── Agent Dashboard Preview ───────────────────────────────────────────────────
 function AgentDashboardPreview({ navigate }) {
   const runs          = demoData.runs
@@ -516,16 +620,29 @@ function AgentDashboardPreview({ navigate }) {
   const learnings     = demoData.learnings
   const impactMetrics = demoData.impactMetrics
 
-  const total          = runs.length
-  const deployed       = runs.filter(r => r.status === 'deployed').length
-  const deployRate     = Math.round((deployed / total) * 100)
-  const pendingCount   = runs.filter(r => r.status === 'waiting_approval').length
-  const failedRejected = runs.filter(r => r.status === 'failed' || r.status === 'rejected').length
+  // A pending PR for the elevated mission-control card. Kept LOCAL to this
+  // marketing mock (deliberately NOT added to demoData) so the live
+  // /agent?demo=true dashboard is unaffected. Shape mirrors a real agent_runs row.
+  const pendingRun = {
+    id: 'demo-pending', status: 'waiting_approval', pr_number: 251,
+    pr_url: 'https://github.com/taskloop/web/pull/251',
+    created_at: new Date(Date.now() - 2 * 3600000).toISOString(),
+    analysis_result: {
+      problem: 'Pricing page has no plan comparison table',
+      data_insight: 'Visitors spend 24s on /pricing vs 1m08s on competitor pages with a side-by-side table — 58% leave without reaching a CTA.',
+      solution: 'Add a 3-column plan comparison table with feature checkmarks and a "most popular" highlight above the pricing CTAs.',
+      expected_improvement: '+0.3pp CVR',
+      file_to_edit: 'src/pages/Pricing.tsx',
+      confidence_score: 84,
+    },
+  }
+  const allRuns = [pendingRun, ...runs]
 
-  const bounceImprove = impactMetrics.filter(m => m.value_before && m.value_after)
-  const avgDelta = bounceImprove.length > 0
-    ? Math.round(bounceImprove.reduce((s,m) => s + (m.value_before - m.value_after), 0) / bounceImprove.length)
-    : null
+  const total          = allRuns.length
+  const deployed       = runs.filter(r => r.status === 'deployed').length
+  const deployRate     = Math.round((deployed / runs.length) * 100)
+  const pendingCount   = allRuns.filter(r => r.status === 'waiting_approval').length
+  const failedRejected = runs.filter(r => r.status === 'failed' || r.status === 'rejected').length
 
   const topDropOff = [...funnelPages].filter(p => p.drop_off_score > 0).sort((a,b) => b.drop_off_score - a.drop_off_score)[0]
   const bestImpact = [...impactMetrics].filter(m => m.value_before > m.value_after).sort((a,b) => (b.value_before-b.value_after) - (a.value_before-a.value_after))[0]
@@ -533,6 +650,12 @@ function AgentDashboardPreview({ navigate }) {
 
   const positiveLearnings = learnings.filter(l => l.outcome === 'positive')
   const winRate = learnings.length > 0 ? Math.round((positiveLearnings.length / learnings.length) * 100) : null
+
+  // Outcome-led KPI inputs — mirror the live dashboard's KPIBar
+  // (Fixes Live / Avg Uplift on Wins / Runs), not the old process metrics.
+  const winDeltas = positiveLearnings.filter(l => l.delta).map(l => l.delta)
+  const avgUplift = winDeltas.length ? Math.round(winDeltas.reduce((s,v) => s+v, 0) / winDeltas.length) : null
+  const sparkData = [...runs].slice(0,8).reverse().map(r => r.status === 'deployed' ? 1 : 0.35)
 
   const deployedRuns = runs.filter(r => r.status === 'deployed')
   const avgConvNum = deployedRuns.length > 0
@@ -613,10 +736,9 @@ function AgentDashboardPreview({ navigate }) {
   const inProgressIdx = AGENT_STEPS.length - 1 // last step (Sending notification) is blue / in-progress
 
   const kpis = [
-    { label:'Total Runs',      value: total,            sub: 'All processed',     accent: false },
-    { label:'Fixes Deployed',  value: deployed,         sub: '+1 this week',      accent: true  },
-    { label:'Deploy Rate',     value: `${deployRate}%`, sub: 'On track',          accent: false },
-    { label:'Avg. Bounce Δ',   value: avgDelta != null ? `−${avgDelta}%` : '—', sub:'After agent fixes', accent: false },
+    { label:'Fixes Live',          value: deployed,                                  sub:'+1 this week',                            accent: true,  spark: true },
+    { label:'Avg Uplift on Wins',  value: avgUplift != null ? `+${avgUplift}%` : '—', sub:`across ${winDeltas.length} winning fixes`, accent: false },
+    { label:'Runs',                value: total,                                      sub:'Analyzed since launch',                   accent: false },
   ]
 
   const insights = [
@@ -659,7 +781,7 @@ function AgentDashboardPreview({ navigate }) {
   }
 
   // Run history bar (oldest to latest)
-  const last12 = [...runs].slice(0,12).reverse()
+  const last12 = [...allRuns].slice(0,12).reverse()
 
   return (
     <div className="dash-preview-shell" style={{
@@ -695,7 +817,7 @@ function AgentDashboardPreview({ navigate }) {
             <line x1="24" y1="16" x2="29" y2="16" stroke={DC.accent} strokeWidth="1" strokeLinecap="round" opacity="0.4"/>
           </svg>
           <div>
-            <p style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:17, color:DC.text, lineHeight:1 }}>Velyr</p>
+            <p style={{ fontFamily:'Instrument Serif, serif', fontWeight:400, fontSize:18, color:DC.text, lineHeight:1 }}>Velyr</p>
             <p style={{ fontSize:9, color:DC.textLight, letterSpacing:'.06em', textTransform:'uppercase', marginTop:2 }}>Growth Agent</p>
           </div>
         </div>
@@ -750,8 +872,8 @@ function AgentDashboardPreview({ navigate }) {
         <div style={{ marginBottom:18 }}>
           <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:500, color:DC.accent, marginBottom:6 }}>{head.kicker}</p>
           <h1 style={{
-            fontFamily:'Cormorant Garant, serif', fontWeight:400,
-            fontSize:'clamp(22px,2.6vw,32px)', letterSpacing:'-.02em', lineHeight:1.1,
+            fontFamily:'Instrument Serif, serif', fontWeight:400,
+            fontSize:'clamp(22px,2.8vw,33px)', letterSpacing:'-.01em', lineHeight:1.1,
             color:DC.text, marginBottom:5,
           }}>
             {head.title}
@@ -764,21 +886,32 @@ function AgentDashboardPreview({ navigate }) {
 
         {/* ── OVERVIEW TAB ─────────────────────────────────────────────── */}
         {tab === 'overview' && (
-        <div className="dp-overview-grid" style={{ display:'flex', gap:14, alignItems:'flex-start' }}>
+        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+
+          {/* The elevated star: a PR awaiting approval (mirrors the live dashboard) */}
+          <MockMissionControl run={pendingRun} DC={DC} />
+
+          <div className="dp-overview-grid" style={{ display:'flex', gap:14, alignItems:'flex-start' }}>
 
           {/* Main column */}
           <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:12 }}>
 
             {/* KPI bar */}
-            <div className="dp-kpis" style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8 }}>
+            <div className="dp-kpis" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
               {kpis.map((k,i) => (
                 <div key={i} style={{
                   background: k.accent ? DC.accentSoft : DC.bgCard,
                   border: `1px solid ${k.accent ? DC.accentMid : DC.border}`,
                   borderRadius:12, padding:'13px 14px',
+                  boxShadow: k.accent ? '0 4px 18px rgba(42,92,69,0.10)' : 'none',
                 }}>
-                  <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:500, color: k.accent ? DC.accent : DC.textLight, marginBottom:7 }}>{k.label}</p>
-                  <p style={{ fontFamily:'Cormorant Garant, serif', fontSize:28, fontWeight:400, color: k.accent ? DC.accent : DC.text, lineHeight:1, marginBottom:3 }}>{k.value}</p>
+                  <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:7 }}>
+                    <p style={{ fontSize:10, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:500, color: k.accent ? DC.accent : DC.textLight }}>{k.label}</p>
+                    {k.spark && <MiniSpark data={sparkData} color={DC.accent} />}
+                  </div>
+                  <p style={{ fontFamily:'Instrument Serif, serif', fontSize:32, fontWeight:400, color: k.accent ? DC.accent : DC.text, lineHeight:1, marginBottom:3 }}>
+                    <CountUp value={k.value} />
+                  </p>
                   <p style={{ fontSize:10, color:DC.textLight, fontWeight:300 }}>{k.sub}</p>
                 </div>
               ))}
@@ -794,7 +927,7 @@ function AgentDashboardPreview({ navigate }) {
                   <p style={{ fontSize:11, color:DC.textLight }}>Last actions taken</p>
                 </div>
                 <div>
-                  {runs.map((run,i) => {
+                  {allRuns.map((run,i) => {
                     const s = STATUS_MAP[run.status] || STATUS_MAP.deployed
                     const a = run.analysis_result || {}
                     const file = a.file_to_edit?.split('/').pop()
@@ -802,7 +935,7 @@ function AgentDashboardPreview({ navigate }) {
                       <div key={run.id} style={{
                         display:'flex', gap:10, alignItems:'flex-start',
                         padding:'9px 0',
-                        borderBottom: i < runs.length-1 ? `1px solid ${DC.border}` : 'none',
+                        borderBottom: i < allRuns.length-1 ? `1px solid ${DC.border}` : 'none',
                       }}>
                         <div style={{ width:8, height:8, borderRadius:'50%', background:s.dot, marginTop:5, flexShrink:0 }}/>
                         <div style={{ flex:1, minWidth:0 }}>
@@ -964,7 +1097,7 @@ function AgentDashboardPreview({ navigate }) {
                   { label:'Failed/rejected', value:failedRejected,   color:DC.textLight },
                 ].map((s,i) => (
                   <div key={i}>
-                    <p style={{ fontFamily:'Cormorant Garant, serif', fontSize:22, fontWeight:400, color:s.color, lineHeight:1 }}>{s.value}</p>
+                    <p style={{ fontFamily:'Instrument Serif, serif', fontSize:24, fontWeight:400, color:s.color, lineHeight:1 }}>{s.value}</p>
                     <p style={{ fontSize:9, color:DC.textLight, marginTop:3 }}>{s.label}</p>
                   </div>
                 ))}
@@ -992,6 +1125,7 @@ function AgentDashboardPreview({ navigate }) {
               </div>
             </div>
           </div>
+          </div>
         </div>
         )}
 
@@ -1004,7 +1138,7 @@ function AgentDashboardPreview({ navigate }) {
                   <span style={{ fontSize:17, flexShrink:0 }}>{ins.icon}</span>
                   <div style={{ minWidth:0 }}>
                     <p style={{ fontSize:9.5, letterSpacing:'.08em', textTransform:'uppercase', fontWeight:600, color:ins.color, marginBottom:5 }}>{ins.label}</p>
-                    <p style={{ fontFamily:'Cormorant Garant, serif', fontSize:21, fontWeight:400, color:DC.text, marginBottom:5, lineHeight:1.15, wordBreak:'break-word' }}>{ins.value}</p>
+                    <p style={{ fontFamily:'Instrument Serif, serif', fontSize:22, fontWeight:400, color:DC.text, marginBottom:5, lineHeight:1.15, wordBreak:'break-word' }}>{ins.value}</p>
                     <p style={{ fontSize:12, color:DC.textMuted, lineHeight:1.5, marginBottom:5 }}>{ins.sub}</p>
                     <p style={{ fontSize:10, color:DC.textLight }}>{ins.detail}</p>
                   </div>
@@ -1045,7 +1179,7 @@ function AgentDashboardPreview({ navigate }) {
               <SiteNetwork
                 data={mockSiteNetworkData}
                 style={{ height:420 }}
-                fonts={{ sans:'Jost, sans-serif', serif:'Cormorant Garant, serif', mono:'DM Mono, monospace' }}
+                fonts={{ sans:'Jost, sans-serif', serif:'Instrument Serif, serif', mono:'DM Mono, monospace' }}
               />
             </div>
             <p style={{ fontSize:10.5, color:DC.textLight, marginTop:9, lineHeight:1.5 }}>
@@ -1076,7 +1210,7 @@ function AgentRequirements() {
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:36 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Before you subscribe</p>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em', lineHeight:1.12 }}>Will the agent work for you?</h2>
+          <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em', lineHeight:1.12 }}>Will the agent work for you?</h2>
           <p style={{ fontSize:15, color:C.textMuted, fontWeight:300, marginTop:14, maxWidth:560, lineHeight:1.65 }}>
             The Growth Agent reads your code, opens Pull Requests, and notifies you on Telegram. To do its job it needs five things — check you have them before you subscribe.
           </p>
@@ -1130,7 +1264,7 @@ function Pricing({ navigate }) {
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:56 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Pricing</p>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em' }}>Simple. No surprises.</h2>
+          <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em' }}>Simple. No surprises.</h2>
         </div>
         <div className="pricing-grid" style={{ display:'flex', justifyContent:'center', gap:16 }}>
 
@@ -1147,7 +1281,7 @@ function Pricing({ navigate }) {
             </div>
             <p style={{ fontWeight:500, fontSize:15, marginBottom:5, color:'rgba(247,244,239,0.9)' }}>Growth Agent</p>
             <p style={{ color:'rgba(247,244,239,0.6)', fontSize:13, fontWeight:300, marginBottom:20 }}>Autonomous weekly improvements.</p>
-            <span style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:52, letterSpacing:'-.03em', color:'#fff' }}>€29</span>
+            <span style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:52, letterSpacing:'-.03em', color:'#fff' }}><CountUp value={visible ? 29 : 0} format={(n)=>`€${Math.round(n)}`} /></span>
             <sup style={{ fontSize:14, color:'rgba(247,244,239,0.5)', fontWeight:300, marginLeft:2 }}>*</sup>
             <p style={{ color:'rgba(247,244,239,0.5)', fontSize:12, marginBottom:4, fontWeight:300, marginTop:4 }}>per month · cancel anytime</p>
             <div style={{ display:'flex', flexDirection:'column', gap:9, marginBottom:0 }}>
@@ -1224,7 +1358,7 @@ function FAQ() {
       <div style={{ maxWidth:720, margin:'0 auto' }}>
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:40 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>FAQ</p>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 48px)', letterSpacing:'-.02em' }}>Questions you might have.</h2>
+          <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 48px)', letterSpacing:'-.02em' }}>Questions you might have.</h2>
         </div>
 
         {items.map((item, i) => (
@@ -1250,7 +1384,7 @@ function Footer({ navigate }) {
       <div className="footer-inner" style={{ maxWidth:1060, margin:'0 auto', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:16 }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <Logo size={20} />
-          <span style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:16, color:C.text }}>Velyr</span>
+          <span style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:400, fontSize:16, color:C.text }}>Velyr</span>
         </div>
         <p style={{ fontSize:13, color:C.textLight, fontWeight:300 }}>© 2026 Velyr · <a href="mailto:info@velyr.io" style={{ color:C.textLight, textDecoration:'none' }}>info@velyr.io</a></p>
         <div className="footer-links" style={{ display:'flex', gap:20 }}>
@@ -1308,7 +1442,7 @@ function WhySection() {
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:40, maxWidth:640 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Why Velyr</p>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text, marginBottom:18 }}>
+          <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text, marginBottom:18 }}>
             Every site leaks conversions.<br /><em style={{ fontStyle:'italic', color:C.warm }}>Fixing them never makes the to-do list.</em>
           </h2>
           <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7 }}>
@@ -1349,7 +1483,7 @@ function ShowcaseSection({ navigate }) {
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:36, maxWidth:640 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Your dashboard</p>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text, marginBottom:16 }}>
+          <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text, marginBottom:16 }}>
             See exactly what it found, fixed, <em style={{ fontStyle:'italic', color:C.warm }}>and shipped.</em>
           </h2>
           <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7 }}>
@@ -1382,7 +1516,7 @@ function DifferentiatorsSection() {
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:36, maxWidth:640 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>More than a weekly fix</p>
-          <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text }}>
+          <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text }}>
             Always watching, <em style={{ fontStyle:'italic', color:C.warm }}>always honest.</em>
           </h2>
         </div>
@@ -1396,7 +1530,7 @@ function DifferentiatorsSection() {
                 height:'100%', background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'30px 30px',
               }}>
                 <div style={{ marginBottom:16 }}><CardIcon name={c.icon} /></div>
-                <h3 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:400, fontSize:21, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{c.title}</h3>
+                <h3 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:400, fontSize:21, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{c.title}</h3>
                 <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{c.desc}</p>
               </div>
             </div>
@@ -1413,7 +1547,7 @@ function ClosingCTA({ navigate }) {
   return (
     <section className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, padding:'96px 24px' }}>
       <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ maxWidth:680, margin:'0 auto', textAlign:'center' }}>
-        <h2 style={{ fontFamily:'Cormorant Garant, serif', fontWeight:300, fontSize:'clamp(32px, 5vw, 56px)', letterSpacing:'-.025em', lineHeight:1.08, color:C.text, marginBottom:18 }}>
+        <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(32px, 5vw, 56px)', letterSpacing:'-.025em', lineHeight:1.08, color:C.text, marginBottom:18 }}>
           Let the agent ship your <em style={{ fontStyle:'italic', color:C.warm }}>next win.</em>
         </h2>
         <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7, marginBottom:32, maxWidth:520, marginLeft:'auto', marginRight:'auto' }}>
