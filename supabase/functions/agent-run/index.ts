@@ -20,6 +20,33 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 )
 
+// Guards run-path supabase writes against TWO failure modes that otherwise
+// produce a silent zombie 'running' row:
+//   1. A hung connection (e.g. Supabase pooler maintenance, where reads return
+//      but writes stall) — caught by racing against a timer that rejects.
+//   2. A pooler/DB-rejected write — supabase-js RESOLVES (does not throw) on a
+//      PostgREST/DB error, handing back { error }. Awaiting alone therefore
+//      can't tell a committed write from a rejected one, so we inspect the
+//      result and throw on a non-null error.
+// Either way the throw propagates to processConnection's catch → run set
+// 'failed' → lock released, instead of a write that "logged done" but never
+// committed.
+const DB_TIMEOUT_MS = Number(Deno.env.get('DB_WRITE_TIMEOUT_MS') || '10000')
+async function dbWrite<T extends { error: any; status?: number }>(
+  p: PromiseLike<T>, ms: number, label: string,
+): Promise<T> {
+  const res = await Promise.race([
+    Promise.resolve(p),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`timeout after ${ms}ms: ${label}`)), ms)
+    ),
+  ])
+  if (res?.error) {
+    throw new Error(`db write failed (${label}): ${res.error.message ?? JSON.stringify(res.error)}`)
+  }
+  return res
+}
+
 // ─── COST & PROMPT-SIZE CAPS (Stage 2 wallet protection) ─────────────────────
 // These are intentionally conservative — a hostile repo, a runaway prompt, or
 // a Claude run going long must NEVER drain the OpenRouter wallet. Every value
@@ -107,13 +134,17 @@ async function recordLLMUsage(subscriptionId: string, inputTokens: number, outpu
     (inputTokens  / 1_000_000) * LLM_PRICING_EUR_PER_M.INPUT  +
     (outputTokens / 1_000_000) * LLM_PRICING_EUR_PER_M.OUTPUT
   const period = new Date().toISOString().slice(0, 7)
-  const { error } = await supabase.rpc('agent_llm_usage_increment', {
-    p_subscription_id: subscriptionId,
-    p_period:          period,
-    p_input_tokens:    inputTokens,
-    p_output_tokens:   outputTokens,
-    p_cost_eur:        costEur,
-  })
+  // Fail-soft + bounded: lose accounting rather than fail (or hang) the run.
+  const { error } = await dbWrite(
+    supabase.rpc('agent_llm_usage_increment', {
+      p_subscription_id: subscriptionId,
+      p_period:          period,
+      p_input_tokens:    inputTokens,
+      p_output_tokens:   outputTokens,
+      p_cost_eur:        costEur,
+    }),
+    DB_TIMEOUT_MS, 'llm_usage_increment'
+  ).catch((e: any) => ({ error: e }))
   if (error) {
     console.warn(`[llm-cap] failed to record usage for ${callerLabel}:`, error.message)
   }
@@ -521,6 +552,10 @@ async function getOctokit(installationId: number) {
 
   return new ThrottledOctokit({
     auth: token,
+    request: {
+      fetch: (url: string | URL | Request, options: RequestInit = {}) =>
+        fetch(url, { ...options, signal: options.signal ?? AbortSignal.timeout(15000) }),
+    },
     throttle: {
       onRateLimit: (retryAfter: number, options: any, _octokit: any, retryCount: number) => {
         slog('warn', 'github_rate_limit', { method: options.method, url: options.url, retryAfter, retryCount })
@@ -692,7 +727,10 @@ async function saveFunnelPages(subscriptionId: string, runId: string, funnelAnal
 
   if (!rows.length) return
 
-  const { error: insErr } = await supabase.from('agent_funnel_pages').insert(rows)
+  const { error: insErr } = await dbWrite(
+    supabase.from('agent_funnel_pages').insert(rows),
+    DB_TIMEOUT_MS, 'funnel_pages_insert'
+  ).catch((e: any) => ({ error: e }))
   if (insErr) {
     slog('warn', 'funnel_pages_insert_failed', { runId, error: insErr.message })
     return   // keep the previous snapshot — never leave the tab empty
@@ -964,11 +1002,14 @@ async function setupPostHogForConnection(conn: any) {
 
     const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || VELYR_POSTHOG_TOKEN
 
-    await supabase.from('agent_connections').update({
-      posthog_host_filter:   hostFilter,
-      posthog_project_id:    sharedProjectId,
-      posthog_snippet_token: snippetToken,
-    }).eq('id', conn.id)
+    await dbWrite(
+      supabase.from('agent_connections').update({
+        posthog_host_filter:   hostFilter,
+        posthog_project_id:    sharedProjectId,
+        posthog_snippet_token: snippetToken,
+      }).eq('id', conn.id),
+      DB_TIMEOUT_MS, 'posthog_setup_connection_update'
+    )
 
     return { posthogProjectId: sharedProjectId, hostFilter }
   } catch (err) {
@@ -1061,9 +1102,12 @@ async function detectSnippetState(
 
   if (fileContent.includes(VELYR_POSTHOG_TOKEN)) {
     // Self-heal: customer manually pasted the snippet — record it so we skip Setup-PR forever.
-    await supabase.from('agent_connections')
-      .update({ posthog_snippet_installed_at: new Date().toISOString() })
-      .eq('id', conn.id)
+    await dbWrite(
+      supabase.from('agent_connections')
+        .update({ posthog_snippet_installed_at: new Date().toISOString() })
+        .eq('id', conn.id),
+      DB_TIMEOUT_MS, 'selfheal_snippet_installed_update'
+    )
     return { state: 'installed' }
   }
 
@@ -1192,6 +1236,7 @@ async function createSnippetPR(
   if (forbiddenMatch) throw new Error(`Target path ${targetPath} is in FORBIDDEN_EDIT_PATHS (${forbiddenMatch})`)
 
   const filesChanged: string[] = []
+  let branchCreatedThisRun = false
 
   try {
     // PART 1 (dep fix): detect a frozen lockfile in the package.json directory.
@@ -1214,9 +1259,35 @@ async function createSnippetPR(
       ? 'present'
       : hasFrozenLockfile ? 'manual_lockfile' : 'auto_added'
 
+    let branchExists = false
+    try {
+      await octokit.rest.git.getRef({ owner, repo, ref: `heads/${branchName}` })
+      branchExists = true
+    } catch { /* 404 → branch absent, normal */ }
+
+    if (branchExists) {
+      const { data: openPRs } = await octokit.rest.pulls.list({
+        owner, repo, state: 'open', head: `${owner}:${branchName}`,
+      })
+      if (openPRs.length > 0) {
+        await dbWrite(
+          supabase.from('agent_runs').update({
+            run_type: 'setup_posthog',
+            status: 'skipped_setup_pending', current_step: 'done',
+            completed_at: new Date().toISOString(),
+            error_message: `Setup-PR #${openPRs[0].number} already open — run skipped`,
+          }).eq('id', run.id),
+          DB_TIMEOUT_MS, 'createpr_branch_skip_update'
+        )
+        return
+      }
+      await octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branchName}` }).catch(() => {})
+    }
+
     const { data: refData } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` })
     const baseSha = refData.object.sha
     await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: baseSha })
+    branchCreatedThisRun = true
 
     if (mapResult.framework === 'nextjs-app') {
       // App Router: create velyr-analytics component + edit layout to import+render it.
@@ -1343,15 +1414,18 @@ async function createSnippetPR(
       body: receipt, head: branchName, base: defaultBranch,
     })
 
-    await supabase.from('agent_runs').update({
-      run_type:     'setup_posthog',
-      status:       'waiting_approval',
-      current_step: 'done',
-      completed_at: new Date().toISOString(),
-      pr_number:    pr.number,
-      pr_url:       pr.html_url,
-      pages_fixed:  filesChanged,
-    }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        run_type:     'setup_posthog',
+        status:       'waiting_approval',
+        current_step: 'done',
+        completed_at: new Date().toISOString(),
+        pr_number:    pr.number,
+        pr_url:       pr.html_url,
+        pages_fixed:  filesChanged,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'createpr_waiting_approval_update'
+    )
 
     if (chatId) await sendSnippetTelegram(chatId, pr.html_url, depAction)
 
@@ -1360,12 +1434,18 @@ async function createSnippetPR(
       subscriptionId: conn.subscription_id, runId: run.id, error: err.message,
     })
     // Clean up branch best-effort, then fall back to manual-paste Telegram.
-    await octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branchName}` }).catch(() => {})
-    await supabase.from('agent_runs').update({
-      status: 'failed', current_step: 'done',
-      completed_at: new Date().toISOString(),
-      error_message: `Setup-PR creation failed: ${err.message}`,
-    }).eq('id', run.id)
+    // Only delete a branch THIS run created — never a branch behind a legitimate open PR.
+    if (branchCreatedThisRun) {
+      await octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branchName}` }).catch(() => {})
+    }
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'failed', current_step: 'done',
+        completed_at: new Date().toISOString(),
+        error_message: `Setup-PR creation failed: ${err.message}`,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'createpr_failed_update'
+    )
     if (chatId) {
       const fallbackSnippet = mapResult.framework === 'nextjs-app'
         ? `// app/velyr-analytics.tsx\n'use client'\nimport { useEffect } from 'react'\nimport posthog from 'posthog-js'\nexport default function VelyrAnalytics() {\n  useEffect(() => {\n    posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n    posthog.register({ $host: '${hostFilter}' })\n  }, [])\n  return null\n}`
@@ -1586,24 +1666,6 @@ async function maybeRunSnippetSetup(
 ): Promise<boolean> {
   if (conn.posthog_snippet_declined) return false
 
-  // Dedupe: if a Setup-PR is already waiting approval, mark this run skipped.
-  const { data: existingSetup } = await supabase
-    .from('agent_runs')
-    .select('id')
-    .eq('subscription_id', conn.subscription_id)
-    .in('run_type', ['setup_posthog', 'setup_posthog_foreign_choice'])
-    .eq('status', 'waiting_approval')
-    .maybeSingle()
-
-  if (existingSetup) {
-    await supabase.from('agent_runs').update({
-      status: 'skipped_setup_pending', current_step: 'done',
-      completed_at: new Date().toISOString(),
-      error_message: 'Setup-PR already awaiting approval — run skipped',
-    }).eq('id', run.id)
-    return true
-  }
-
   const SNIPPET_SUPPORTED = ['nextjs-app', 'nextjs-pages', 'vite-react', 'cra']
   if (!SNIPPET_SUPPORTED.includes(mapResult.framework)) {
     // Vue-vite, Svelte-kit, etc.: no auto-PR. Send one-shot manual-paste Telegram
@@ -1630,22 +1692,76 @@ async function maybeRunSnippetSetup(
 
   if (detection.state === 'installed') return false
   if (detection.state === 'error') {
-    console.warn(`[snippet] detection error for ${conn.subscription_id}: ${detection.reason}`)
-    return false
+    slog('error', 'snippet_detection_error', {
+      subscriptionId: conn.subscription_id, runId: run.id, reason: detection.reason,
+    })
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        run_type: 'setup_posthog',
+        status: 'failed', current_step: 'done',
+        completed_at: new Date().toISOString(),
+        error_message: `Snippet detection failed: ${detection.reason}`,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'detection_error_update'
+    )
+    if (chatId) {
+      await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `⚠️ <b>Velyr setup paused</b>\n\nCouldn't read your entry file to check analytics setup, so I skipped this run instead of guessing. I'll retry next cycle.`,
+          parse_mode: 'HTML',
+        }),
+      }).catch(() => {})
+    }
+    return true
   }
 
   if (detection.state === 'foreign_detected') {
-    await supabase.from('agent_runs').update({
-      run_type:     'setup_posthog_foreign_choice',
-      status:       'waiting_approval',
-      current_step: 'done',
-      completed_at: new Date().toISOString(),
-    }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        run_type:     'setup_posthog_foreign_choice',
+        status:       'waiting_approval',
+        current_step: 'done',
+        completed_at: new Date().toISOString(),
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'foreign_choice_update'
+    )
     if (chatId) await sendForeignChoiceTelegram(chatId)
     return true
   }
 
-  // state === 'missing': open Setup-PR
+  // state === 'missing': a Setup-PR is genuinely needed.
+  // Dedupe (runs AFTER detection, by design): if a Setup-PR is already waiting
+  // approval, mark this run skipped. Placing this after detectSnippetState means a
+  // snippet merged directly on GitHub self-heals via the 'installed' path above
+  // (which stamps posthog_snippet_installed_at) instead of being trapped behind a
+  // stale waiting_approval row forever.
+  const { data: existingSetup } = await supabase
+    .from('agent_runs')
+    .select('id')
+    .eq('subscription_id', conn.subscription_id)
+    .in('run_type', ['setup_posthog', 'setup_posthog_foreign_choice'])
+    .eq('status', 'waiting_approval')
+    .maybeSingle()
+
+  if (existingSetup) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'skipped_setup_pending', current_step: 'done',
+        completed_at: new Date().toISOString(),
+        error_message: 'Setup-PR already awaiting approval — run skipped',
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'skip_setup_pending_update'
+    )
+    return true
+  }
+
+  // open Setup-PR
+  await dbWrite(
+    supabase.from('agent_runs').update({ run_type: 'setup_posthog' }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'relabel_setup_posthog_update'
+  )
   await createSnippetPR(conn, run, mapResult, octokit, defaultBranch, detection, chatId)
   return true
 }
@@ -1784,9 +1900,12 @@ async function scanCompetitorsForChanges(subscriptionId: string, competitorUrls:
         if (p.pricing && p.pricing !== pricingMatch)            diffs.push(`Pricing: ${p.pricing} → ${pricingMatch || 'removed'}`)
       }
 
-      await supabase.from('agent_competitor_snapshots').insert({
-        subscription_id: subscriptionId, competitor_url: url, snapshot_data: snapshot,
-      })
+      await dbWrite(
+        supabase.from('agent_competitor_snapshots').insert({
+          subscription_id: subscriptionId, competitor_url: url, snapshot_data: snapshot,
+        }),
+        DB_TIMEOUT_MS, 'competitor_snapshot_insert'
+      )
 
       if (diffs.length > 0) changes.push({ url, diffs, current: snapshot })
     } catch (err: any) {
@@ -1817,9 +1936,14 @@ async function loadBusinessDNA(subscriptionId: string) {
 }
 
 async function recordDNA(subscriptionId: string, runId: string | null, fixType: string, outcome: 'success'|'rollback'|'pending', notes: string) {
-  await supabase.from('agent_business_dna').insert({
-    subscription_id: subscriptionId, run_id: runId, fix_type: fixType, outcome, notes: (notes || '').slice(0, 500),
-  })
+  // Best-effort + bounded: a DNA-write hang must not zombie the run after the
+  // PR already exists; the entry is reconstructable, the wall-clock is not.
+  await dbWrite(
+    supabase.from('agent_business_dna').insert({
+      subscription_id: subscriptionId, run_id: runId, fix_type: fixType, outcome, notes: (notes || '').slice(0, 500),
+    }),
+    DB_TIMEOUT_MS, 'business_dna_insert'
+  ).catch((e: any) => console.warn(`[dna] record failed for ${subscriptionId}:`, e?.message))
 }
 
 // Email notifications removed — Telegram is the sole customer notification
@@ -1876,9 +2000,12 @@ Make it sound like a smart friend being honest. Direct second person. No headers
     const roast = data.choices?.[0]?.message?.content?.trim()
     if (!roast) return
 
-    await supabase.from('agent_subscriptions').update({
-      last_roast_report: roast, last_roast_at: new Date().toISOString(),
-    }).eq('id', opts.subscriptionId)
+    await dbWrite(
+      supabase.from('agent_subscriptions').update({
+        last_roast_report: roast, last_roast_at: new Date().toISOString(),
+      }).eq('id', opts.subscriptionId),
+      DB_TIMEOUT_MS, 'roast_report_update'
+    )
 
     // Telegram is the sole customer notification channel (email removed). HTML
     // mode: the roast is free-form LLM prose, full of em-dashes, asterisks and
@@ -2262,9 +2389,12 @@ async function processConnection(conn: any) {
       }
     }
 
-    const { data: runData } = await supabase
-      .from('agent_runs').insert({ subscription_id: conn.subscription_id, status: 'running' })
-      .select().single()
+    const { data: runData } = await dbWrite(
+      supabase
+        .from('agent_runs').insert({ subscription_id: conn.subscription_id, status: 'running' })
+        .select().single(),
+      DB_TIMEOUT_MS, 'run_insert'
+    )
     run = runData
 
     // Pull subscription extras (revenue connection, slug, etc.) once up front
@@ -2280,28 +2410,37 @@ async function processConnection(conn: any) {
     const spendStatus = await getMonthlySpend(conn.subscription_id)
     if (spendStatus.capAvailable && spendStatus.spent >= MONTHLY_SPEND_CAP_EUR) {
       console.warn(`[llm-cap] subscription ${conn.subscription_id} over monthly cap (€${spendStatus.spent.toFixed(4)} / €${MONTHLY_SPEND_CAP_EUR}) — skipping`)
-      await supabase.from('agent_runs').update({
-        status:        'skipped_cost_cap',
-        current_step:  'done',
-        completed_at:  new Date().toISOString(),
-        error_message: `Monthly LLM spend cap reached (€${spendStatus.spent.toFixed(2)} / €${MONTHLY_SPEND_CAP_EUR.toFixed(2)} in ${spendStatus.period})`,
-      }).eq('id', run.id)
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status:        'skipped_cost_cap',
+          current_step:  'done',
+          completed_at:  new Date().toISOString(),
+          error_message: `Monthly LLM spend cap reached (€${spendStatus.spent.toFixed(2)} / €${MONTHLY_SPEND_CAP_EUR.toFixed(2)} in ${spendStatus.period})`,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'skipped_cost_cap_update'
+      )
       await notifyCapExceeded(subRow?.telegram_chat_id || null, spendStatus.spent, spendStatus.period)
       return
     }
 
     // Step 1: Fetching repo
-    await supabase.from('agent_runs').update({ current_step: 'fetching_repo' }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({ current_step: 'fetching_repo' }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'step_fetching_repo_update'
+    )
     const octokit        = await getOctokit(conn.github_installation_id)
 
     // Stage 5.3: repo existence / writability pre-flight BEFORE any AI spend.
     const preflight = await repoPreflight(octokit, conn.github_repo_owner, conn.github_repo_name)
     if (!preflight.ok) {
       console.warn(`[preflight] run=${run.id} sub=${conn.subscription_id}: ${preflight.reason}`)
-      await supabase.from('agent_runs').update({
-        status: 'skipped_repo_unavailable', current_step: 'done',
-        completed_at: new Date().toISOString(), error_message: preflight.reason,
-      }).eq('id', run.id)
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status: 'skipped_repo_unavailable', current_step: 'done',
+          completed_at: new Date().toISOString(), error_message: preflight.reason,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'skipped_repo_unavailable_update'
+      )
       await notifyInsufficientData(subRow?.telegram_chat_id || null, preflight.reason)
       return
     }
@@ -2320,10 +2459,13 @@ async function processConnection(conn: any) {
     if (mapResult.framework === 'unsupported') {
       const reason = mapResult.unsupportedReason || 'unsupported repository shape'
       console.warn(`[repo-mapper] run=${run.id} sub=${conn.subscription_id}: ${reason}`)
-      await supabase.from('agent_runs').update({
-        status: 'skipped_unsupported_framework', current_step: 'done',
-        completed_at: new Date().toISOString(), error_message: reason,
-      }).eq('id', run.id)
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status: 'skipped_unsupported_framework', current_step: 'done',
+          completed_at: new Date().toISOString(), error_message: reason,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'skipped_unsupported_framework_update'
+      )
       await notifyInsufficientData(subRow?.telegram_chat_id || null, reason)
       return
     }
@@ -2356,18 +2498,27 @@ async function processConnection(conn: any) {
     // status writes — PostgREST rejects the entire payload if a column is
     // unknown. Mirrors the Stage 2 "fail-open on missing migration" stance.
     {
-      const { error: metaErr } = await supabase.from('agent_runs').update({
-        discovered_framework:   mapResult.framework,
-        graph_node_count:       graph.nodes.length,
-        graph_unresolved_count: graph.unresolved.length,
-      }).eq('id', run.id)
+      // Fail-open (best-effort): a missing-migration error OR a write timeout
+      // must only warn, never fail the run — so the timeout is funneled into the
+      // same { error } shape rather than thrown.
+      const { error: metaErr } = await dbWrite(
+        supabase.from('agent_runs').update({
+          discovered_framework:   mapResult.framework,
+          graph_node_count:       graph.nodes.length,
+          graph_unresolved_count: graph.unresolved.length,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'graph_metadata_update'
+      ).catch((e: any) => ({ error: e }))
       if (metaErr) slog('warn', 'graph_metadata_write_failed', { runId: run.id, error: metaErr.message })
     }
 
     const competitorUrls = await getCompetitorUrls(conn.subscription_id)
 
     // Step 2: Pulling analytics + parallel context
-    await supabase.from('agent_runs').update({ current_step: 'pulling_analytics' }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({ current_step: 'pulling_analytics' }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'step_pulling_analytics_update'
+    )
     // Stage 4.1: decrypt the PostHog key in-memory before kicking off the
     // analytics fetch. The key never appears in process state outside this
     // async scope.
@@ -2400,7 +2551,10 @@ async function processConnection(conn: any) {
     const dna = businessDna || legacyDna
 
     // Step 3: Mapping funnel
-    await supabase.from('agent_runs').update({ current_step: 'mapping_funnel' }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({ current_step: 'mapping_funnel' }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'step_mapping_funnel_update'
+    )
     const funnelAnalysis = buildFunnelAnalysis(allPages, analytics)
 
     // ── Empty-repo gate: removed (Stage 1B) ─────────────────────────────────
@@ -2426,12 +2580,15 @@ async function processConnection(conn: any) {
     const hasCompetitorRows = Array.isArray(competitorData) && competitorData.length > 0
     if (!hasAnalytics && !hasAnyDNA && !hasCompetitorRows && repoFileCount < NO_DATA_THRESHOLDS.MIN_REPO_FILES) {
       console.warn(`[no-data] all signals empty for subscription ${conn.subscription_id} (visitors<${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D}, no DNA, no competitors, ${repoFileCount}<${NO_DATA_THRESHOLDS.MIN_REPO_FILES} files)`)
-      await supabase.from('agent_runs').update({
-        status:        'skipped_no_data',
-        current_step:  'done',
-        completed_at:  new Date().toISOString(),
-        error_message: `No signal to ground a recommendation (analytics<${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions/7d, no DNA, no competitors, only ${repoFileCount} repo files)`,
-      }).eq('id', run.id)
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status:        'skipped_no_data',
+          current_step:  'done',
+          completed_at:  new Date().toISOString(),
+          error_message: `No signal to ground a recommendation (analytics<${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions/7d, no DNA, no competitors, only ${repoFileCount} repo files)`,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'skipped_no_data_update'
+      )
       await notifyInsufficientData(subRow?.telegram_chat_id || null, 'no real visitor analytics, no Business DNA, no tracked competitors, and almost no readable repo files')
       return
     }
@@ -2440,7 +2597,10 @@ async function processConnection(conn: any) {
     // Reads node.firstChars (RA2's cache) — no blob re-fetch. The injected
     // callAI closure applies the Stage-2 ranker cap (LLM_CAPS.MAX_TOKENS_RANKER).
     // The sparse-graph gate inside the ranker runs before any LLM spend.
-    await supabase.from('agent_runs').update({ current_step: 'ranking_components' }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({ current_step: 'ranking_components' }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'step_ranking_components_update'
+    )
     const rankerAnalyticsContext = (() => {
       const a = analytics?.last7Days
       if (!a) return 'No analytics data available.'
@@ -2463,11 +2623,14 @@ async function processConnection(conn: any) {
     // chat only (never env.TELEGRAM_CHAT_ID).
     if (rankerResult.insufficient_graph) {
       console.warn(`[ranker] run=${run.id} sub=${conn.subscription_id} insufficient graph (${rankerResult.node_count} nodes, framework=${mapResult.framework})`)
-      await supabase.from('agent_runs').update({
-        status: 'skipped_insufficient_graph', current_step: 'done',
-        completed_at: new Date().toISOString(),
-        error_message: `Import graph too sparse to rank (${rankerResult.node_count} nodes, framework ${mapResult.framework})`,
-      }).eq('id', run.id)
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status: 'skipped_insufficient_graph', current_step: 'done',
+          completed_at: new Date().toISOString(),
+          error_message: `Import graph too sparse to rank (${rankerResult.node_count} nodes, framework ${mapResult.framework})`,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'skipped_insufficient_graph_update'
+      )
       await notifyInsufficientData(
         subRow?.telegram_chat_id || null,
         `your site's import graph was too sparse to analyze (${rankerResult.node_count} component${rankerResult.node_count === 1 ? '' : 's'} found, framework: ${mapResult.framework})`,
@@ -2493,13 +2656,16 @@ async function processConnection(conn: any) {
         rankReason:    rankedByPath.get(n.path)?.reason ?? null,
       }))
       const networkEdges = graph.edges.map(e => ({ source: e.from, target: e.to }))
-      const { error: snErr } = await supabase.from('agent_site_network').insert({
-        subscription_id: conn.subscription_id,
-        run_id:          run.id,
-        framework:       mapResult.framework,
-        nodes:           networkNodes ?? [],
-        edges:           networkEdges ?? [],
-      })
+      const { error: snErr } = await dbWrite(
+        supabase.from('agent_site_network').insert({
+          subscription_id: conn.subscription_id,
+          run_id:          run.id,
+          framework:       mapResult.framework,
+          nodes:           networkNodes ?? [],
+          edges:           networkEdges ?? [],
+        }),
+        DB_TIMEOUT_MS, 'site_network_insert'
+      )
       if (snErr) slog('warn', 'site_network_write_failed', { runId: run.id, error: snErr.message })
     } catch (snEx) {
       slog('warn', 'site_network_write_exception', { runId: run.id, error: String(snEx) })
@@ -2510,7 +2676,10 @@ async function processConnection(conn: any) {
     // byte budget. rankerResult + mapResult.repoTree are threaded in explicitly
     // (one getBlob per file). Consumed by RA5's Pass-2 prompt (callAIForFix) and
     // by RA7's PR receipt (buildReceipt).
-    await supabase.from('agent_runs').update({ current_step: 'reading_deep_context' }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({ current_step: 'reading_deep_context' }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'step_reading_deep_context_update'
+    )
     const deepContext: DeepContext = await readDeepContext(
       octokit, conn.github_repo_owner, conn.github_repo_name, preflight.defaultBranch, rankerResult, mapResult, {},
     )
@@ -2523,7 +2692,10 @@ async function processConnection(conn: any) {
     const chatId = subRow?.telegram_chat_id
 
     // Step 4: Pass 2 — single highest-impact conversion fix from deep context.
-    await supabase.from('agent_runs').update({ current_step: 'finding_biggest_issue' }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({ current_step: 'finding_biggest_issue' }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'step_finding_biggest_issue_update'
+    )
     const fixResult = await callAIForFix(
       conn.subscription_id, mapResult, deepContext, rankerResult,
       analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
@@ -2531,11 +2703,14 @@ async function processConnection(conn: any) {
 
     // Honest skip — model couldn't find a confident #1 problem. New status.
     if (fixResult.skip) {
-      await supabase.from('agent_runs').update({
-        status: 'skipped_low_confidence', current_step: 'done',
-        completed_at: new Date().toISOString(),
-        error_message: `Pass 2 skipped: ${fixResult.reason || 'no confident #1 problem'}`,
-      }).eq('id', run.id)
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status: 'skipped_low_confidence', current_step: 'done',
+          completed_at: new Date().toISOString(),
+          error_message: `Pass 2 skipped: ${fixResult.reason || 'no confident #1 problem'}`,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'skipped_low_confidence_update'
+      )
       await notifyInsufficientData(chatId || null, fixResult.reason || 'no confident high-impact fix this week')
       return
     }
@@ -2548,7 +2723,10 @@ async function processConnection(conn: any) {
 
     // Step 5: Writing fix — createPR re-fetches the file and runs the
     // whitespace-normalized find guard + Babel syntax check before committing.
-    await supabase.from('agent_runs').update({ current_step: 'writing_fix' }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({ current_step: 'writing_fix' }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'step_writing_fix_update'
+    )
     // Honest behavioral-signal note for the receipt: state what scroll/click
     // data was actually inspected, or why none was (low traffic vs none returned).
     const engForReceipt = analytics?.last7Days?.engagement
@@ -2565,10 +2743,13 @@ async function processConnection(conn: any) {
     // find_mismatch / find_ambiguous — distinct statuses (NOT generic failed),
     // honest Telegram to the subscription's own chat.
     if (!prResult.ok) {
-      await supabase.from('agent_runs').update({
-        status: prResult.status, current_step: 'done',
-        completed_at: new Date().toISOString(), error_message: prResult.message,
-      }).eq('id', run.id)
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status: prResult.status, current_step: 'done',
+          completed_at: new Date().toISOString(), error_message: prResult.message,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'find_problem_update'
+      )
       await notifyFindProblem(chatId || null, prResult.status, prResult)
       return
     }
@@ -2582,33 +2763,39 @@ async function processConnection(conn: any) {
     const screenshotBefore = await captureScreenshot(conn.website_url)
 
     // Step 6: approval notification.
-    await supabase.from('agent_runs').update({ current_step: 'sending_notification' }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({ current_step: 'sending_notification' }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'step_sending_notification_update'
+    )
     if (!chatId) throw new Error(`No telegram_chat_id for subscription ${conn.subscription_id}`)
     const messageId = await sendTelegramNotification(fixResult, pr, run.id, chatId)
 
     // Persist run. A/B-test variants, sprint, risk_score, and impact_prediction
     // are gone — the new fixResult schema doesn't carry them (see RA5 flag).
     const bounceBefore = analytics?.last7Days?.bounceRate ?? null
-    await supabase.from('agent_runs').update({
-      status:        'waiting_approval',
-      current_step:  'done',
-      completed_at:  new Date().toISOString(),
-      analysis_result: { ...fixResult, analytics_snapshot: analytics?.last7Days, revenue: revenue || null },
-      funnel_analysis: funnelAnalysis ? {
-        totalPages:     funnelAnalysis.totalPages,
-        pageTypes:      funnelAnalysis.pageTypes,
-        biggestDropOff: funnelAnalysis.biggestDropOff,
-      } : null,
-      pr_number:                 pr.number,
-      pr_url:                    pr.html_url,
-      telegram_message_id:       messageId || null,
-      screenshot_before:         screenshotBefore,
-      bounce_rate_before:        bounceBefore,
-      revenue_per_visitor_before: revenue?.lowestRpv?.revenuePerVisitor ?? null,
-      competitor_changes:        competitorChanges,
-      pages_fixed:               filesEdited,
-      problem_description:       fixResult.problem,
-    }).eq('id', run.id)
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status:        'waiting_approval',
+        current_step:  'done',
+        completed_at:  new Date().toISOString(),
+        analysis_result: { ...fixResult, analytics_snapshot: analytics?.last7Days, revenue: revenue || null },
+        funnel_analysis: funnelAnalysis ? {
+          totalPages:     funnelAnalysis.totalPages,
+          pageTypes:      funnelAnalysis.pageTypes,
+          biggestDropOff: funnelAnalysis.biggestDropOff,
+        } : null,
+        pr_number:                 pr.number,
+        pr_url:                    pr.html_url,
+        telegram_message_id:       messageId || null,
+        screenshot_before:         screenshotBefore,
+        bounce_rate_before:        bounceBefore,
+        revenue_per_visitor_before: revenue?.lowestRpv?.revenuePerVisitor ?? null,
+        competitor_changes:        competitorChanges,
+        pages_fixed:               filesEdited,
+        problem_description:       fixResult.problem,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'final_waiting_approval_update'
+    )
 
     await saveFunnelPages(conn.subscription_id, run.id, funnelAnalysis)
 
@@ -2637,10 +2824,17 @@ async function processConnection(conn: any) {
     })
 
     if (run?.id) {
-      await supabase.from('agent_runs').update({
-        status:        'failed',
-        error_message: err.message || 'Unknown error',
-      }).eq('id', run.id)
+      // Bounded + swallowed: if the pooler is the very thing that's down, this
+      // failed-write would itself hang. Cap it and move on to the user Telegram;
+      // the lock still releases in handleFullRun's finally and stale-cleanup
+      // sweeps the row. Never let the error handler become a second 73s zombie.
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status:        'failed',
+          error_message: err.message || 'Unknown error',
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'catch_failed_update'
+      ).catch((e: any) => slog('error', 'catch_failed_update_timed_out', { runId: run.id, error: e?.message }))
     }
 
     try {
@@ -2673,16 +2867,22 @@ async function processConnection(conn: any) {
 // and mark it 'failed' before this run starts.
 async function cleanupStaleRuns() {
   const threshold = new Date(Date.now() - Number(Deno.env.get('STALE_RUN_THRESHOLD_MS') || String(60 * 60 * 1000))).toISOString()
-  const { data, error } = await supabase
-    .from('agent_runs')
-    .update({
-      status:        'failed',
-      error_message: 'Stuck in status=running past stale threshold — likely killed mid-flight',
-      completed_at:  new Date().toISOString(),
-    })
-    .eq('status', 'running')
-    .lt('created_at', threshold)
-    .select('id, subscription_id')
+  // Fail-open + bounded: this runs at the very top of handleFullRun, so a hung
+  // pooler write here must not block every run from starting — funnel a timeout
+  // into the same { error } warn path rather than throw.
+  const { data, error } = await dbWrite(
+    supabase
+      .from('agent_runs')
+      .update({
+        status:        'failed',
+        error_message: 'Stuck in status=running past stale threshold — likely killed mid-flight',
+        completed_at:  new Date().toISOString(),
+      })
+      .eq('status', 'running')
+      .lt('created_at', threshold)
+      .select('id, subscription_id'),
+    DB_TIMEOUT_MS, 'cleanup_stale_runs'
+  ).catch((e: any) => ({ data: null, error: e }))
   if (error) {
     console.warn('[stale-cleanup] failed:', error.message)
     return
@@ -2698,20 +2898,36 @@ async function cleanupStaleRuns() {
 async function acquireRunLock(subscriptionId: string): Promise<boolean> {
   const ttlMs    = Number(Deno.env.get('RUN_LOCK_TTL_MS') || String(15 * 60 * 1000)) // 15 min
   const expires  = new Date(Date.now() + ttlMs).toISOString()
-  const { data, error } = await supabase.rpc('agent_run_lock_acquire', {
-    p_subscription_id: subscriptionId,
-    p_locked_until:    expires,
-  })
+  // Bounded: this runs before processConnection's try, so a hung acquire would
+  // zombie the run before it starts. A timeout funnels into the same fail-open
+  // path as an RPC error (better to run than to block forever).
+  const { data, error } = await dbWrite(
+    supabase.rpc('agent_run_lock_acquire', {
+      p_subscription_id: subscriptionId,
+      p_locked_until:    expires,
+    }),
+    DB_TIMEOUT_MS, 'acquire_lock'
+  ).catch((e: any) => ({ data: null, error: e }))
   if (error) {
-    console.warn(`[run-lock] acquire failed for ${subscriptionId} (RPC missing?):`, error.message)
+    console.warn(`[run-lock] acquire failed for ${subscriptionId} (RPC missing/timeout?):`, error.message)
     return true // fail-open: better to run than to block forever on a missing migration
   }
   return data === true
 }
 
 async function releaseRunLock(subscriptionId: string) {
-  const { error } = await supabase.rpc('agent_run_lock_release', { p_subscription_id: subscriptionId })
-  if (error) console.warn(`[run-lock] release failed for ${subscriptionId}:`, error.message)
+  // Bounded + swallowed: runs in handleFullRun's finally, so it must never hang
+  // (would re-burn the wall-clock that the per-call timeouts just saved) and
+  // must never throw. If the release times out, the lock self-heals via its TTL.
+  try {
+    const { error } = await dbWrite(
+      supabase.rpc('agent_run_lock_release', { p_subscription_id: subscriptionId }),
+      DB_TIMEOUT_MS, 'release_lock'
+    )
+    if (error) console.warn(`[run-lock] release failed for ${subscriptionId}:`, error.message)
+  } catch (err: any) {
+    console.warn(`[run-lock] release timed out for ${subscriptionId} (self-heals via TTL):`, err?.message)
+  }
 }
 
 async function handleFullRun() {
