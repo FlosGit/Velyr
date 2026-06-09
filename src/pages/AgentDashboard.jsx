@@ -357,7 +357,9 @@ function LiveActivityStream({runs, activeRun}) {
   // Fallback label is the status (not a repeated "Run completed") per the
   // real-timeline rule.
   runs.slice(0,8).forEach(run => {
-    if (run.status==='running') return
+    // Pending PRs live in PRMissionControl + the header badge; this stream is
+    // "actions taken", so skip running + waiting_approval to avoid duplication.
+    if (run.status==='running' || run.status==='waiting_approval') return
     const analysis = run.analysis_result||{}
     streamItems.push({
       id: run.id,
@@ -577,7 +579,9 @@ function KPIBar({runs, learnings}) {
 }
 
 // ─── TOP INSIGHTS PANEL ───────────────────────────────────────────────────────
-function TopInsights({runs, funnelPages, learnings, impactMetrics}) {
+// Pure builder so callers (OverviewPage) can ask "are there any insights?"
+// without duplicating the logic — used to hide the column cleanly when empty.
+function buildTopInsights({runs, funnelPages, learnings, impactMetrics}) {
   const deployed = runs.filter(r=>r.status==='deployed'||r.status==='approved')
   const pending  = runs.filter(r=>r.status==='waiting_approval')
 
@@ -594,7 +598,7 @@ function TopInsights({runs, funnelPages, learnings, impactMetrics}) {
   const positiveLearnings = learnings.filter(l=>l.outcome==='positive')
   const winRate = learnings.length>0?Math.round((positiveLearnings.length/learnings.length)*100):null
 
-  const insights = [
+  return [
     topDropOff && {
       icon:'⚠️', color:C.yellow, bg:C.yellowSoft, border:C.yellowMid,
       label:'Biggest Drop-off',
@@ -633,6 +637,10 @@ function TopInsights({runs, funnelPages, learnings, impactMetrics}) {
       detail: 'Funnel map updated last run',
     },
   ].filter(Boolean)
+}
+
+function TopInsights(props) {
+  const insights = buildTopInsights(props)
 
   return (
     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
@@ -898,6 +906,9 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
 function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading}) {
   const activeRun = runs.find(r=>r.status==='running')
   const pendingRun = runs.find(r=>r.status==='waiting_approval')
+  // Hide the Top Insights column entirely when there's nothing to show (day-1),
+  // letting the activity stream span full width — no onboarding-copy placeholder.
+  const hasInsights = buildTopInsights({runs, funnelPages, learnings, impactMetrics}).length > 0
 
   return (
     <div className="dash-overview-row" style={{display:'flex',gap:16,alignItems:'flex-start'}}>
@@ -909,7 +920,7 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
           <KPIBar runs={runs} learnings={learnings}/>
         </div>
 
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+        <div style={{display:'grid',gridTemplateColumns:hasInsights?'1fr 1fr':'1fr',gap:14}}>
           <Card className="fade-up" style={{padding:'16px 18px',animationDelay:'.1s'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
               <div>
@@ -928,10 +939,12 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
             <LiveActivityStream runs={runs} activeRun={activeRun}/>
           </Card>
 
-          <div className="fade-up" style={{animationDelay:'.12s',display:'flex',flexDirection:'column',gap:10}}>
-            <SectionLabel>Top Insights</SectionLabel>
-            <TopInsights runs={runs} funnelPages={funnelPages} learnings={learnings} impactMetrics={impactMetrics}/>
-          </div>
+          {hasInsights && (
+            <div className="fade-up" style={{animationDelay:'.12s',display:'flex',flexDirection:'column',gap:10}}>
+              <SectionLabel>Top Insights</SectionLabel>
+              <TopInsights runs={runs} funnelPages={funnelPages} learnings={learnings} impactMetrics={impactMetrics}/>
+            </div>
+          )}
         </div>
 
         {/* RevenueEstimator removed from Overview — it now lives only on the
