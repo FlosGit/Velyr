@@ -81,6 +81,28 @@ const CSS = `
       rgba(247,244,239,0.96) 0%, rgba(247,244,239,0.76) 50%, rgba(247,244,239,0) 77%);
   }
 
+  /* ── §1 Trust strip — the hero's signal threading the guarantees ──────────
+     A hairline connects the guarantees (draws in on scroll-enter); a soft green
+     luminance travels it on a slow seamless loop (background-position, the bright
+     band sits off-screen at both 0% and 100% so the wrap is invisible). Pauses on
+     hover. On narrow widths the row wraps, so the line/pulse drop to a clean
+     static list. Hidden + line-drawn under reduced-motion. NOT a translating ticker. */
+  .trust-line { position:absolute; left:0; right:0; top:50%; height:1px; transform:translateY(-50%) scaleX(0);
+    transform-origin:left center; background:rgba(42,92,69,0.16); transition:transform .9s cubic-bezier(.22,.61,.36,1); }
+  .trust-rail.in .trust-line { transform:translateY(-50%) scaleX(1); }
+  .trust-pulse { position:absolute; left:0; right:0; top:50%; height:3px; transform:translateY(-50%); pointer-events:none; opacity:0;
+    background-image:linear-gradient(90deg, rgba(42,92,69,0) 0%, rgba(42,92,69,0.55) 50%, rgba(42,92,69,0) 100%);
+    background-size:24% 100%; background-repeat:no-repeat; background-position:-30% 50%;
+    transition:opacity .6s ease .35s; animation:tsGlide 7.5s linear infinite; }
+  .trust-rail.in .trust-pulse { opacity:1; }
+  .trust-strip:hover .trust-pulse { animation-play-state:paused; }
+  @keyframes tsGlide { 0% { background-position:-30% 50%; } 100% { background-position:130% 50%; } }
+  @media (max-width:1119px) { .trust-line, .trust-pulse { display:none !important; } .trust-items { justify-content:center !important; } }
+  @media (prefers-reduced-motion: reduce) {
+    .trust-pulse { display:none !important; }
+    .trust-line { transform:translateY(-50%) scaleX(1) !important; }
+  }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -1399,7 +1421,13 @@ function Footer({ navigate }) {
 }
 
 // ─── Trust strip (honest signals only) ────────────────────────────────────────
+// §1: the hero's green signal threads the four guarantees. A hairline connects
+// them and a soft luminance pulse travels it on a slow seamless loop — pausing on
+// hover, dropping to a static centered list when the row wraps (≤1119px) or under
+// reduced motion. Each guarantee's cream background masks the rail, so the pulse
+// reads as the signal passing through each one.
 function TrustStrip() {
+  const [ref, visible] = useReveal()
   const items = [
     'Powered by Claude',
     'You approve every change before it ships',
@@ -1407,14 +1435,22 @@ function TrustStrip() {
     'Read + Pull-Request access only — revoke anytime',
   ]
   return (
-    <section style={{ background:C.bg, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, padding:'18px 24px' }}>
-      <div style={{ maxWidth:1060, margin:'0 auto', display:'flex', flexWrap:'wrap', gap:'12px 32px', alignItems:'center', justifyContent:'center' }}>
-        {items.map((t, i) => (
-          <div key={i} style={{ display:'flex', alignItems:'center', gap:9 }}>
-            <span style={{ width:6, height:6, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
-            <span style={{ fontSize:12.5, color:C.textMuted, fontWeight:300, letterSpacing:'.01em' }}>{t}</span>
-          </div>
-        ))}
+    <section className="trust-strip" style={{ background:C.bg, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, padding:'22px 24px', overflow:'hidden' }}>
+      <div ref={ref} className={`trust-rail ${visible?'in':''}`} style={{ position:'relative', maxWidth:1060, margin:'0 auto' }}>
+        <div className="trust-line" aria-hidden="true" />
+        <div className="trust-pulse" aria-hidden="true" />
+        <div className="trust-items" style={{ position:'relative', zIndex:2, display:'flex', flexWrap:'wrap', alignItems:'center', justifyContent:'space-between', gap:'14px 22px' }}>
+          {items.map((t, i) => (
+            <div key={i} style={{
+              display:'flex', alignItems:'center', gap:9, background:C.bg, padding:'0 14px',
+              opacity: visible ? 1 : 0, transform: visible ? 'none' : 'translateY(8px)',
+              transition: `opacity .5s ease ${0.1 + i*0.08}s, transform .5s ease ${0.1 + i*0.08}s`,
+            }}>
+              <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
+              <span style={{ fontSize:12.5, color:C.textMuted, fontWeight:300, letterSpacing:'.01em', whiteSpace:'nowrap' }}>{t}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   )
