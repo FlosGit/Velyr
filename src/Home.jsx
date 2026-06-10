@@ -4,7 +4,7 @@ import SubscribeButton from './components/SubscribeButton.jsx'
 import SiteNetwork from './components/SiteNetwork.jsx'
 import { mockSiteNetworkData } from './data/mockSiteNetwork.js'
 import { CountUp, MOTION_CSS } from './lib/motion.jsx'
-import HeroWireframe from './components/HeroWireframe.jsx'
+import HeroWorkspace from './components/HeroWorkspace.jsx'
 
 const C = {
   bg:          '#f7f4ef',
@@ -46,6 +46,10 @@ const CSS = `
   .btn-primary:active:not(:disabled) { transform:none; }
   .btn-primary:disabled { opacity:0.6; cursor:not-allowed; }
 
+  /* Solid-green variant — the hero's primary CTA leads with the brand green. */
+  .btn-primary.btn-green { background:#2a5c45; }
+  .btn-primary.btn-green:hover:not(:disabled) { background:#234d3a; box-shadow:0 12px 36px rgba(42,92,69,0.28); }
+
   .btn-ghost {
     background:transparent; color:#1c1917; border:1px solid rgba(28,25,23,0.18); border-radius:10px;
     padding:14px 28px; font-family:'Jost',sans-serif; font-weight:400; font-size:15px;
@@ -73,8 +77,8 @@ const CSS = `
      keeps the headline fully legible without ever reading as a box. */
   .hero-wash {
     position: absolute; inset: 0; z-index: 1; pointer-events: none;
-    background: radial-gradient(ellipse 560px 350px at 50% 46%,
-      rgba(247,244,239,0.95) 0%, rgba(247,244,239,0.72) 52%, rgba(247,244,239,0) 78%);
+    background: radial-gradient(ellipse 680px 380px at 50% 47%,
+      rgba(247,244,239,0.96) 0%, rgba(247,244,239,0.76) 50%, rgba(247,244,239,0) 77%);
   }
 
   ::-webkit-scrollbar { width:5px; }
@@ -91,7 +95,7 @@ const CSS = `
     nav { padding: 0 16px !important; }
     .nav-agent-link { display: none !important; }
     .nav-burger { display: flex !important; }
-    .hero-section { padding: 104px 16px 56px !important; min-height: 0 !important; }
+    .hero-section { padding: 110px 16px 64px !important; min-height: min(90vh, 660px) !important; }
     .section-pad { padding: 64px 16px !important; }
     .pricing-grid { grid-template-columns: 1fr !important; }
     .footer-inner { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
@@ -109,9 +113,12 @@ const CSS = `
 
   @media (max-width: 900px) {
     .agent-bottom-grid { grid-template-columns: 1fr !important; }
-    .hero-section { min-height: 0 !important; padding-top: 120px !important; padding-bottom: 64px !important; }
-    .hero-wash { display: none !important; }
+    .hero-section { min-height: min(88vh, 780px) !important; padding-top: 124px !important; padding-bottom: 72px !important; }
+    .hero-wash { background: radial-gradient(ellipse 420px 300px at 50% 44%, rgba(247,244,239,0.96) 0%, rgba(247,244,239,0.78) 50%, rgba(247,244,239,0) 78%) !important; }
     .hiw-anchor { position: static !important; top: auto !important; }
+  }
+  @media (max-width: 640px) {
+    .hero-wash { background: radial-gradient(ellipse 320px 360px at 50% 50%, rgba(247,244,239,0.95) 0%, rgba(247,244,239,0.74) 54%, rgba(247,244,239,0) 80%) !important; }
   }
   @media (max-width: 768px) {
     .dash-preview-shell .dp-leftnav { display: none !important; }
@@ -336,28 +343,28 @@ function Hero({ navigate }) {
     <section className="hero-section" style={{
       position:'relative', overflow:'hidden', background:C.bg,
       display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-      minHeight:'min(92vh, 800px)', padding:'140px 24px 88px',
+      minHeight:'min(94vh, 880px)', padding:'140px 24px 96px',
     }}>
-      <HeroWireframe />
+      <HeroWorkspace />
       <div className="hero-wash" aria-hidden="true" />
 
       <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ position:'relative', zIndex:2, maxWidth:780, margin:'0 auto', textAlign:'center' }}>
         {/* Brand eyebrow — calm, static (no live-activity implication) */}
         <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:9, marginBottom:18 }}>
           <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
-          <span style={{ fontSize:11, letterSpacing:'.16em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>AI Growth Agent · for React, Next.js & Vite</span>
+          <span style={{ fontSize:11, letterSpacing:'.16em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>AI Growth Agent</span>
         </div>
 
         <h1 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(38px, 5.6vw, 66px)', lineHeight:1.08, letterSpacing:'-.025em', color:C.text }}>
-          Conversion fixes, <em style={{ fontStyle:'italic', color:C.warm }}>shipped weekly</em>.
+          Conversion fixes, <em style={{ fontStyle:'italic', color:C.accent }}>shipped weekly</em>.
         </h1>
 
-        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 18px)', color:C.textMuted, maxWidth:560, margin:'22px auto 0', lineHeight:1.6 }}>
-          An AI agent that finds your site's #1 conversion problem each week and writes the fix as a Pull Request. You approve it with one Telegram reply — and if the numbers drop, <em style={{ fontStyle:'italic', color:C.warm }}>it reverts itself</em>.
+        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 18px)', color:C.textMuted, maxWidth:540, margin:'22px auto 0', lineHeight:1.6 }}>
+          An AI agent that finds your site's biggest conversion leak each week and writes the fix as a Pull Request — you approve it with one Telegram reply.
         </p>
 
         <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:34, flexWrap:'wrap', alignItems:'center', justifyContent:'center' }}>
-          <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
+          <button className="btn-primary btn-green" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
           <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>See how it works</button>
         </div>
         <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:14, letterSpacing:'.01em' }}>
