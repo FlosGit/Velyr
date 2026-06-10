@@ -103,6 +103,32 @@ const CSS = `
     .trust-line { transform:translateY(-50%) scaleX(1) !important; }
   }
 
+  /* ── §2 Why — one merged composition on a center spine. The usual-way side
+     stalls (muted text, a dashed static line); the Velyr side flows — a green
+     line draws top→bottom on scroll-enter and lights each ✓ in turn. Stacks to a
+     plain list ≤640px; settled (line drawn, ✓s green) under reduced-motion. */
+  .why-rows { position:relative; }
+  .why-spine-base { position:absolute; top:6px; bottom:6px; left:50%; width:1px; transform:translateX(-50%);
+    background:repeating-linear-gradient(180deg, rgba(28,25,23,0.15) 0 4px, transparent 4px 10px); }
+  .why-spine-flow { position:absolute; top:6px; left:50%; width:2px; height:calc(100% - 12px); transform:translateX(-50%) scaleY(0);
+    transform-origin:top center; background:#2a5c45; border-radius:2px; transition:transform 1.05s cubic-bezier(.22,.61,.36,1) .1s; }
+  .why-rows.in .why-spine-flow { transform:translateX(-50%) scaleY(1); }
+  .why-x { flex-shrink:0; width:21px; height:21px; border-radius:50%; border:1px solid rgba(28,25,23,0.14);
+    display:flex; align-items:center; justify-content:center; color:#a09890; font-size:10px; }
+  .why-check { flex-shrink:0; width:21px; height:21px; border-radius:50%; border:1px solid rgba(42,92,69,0.3);
+    display:flex; align-items:center; justify-content:center; color:rgba(42,92,69,0.45); font-size:10px; background:transparent;
+    transition:background .45s ease, border-color .45s ease, color .45s ease; }
+  .why-rows.in .why-check { background:#2a5c45; border-color:#2a5c45; color:#fff; }
+  @media (max-width:640px) {
+    .why-spine-base, .why-spine-flow { display:none; }
+    .why-row { grid-template-columns:1fr !important; gap:6px !important; padding:10px 0 !important; }
+    .why-cell-old { flex-direction:row-reverse !important; justify-content:flex-end !important; text-align:left !important; padding-right:0 !important; }
+    .why-cell-neu { padding-left:0 !important; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .why-spine-flow { transform:translateX(-50%) scaleY(1) !important; }
+  }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -1457,17 +1483,24 @@ function TrustStrip() {
 }
 
 // ─── Why / problem + agency comparison ────────────────────────────────────────
+// §2: the two compare cards are merged into one composition around a center
+// spine. The usual-way side (left) stays muted and static (a dashed, stalled
+// line); the Velyr side flows — a green line draws down the spine on scroll-enter
+// and lights each ✓ in turn. Stalled vs flowing, literally.
 function WhySection() {
   const [ref, visible] = useReveal()
+  const [rowsRef, rowsVis] = useReveal()
   const rows = [
     { old:'Hire a CRO agency at €2–5k/mo — or never get around to it.', neu:'€29/mo. One high-impact fix every week, automatically.' },
     { old:'Receive a slide deck of recommendations to build yourself.', neu:'Receive a ready-to-merge Pull Request with the code already written.' },
     { old:'Ship the change and hope it helped.', neu:'Measured 48h later — it auto-reverts if it made things worse.' },
   ]
+  const cellOld = { display:'flex', justifyContent:'flex-end', alignItems:'center', gap:12, paddingRight:18, textAlign:'right' }
+  const cellNeu = { display:'flex', justifyContent:'flex-start', alignItems:'center', gap:12, paddingLeft:18 }
   return (
     <section className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
-        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:40, maxWidth:640 }}>
+        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:44, maxWidth:640 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Why Velyr</p>
           <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text, marginBottom:18 }}>
             Every site leaks conversions.<br /><em style={{ fontStyle:'italic', color:C.warm }}>Fixing them never makes the to-do list.</em>
@@ -1477,22 +1510,30 @@ function WhySection() {
           </p>
         </div>
 
-        <div className="why-compare" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'stretch' }}>
-          <div style={{ background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'28px 30px', opacity:visible?1:0, transform:visible?'none':'translateY(16px)', transition:'all .55s ease .15s' }}>
-            <p style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:C.textLight, fontWeight:400, marginBottom:20 }}>The usual way</p>
-            {rows.map((r,i) => (
-              <div key={i} style={{ display:'flex', gap:11, alignItems:'flex-start', paddingBottom: i<rows.length-1?14:0, marginBottom: i<rows.length-1?14:0, borderBottom: i<rows.length-1?`1px dashed rgba(28,25,23,0.08)`:'none' }}>
-                <span style={{ color:C.textLight, flexShrink:0, marginTop:1, fontSize:13 }}>✕</span>
-                <p style={{ fontSize:14, color:C.textMuted, fontWeight:300, lineHeight:1.6 }}>{r.old}</p>
-              </div>
-            ))}
+        <div style={{ maxWidth:880, margin:'0 auto', opacity:rowsVis?1:0, transform:rowsVis?'none':'translateY(16px)', transition:'opacity .6s ease, transform .6s ease' }}>
+          {/* column headers */}
+          <div className="why-row" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', marginBottom:6 }}>
+            <div className="why-cell-old" style={{ ...cellOld }}>
+              <span style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:C.textLight, fontWeight:400 }}>The usual way</span>
+            </div>
+            <div className="why-cell-neu" style={{ ...cellNeu }}>
+              <span style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:C.accent, fontWeight:500 }}>With Velyr</span>
+            </div>
           </div>
-          <div style={{ background:C.accent, borderRadius:16, padding:'28px 30px', opacity:visible?1:0, transform:visible?'none':'translateY(16px)', transition:'all .55s ease .28s', boxShadow:'0 8px 30px rgba(42,92,69,0.18)' }}>
-            <p style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:'rgba(247,244,239,0.7)', fontWeight:400, marginBottom:20 }}>With Velyr</p>
+
+          <div ref={rowsRef} className={`why-rows ${rowsVis?'in':''}`} style={{ position:'relative' }}>
+            <div className="why-spine-base" aria-hidden="true" />
+            <div className="why-spine-flow" aria-hidden="true" />
             {rows.map((r,i) => (
-              <div key={i} style={{ display:'flex', gap:11, alignItems:'flex-start', paddingBottom: i<rows.length-1?14:0, marginBottom: i<rows.length-1?14:0, borderBottom: i<rows.length-1?`1px dashed rgba(247,244,239,0.18)`:'none' }}>
-                <span style={{ color:'#fff', flexShrink:0, marginTop:1, fontSize:13 }}>✓</span>
-                <p style={{ fontSize:14, color:'rgba(247,244,239,0.92)', fontWeight:300, lineHeight:1.6 }}>{r.neu}</p>
+              <div key={i} className="why-row" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', alignItems:'center', padding:'18px 0' }}>
+                <div className="why-cell-old" style={{ ...cellOld }}>
+                  <p style={{ fontSize:14, color:C.textLight, fontWeight:300, lineHeight:1.55 }}>{r.old}</p>
+                  <span className="why-x">✕</span>
+                </div>
+                <div className="why-cell-neu" style={{ ...cellNeu }}>
+                  <span className="why-check" style={{ transitionDelay:`${0.3 + i * 0.3}s` }}>✓</span>
+                  <p style={{ fontSize:14, color:C.text, fontWeight:400, lineHeight:1.55 }}>{r.neu}</p>
+                </div>
               </div>
             ))}
           </div>
