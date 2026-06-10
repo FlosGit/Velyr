@@ -119,11 +119,15 @@ const CSS = `
     display:flex; align-items:center; justify-content:center; color:rgba(42,92,69,0.45); font-size:10px; background:transparent;
     transition:background .45s ease, border-color .45s ease, color .45s ease; }
   .why-rows.in .why-check { background:#2a5c45; border-color:#2a5c45; color:#fff; }
+  /* equal text column on each side → the two halves wrap identically and stay
+     visually balanced around the true-center spine */
+  .why-rowtext { max-width:300px; }
   @media (max-width:640px) {
     .why-spine-base, .why-spine-flow { display:none; }
     .why-row { grid-template-columns:1fr !important; gap:6px !important; padding:10px 0 !important; }
     .why-cell-old { flex-direction:row-reverse !important; justify-content:flex-end !important; text-align:left !important; padding-right:0 !important; }
     .why-cell-neu { padding-left:0 !important; }
+    .why-rowtext { max-width:none !important; }
   }
   @media (prefers-reduced-motion: reduce) {
     .why-spine-flow { transform:translateX(-50%) scaleY(1) !important; }
@@ -1495,8 +1499,8 @@ function WhySection() {
     { old:'Receive a slide deck of recommendations to build yourself.', neu:'Receive a ready-to-merge Pull Request with the code already written.' },
     { old:'Ship the change and hope it helped.', neu:'Measured 48h later — it auto-reverts if it made things worse.' },
   ]
-  const cellOld = { display:'flex', justifyContent:'flex-end', alignItems:'center', gap:12, paddingRight:18, textAlign:'right' }
-  const cellNeu = { display:'flex', justifyContent:'flex-start', alignItems:'center', gap:12, paddingLeft:18 }
+  const cellOld = { display:'flex', justifyContent:'flex-end', alignItems:'center', gap:12, paddingRight:16, textAlign:'right' }
+  const cellNeu = { display:'flex', justifyContent:'flex-start', alignItems:'center', gap:12, paddingLeft:16 }
   return (
     <section className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
@@ -1510,7 +1514,7 @@ function WhySection() {
           </p>
         </div>
 
-        <div style={{ maxWidth:880, margin:'0 auto', opacity:rowsVis?1:0, transform:rowsVis?'none':'translateY(16px)', transition:'opacity .6s ease, transform .6s ease' }}>
+        <div style={{ maxWidth:720, margin:'0 auto', opacity:rowsVis?1:0, transform:rowsVis?'none':'translateY(16px)', transition:'opacity .6s ease, transform .6s ease' }}>
           {/* column headers */}
           <div className="why-row" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', marginBottom:6 }}>
             <div className="why-cell-old" style={{ ...cellOld }}>
@@ -1527,12 +1531,12 @@ function WhySection() {
             {rows.map((r,i) => (
               <div key={i} className="why-row" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', alignItems:'center', padding:'18px 0' }}>
                 <div className="why-cell-old" style={{ ...cellOld }}>
-                  <p style={{ fontSize:14, color:C.textLight, fontWeight:300, lineHeight:1.55 }}>{r.old}</p>
+                  <p className="why-rowtext" style={{ fontSize:14, color:C.textLight, fontWeight:300, lineHeight:1.55 }}>{r.old}</p>
                   <span className="why-x">✕</span>
                 </div>
                 <div className="why-cell-neu" style={{ ...cellNeu }}>
                   <span className="why-check" style={{ transitionDelay:`${0.3 + i * 0.3}s` }}>✓</span>
-                  <p style={{ fontSize:14, color:C.text, fontWeight:400, lineHeight:1.55 }}>{r.neu}</p>
+                  <p className="why-rowtext" style={{ fontSize:14, color:C.text, fontWeight:400, lineHeight:1.55 }}>{r.neu}</p>
                 </div>
               </div>
             ))}
