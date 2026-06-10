@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { demoData } from './data/demoData'
 import SubscribeButton from './components/SubscribeButton.jsx'
 import SiteNetwork from './components/SiteNetwork.jsx'
 import { mockSiteNetworkData } from './data/mockSiteNetwork.js'
 import { CountUp, MOTION_CSS } from './lib/motion.jsx'
-import HeroLoop from './components/HeroLoop.jsx'
+import HeroWireframe from './components/HeroWireframe.jsx'
 
 const C = {
   bg:          '#f7f4ef',
@@ -69,6 +69,14 @@ const CSS = `
      schedule scrolls beside it (native sticky, no scroll-jacking). */
   .hiw-anchor { position: sticky; top: 84px; align-self: start; }
 
+  /* Feathered cream wash between the hero animation and the centered copy —
+     keeps the headline fully legible without ever reading as a box. */
+  .hero-wash {
+    position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background: radial-gradient(ellipse 560px 350px at 50% 46%,
+      rgba(247,244,239,0.95) 0%, rgba(247,244,239,0.72) 52%, rgba(247,244,239,0) 78%);
+  }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -83,9 +91,7 @@ const CSS = `
     nav { padding: 0 16px !important; }
     .nav-agent-link { display: none !important; }
     .nav-burger { display: flex !important; }
-    .hero-section { padding: 96px 16px 48px !important; }
-    .hero-stats { flex-direction: column !important; align-items: stretch !important; gap: 10px !important; }
-    .hero-flow-arrow { display: none !important; }
+    .hero-section { padding: 104px 16px 56px !important; min-height: 0 !important; }
     .section-pad { padding: 64px 16px !important; }
     .pricing-grid { grid-template-columns: 1fr !important; }
     .footer-inner { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
@@ -103,8 +109,8 @@ const CSS = `
 
   @media (max-width: 900px) {
     .agent-bottom-grid { grid-template-columns: 1fr !important; }
-    .hero-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
-    .hero-visual { order: 2; max-width: 360px; margin: 8px auto 0 !important; }
+    .hero-section { min-height: 0 !important; padding-top: 120px !important; padding-bottom: 64px !important; }
+    .hero-wash { display: none !important; }
     .hiw-anchor { position: static !important; top: auto !important; }
   }
   @media (max-width: 768px) {
@@ -317,68 +323,46 @@ function Nav({ navigate }) {
 }
 
 // ─── Hero ──────────────────────────────────────────────────────────────────────
+// Centered copy over the full-bleed HeroWireframe animation. A feathered cream
+// wash (.hero-wash) sits between the art and the text so the headline stays
+// fully legible at every width — soft radial falloff, never a visible box.
+// ≤900px the full-bleed scene is replaced by HeroWireframe's compact vignette,
+// which flexes below the copy (order:1).
 function Hero({ navigate }) {
   const [ref, visible] = useReveal()
-
-  // The three honest steps of a weekly run — describes the product, no fabricated metrics.
-  const flow = [
-    { n: '01', text: 'Reads your analytics + repo' },
-    { n: '02', text: 'Opens a PR with the fix' },
-    { n: '03', text: 'You approve on Telegram' },
-  ]
-
   const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
 
   return (
-    <section className="hero-section" style={{ paddingTop:120, paddingBottom:64, paddingLeft:24, paddingRight:24, background:C.bg }}>
-      <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ maxWidth:1060, margin:'0 auto' }}>
+    <section className="hero-section" style={{
+      position:'relative', overflow:'hidden', background:C.bg,
+      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+      minHeight:'min(92vh, 800px)', padding:'140px 24px 88px',
+    }}>
+      <HeroWireframe />
+      <div className="hero-wash" aria-hidden="true" />
 
-        <div className="hero-grid" style={{ display:'grid', gridTemplateColumns:'1.05fr 0.95fr', gap:48, alignItems:'center' }}>
-
-          {/* LEFT — copy */}
-          <div className="hero-copy">
-            {/* Brand eyebrow — calm, static (no live-activity implication) */}
-            <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:18 }}>
-              <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
-              <span style={{ fontSize:11, letterSpacing:'.16em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>AI Growth Agent · for React, Next.js & Vite</span>
-            </div>
-
-            <h1 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(36px, 5.4vw, 60px)', lineHeight:1.08, letterSpacing:'-.025em', color:C.text }}>
-              Conversion fixes, <em style={{ fontStyle:'italic', color:C.warm }}>shipped weekly</em>.
-            </h1>
-
-            <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 18px)', color:C.textMuted, maxWidth:520, marginTop:22, lineHeight:1.6 }}>
-              An AI agent that finds your site's #1 conversion problem each week and writes the fix as a Pull Request. You approve it with one Telegram reply — and if the numbers drop, <em style={{ fontStyle:'italic', color:C.warm }}>it reverts itself</em>.
-            </p>
-
-            <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:32, flexWrap:'wrap', alignItems:'center' }}>
-              <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
-              <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>See how it works</button>
-            </div>
-            <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:14, letterSpacing:'.01em' }}>
-              14-day free trial · You approve every change · Cancel anytime
-            </p>
-          </div>
-
-          {/* RIGHT — the living growth loop (echoes the dashboard's SiteNetwork) */}
-          <div className="hero-visual" style={{ display:'flex', justifyContent:'center', alignItems:'center' }}>
-            <HeroLoop />
-          </div>
+      <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ position:'relative', zIndex:2, maxWidth:780, margin:'0 auto', textAlign:'center' }}>
+        {/* Brand eyebrow — calm, static (no live-activity implication) */}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:9, marginBottom:18 }}>
+          <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
+          <span style={{ fontSize:11, letterSpacing:'.16em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>AI Growth Agent · for React, Next.js & Vite</span>
         </div>
 
-        <div className="hero-stats" style={{ marginTop:44, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
-          {flow.map((s, i) => (
-            <Fragment key={s.n}>
-              <div style={{ display:'flex', alignItems:'center', gap:11, border:`1px solid ${C.border}`, borderRadius:12, background:C.bgCard, padding:'12px 16px' }}>
-                <span style={{ fontFamily:'DM Mono, monospace', fontSize:11, letterSpacing:'.06em', color:C.accent, fontWeight:400 }}>{s.n}</span>
-                <span style={{ fontFamily:'Jost, sans-serif', fontSize:14, fontWeight:300, color:C.text, whiteSpace:'nowrap' }}>{s.text}</span>
-              </div>
-              {i < flow.length - 1 && (
-                <span className="hero-flow-arrow" style={{ color:C.textLight, fontSize:15, lineHeight:1 }} aria-hidden="true">→</span>
-              )}
-            </Fragment>
-          ))}
+        <h1 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(38px, 5.6vw, 66px)', lineHeight:1.08, letterSpacing:'-.025em', color:C.text }}>
+          Conversion fixes, <em style={{ fontStyle:'italic', color:C.warm }}>shipped weekly</em>.
+        </h1>
+
+        <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 18px)', color:C.textMuted, maxWidth:560, margin:'22px auto 0', lineHeight:1.6 }}>
+          An AI agent that finds your site's #1 conversion problem each week and writes the fix as a Pull Request. You approve it with one Telegram reply — and if the numbers drop, <em style={{ fontStyle:'italic', color:C.warm }}>it reverts itself</em>.
+        </p>
+
+        <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:34, flexWrap:'wrap', alignItems:'center', justifyContent:'center' }}>
+          <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
+          <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>See how it works</button>
         </div>
+        <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:14, letterSpacing:'.01em' }}>
+          14-day free trial · You approve every change · Cancel anytime
+        </p>
       </div>
     </section>
   )
