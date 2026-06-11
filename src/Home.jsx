@@ -201,6 +201,28 @@ const CSS = `
     .dash-boot .dash-preview-shell, .dash-boot .dp-leftnav, .dash-boot .dp-main { opacity:1 !important; transform:none !important; }
   }
 
+  /* ── §5 Differentiators — alternating full-width rows; each row's bespoke
+     line-icon draws (stroke-dashoffset, ~600ms) on scroll-enter, then dots pop
+     in. One-time, no infinite motion. Stacks ≤760px; settled under reduced-motion. */
+  .diff-rows { display:flex; flex-direction:column; }
+  .diff-row { display:flex; align-items:center; gap:48px; padding:38px 0; border-top:1px solid rgba(28,25,23,0.09); }
+  .diff-row:last-child { border-bottom:1px solid rgba(28,25,23,0.09); }
+  .diff-row.rev { flex-direction:row-reverse; }
+  .diff-medallion { width:112px; height:112px; border-radius:50%; background:rgba(42,92,69,0.07); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .diff-row-text { flex:1; max-width:560px; }
+  .diff-draw { stroke-dasharray:1; stroke-dashoffset:1; }
+  .diff-row.in .diff-draw { stroke-dashoffset:0; transition:stroke-dashoffset .6s cubic-bezier(.4,0,.2,1); }
+  .diff-dot { opacity:0; transform:scale(.3); transform-box:fill-box; transform-origin:center; }
+  .diff-row.in .diff-dot { opacity:1; transform:scale(1); transition:opacity .3s ease .5s, transform .3s cubic-bezier(.22,.61,.36,1) .5s; }
+  @media (max-width:760px) {
+    .diff-row, .diff-row.rev { flex-direction:column; align-items:flex-start; gap:18px; padding:28px 0; }
+    .diff-medallion { width:88px; height:88px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .diff-draw { stroke-dashoffset:0 !important; }
+    .diff-dot { opacity:1 !important; transform:none !important; }
+  }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -1657,9 +1679,62 @@ function ShowcaseSection({ navigate }) {
 }
 
 // ─── Differentiators (beyond the weekly fix) ──────────────────────────────────
+// §5: each differentiator is a full-width row with sides alternating. A bespoke
+// line-icon draws itself (stroke-dashoffset) on scroll-enter, then any accent
+// dots pop in. One-time only.
+function DiffIcon({ name }) {
+  const s = { width:72, height:72, viewBox:'0 0 72 72', fill:'none', stroke:C.accent, strokeWidth:1.6, strokeLinecap:'round', strokeLinejoin:'round' }
+  if (name === 'chat') return (
+    <svg {...s} aria-hidden="true">
+      <path className="diff-draw" pathLength="1" d="M16 16 h40 a8 8 0 0 1 8 8 v16 a8 8 0 0 1 -8 8 H34 l-11 9 v-9 h-7 a8 8 0 0 1 -8 -8 V24 a8 8 0 0 1 8 -8 z" />
+      <path className="diff-draw" pathLength="1" d="M25 32 l7 7 14 -14" />
+    </svg>
+  )
+  if (name === 'scan') return (
+    <svg {...s} aria-hidden="true">
+      <circle className="diff-draw" pathLength="1" cx="36" cy="36" r="23" />
+      <circle className="diff-draw" pathLength="1" cx="36" cy="36" r="13" />
+      <path className="diff-draw" pathLength="1" d="M36 36 L55 23" />
+      <circle className="diff-dot" cx="49" cy="46" r="3" fill={C.accent} stroke="none" />
+    </svg>
+  )
+  if (name === 'report') return (
+    <svg {...s} aria-hidden="true">
+      <path className="diff-draw" pathLength="1" d="M24 13 h18 l11 11 v33 a3 3 0 0 1 -3 3 H24 a3 3 0 0 1 -3 -3 V16 a3 3 0 0 1 3 -3 z" />
+      <path className="diff-draw" pathLength="1" d="M42 13 v11 h11" />
+      <path className="diff-draw" pathLength="1" d="M28 36 h17" />
+      <path className="diff-draw" pathLength="1" d="M28 44 h17" />
+      <path className="diff-draw" pathLength="1" d="M28 52 h9" />
+    </svg>
+  )
+  if (name === 'share') return (
+    <svg {...s} aria-hidden="true">
+      <path className="diff-draw" pathLength="1" d="M14 55 H58" />
+      <path className="diff-draw" pathLength="1" d="M16 50 L30 40 L44 30 L57 17" />
+      <path className="diff-draw" pathLength="1" d="M50 17 h7 v7" />
+      <circle className="diff-dot" cx="30" cy="40" r="3" fill="#fff" stroke={C.accent} strokeWidth="1.6" />
+      <circle className="diff-dot" cx="44" cy="30" r="3" fill="#fff" stroke={C.accent} strokeWidth="1.6" />
+    </svg>
+  )
+  return null
+}
+
+function DiffRow({ item, i }) {
+  const [ref, vis] = useReveal()
+  return (
+    <div ref={ref} className={`diff-row ${i % 2 === 1 ? 'rev' : ''} ${vis ? 'in' : ''}`}>
+      <div className="diff-medallion"><DiffIcon name={item.icon} /></div>
+      <div className="diff-row-text" style={{ opacity: vis ? 1 : 0, transform: vis ? 'none' : 'translateY(12px)', transition: 'opacity .5s ease .15s, transform .5s ease .15s' }}>
+        <h3 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:400, fontSize:26, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{item.title}</h3>
+        <p style={{ fontSize:15, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{item.desc}</p>
+      </div>
+    </div>
+  )
+}
+
 function DifferentiatorsSection() {
   const [ref, visible] = useReveal()
-  const cards = [
+  const rows = [
     { icon:'chat',   title:'One-tap Telegram approval', desc:'Every Monday you get the problem, the data, the fix and the PR link in Telegram. Reply YES to ship or NO to skip — nothing goes live without you.' },
     { icon:'scan',   title:'Competitor weekly scan', desc:"Track up to 2 competitors. The agent watches their hero, CTA and pricing each week and tells you what they shipped that you didn't." },
     { icon:'report', title:'Monthly roast report', desc:'Once a month, brutal honesty: what improved, what is still embarrassingly bad versus competitors, and what you keep ignoring.' },
@@ -1667,28 +1742,15 @@ function DifferentiatorsSection() {
   ]
   return (
     <section className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
-      <div style={{ maxWidth:1060, margin:'0 auto' }}>
-        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:36, maxWidth:640 }}>
+      <div style={{ maxWidth:1000, margin:'0 auto' }}>
+        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:24, maxWidth:640 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>More than a weekly fix</p>
           <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text }}>
             Always watching, <em style={{ fontStyle:'italic', color:C.warm }}>always honest.</em>
           </h2>
         </div>
-        <div className="diff-grid" style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:16 }}>
-          {cards.map((c,i) => (
-            <div key={i} style={{
-              opacity:visible?1:0, transform:visible?'none':'translateY(16px)',
-              transition:`opacity .5s ease ${0.1 + i*0.08}s, transform .5s ease ${0.1 + i*0.08}s`,
-            }}>
-              <div className="lift" style={{
-                height:'100%', background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'30px 30px',
-              }}>
-                <div style={{ marginBottom:16 }}><CardIcon name={c.icon} /></div>
-                <h3 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:400, fontSize:21, color:C.text, marginBottom:10, letterSpacing:'-.01em' }}>{c.title}</h3>
-                <p style={{ fontSize:14, color:C.textMuted, lineHeight:1.72, fontWeight:300 }}>{c.desc}</p>
-              </div>
-            </div>
-          ))}
+        <div className="diff-rows">
+          {rows.map((r, i) => <DiffRow key={i} item={r} i={i} />)}
         </div>
       </div>
     </section>
