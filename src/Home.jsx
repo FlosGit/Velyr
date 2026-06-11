@@ -223,6 +223,15 @@ const CSS = `
     .diff-dot { opacity:1 !important; transform:none !important; }
   }
 
+  /* ── §6 Requirements — the "runs on your stack" chips light green in sequence
+     on enter (per-chip transition-delay). Settled lit under reduced-motion. */
+  .stack-chip { display:inline-flex; align-items:center; gap:8px; padding:8px 15px; border-radius:999px;
+    border:1px solid rgba(28,25,23,0.15); background:transparent; font-size:13px; font-weight:400; color:#a09890;
+    letter-spacing:.01em; transition:color .4s ease, border-color .4s ease, background .4s ease; }
+  .stack-chip .stack-dot { width:7px; height:7px; border-radius:50%; background:rgba(28,25,23,0.2); transition:background .4s ease; }
+  .stack-chips.in .stack-chip { color:#2a5c45; border-color:rgba(42,92,69,0.4); background:rgba(42,92,69,0.07); }
+  .stack-chips.in .stack-chip .stack-dot { background:#2a5c45; }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -1350,12 +1359,22 @@ function AgentRequirements() {
   return (
     <section id="agent-requirements" className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
-        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:36 }}>
+        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:26 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Before you subscribe</p>
           <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em', lineHeight:1.12 }}>Will the agent work for you?</h2>
           <p style={{ fontSize:15, color:C.textMuted, fontWeight:300, marginTop:14, maxWidth:560, lineHeight:1.65 }}>
             The Growth Agent reads your code, opens Pull Requests, and notifies you on Telegram. To do its job it needs five things — check you have them before you subscribe.
           </p>
+        </div>
+
+        {/* "runs on your stack" — the three supported frameworks light green in sequence */}
+        <div className={`stack-chips ${visible?'in':''}`} style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginBottom:30 }}>
+          <span style={{ fontSize:12, color:C.textLight, fontWeight:400, letterSpacing:'.02em', marginRight:4 }}>Runs on your stack</span>
+          {['React','Next.js','Vite'].map((name, i) => (
+            <span key={name} className="stack-chip" style={{ transitionDelay:`${0.15 + i*0.16}s` }}>
+              <span className="stack-dot" />{name}
+            </span>
+          ))}
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:10, marginBottom:18 }}>
