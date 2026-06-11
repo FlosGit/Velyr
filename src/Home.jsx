@@ -1447,7 +1447,12 @@ function Pricing({ navigate }) {
             <p style={{ color:'rgba(247,244,239,0.5)', fontSize:12, marginBottom:4, fontWeight:300, marginTop:4 }}>per month · cancel anytime</p>
             <div style={{ display:'flex', flexDirection:'column', gap:9, marginBottom:0 }}>
               {agentFeaturesTop.map((f,j) => (
-                <div key={j} style={{ display:'flex', alignItems:'flex-start', gap:9, fontSize:13 }}>
+                <div key={j} style={{
+                  display:'flex', alignItems:'flex-start', gap:9, fontSize:13,
+                  opacity: visible ? 1 : 0,
+                  transform: visible ? 'none' : 'translateY(8px)',
+                  transition: `opacity .4s ease ${0.4 + j*0.09}s, transform .4s ease ${0.4 + j*0.09}s`,
+                }}>
                   <span style={{ color:'rgba(247,244,239,0.7)', flexShrink:0, marginTop:1 }}>✓</span>
                   <span style={{ color:'rgba(247,244,239,0.85)', fontWeight:300 }}>{f}</span>
                 </div>
