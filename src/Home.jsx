@@ -232,6 +232,15 @@ const CSS = `
   .stack-chips.in .stack-chip { color:#2a5c45; border-color:rgba(42,92,69,0.4); background:rgba(42,92,69,0.07); }
   .stack-chips.in .stack-chip .stack-dot { background:#2a5c45; }
 
+  /* ── §8 Closing mark — the hero's healed green marker returns once, above the
+     final CTA. A single soft ring pulse on enter (no infinite motion), settling
+     to a static node + faint ring. Static under reduced-motion. */
+  .close-mark { display:inline-flex; align-items:center; justify-content:center; margin-bottom:24px; }
+  .close-mark .cm-pulse { transform-box:fill-box; transform-origin:center; opacity:0; }
+  .close-mark.in .cm-pulse { animation:cmPulse 1.6s cubic-bezier(.22,.61,.36,1) .3s both; }
+  @keyframes cmPulse { 0% { transform:scale(.55); opacity:.5; } 100% { transform:scale(2.3); opacity:0; } }
+  @media (prefers-reduced-motion: reduce) { .close-mark .cm-pulse { display:none !important; } }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -1787,6 +1796,14 @@ function ClosingCTA({ navigate }) {
   return (
     <section className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, padding:'96px 24px' }}>
       <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ maxWidth:680, margin:'0 auto', textAlign:'center' }}>
+        {/* the hero's healed green marker, returning as the closing mark */}
+        <div className={`close-mark ${visible?'in':''}`} aria-hidden="true">
+          <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
+            <circle className="cm-pulse" cx="26" cy="26" r="10" stroke={C.accent} strokeWidth="1.4" />
+            <circle cx="26" cy="26" r="17" stroke={C.accent} strokeWidth="1" opacity="0.22" />
+            <circle cx="26" cy="26" r="5" fill={C.accent} stroke={C.bgSecond} strokeWidth="1.5" />
+          </svg>
+        </div>
         <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(32px, 5vw, 56px)', letterSpacing:'-.025em', lineHeight:1.08, color:C.text, marginBottom:18 }}>
           Let the agent ship your <em style={{ fontStyle:'italic', color:C.warm }}>next win.</em>
         </h2>
