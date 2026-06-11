@@ -133,11 +133,61 @@ const CSS = `
     .why-spine-flow { transform:translateX(-50%) scaleY(1) !important; }
   }
 
+  /* ── §3 How it works — sticky 5-marker spine. The right column scrolls the
+     steps; an IntersectionObserver lights each marker as its step crosses centre,
+     so the per-step advance is clearly visible. The pin is short (~1 viewport).
+     ≤900px the rail is dropped and the steps become a plain revealed list. */
+  .hiw-stage { display:grid; grid-template-columns:296px 1fr; gap:48px; align-items:start; }
+  .hiw-rail { position:sticky; top:104px; align-self:start; }
+  .hiw-marker { display:flex; gap:16px; align-items:flex-start; }
+  .hiw-marker:not(:last-child) { min-height:86px; }
+  .hiw-dotcol { display:flex; flex-direction:column; align-items:center; flex-shrink:0; align-self:stretch; }
+  .hiw-dot { width:30px; height:30px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-family:'DM Mono',monospace; font-size:12px; border:1px solid rgba(28,25,23,0.16); background:#fff; color:#a09890;
+    transition:background .4s ease, border-color .4s ease, color .4s ease, transform .4s ease, box-shadow .4s ease; }
+  .hiw-dot-check { display:none; }
+  .hiw-seg { width:2px; flex:1; min-height:54px; background:rgba(28,25,23,0.12); position:relative; }
+  .hiw-seg::after { content:''; position:absolute; left:0; top:0; right:0; bottom:0; background:#2a5c45; transform:scaleY(0); transform-origin:top center; transition:transform .55s cubic-bezier(.22,.61,.36,1); }
+  .hiw-marker.done .hiw-seg::after { transform:scaleY(1); }
+  .hiw-marker.lit .hiw-dot { background:#2a5c45; border-color:#2a5c45; color:#fff; }
+  .hiw-marker.lit .hiw-dot-num { display:none; }
+  .hiw-marker.lit .hiw-dot-check { display:block; }
+  .hiw-marker.active .hiw-dot { transform:scale(1.14); box-shadow:0 0 0 5px rgba(42,92,69,0.12); }
+  .hiw-mlabel { font-size:14px; font-weight:500; color:#a09890; transition:color .4s ease; }
+  .hiw-marker.lit .hiw-mlabel { color:#1c1917; }
+  .hiw-msub { font-size:11.5px; color:#a09890; font-weight:300; margin-top:3px; }
+  /* each step self-reveals (opacity 0 → 1 once seen); desktop dims the steps that
+     are still ahead of the active marker. A per-step gate (not a column-level one)
+     means an anchor jump can never leave the whole column hidden. */
+  .hiw-step { opacity:0; transform:translateY(12px); transition:opacity .55s ease, transform .55s ease; }
+  .hiw-step.seen { opacity:1; transform:none; }
+  .hiw-step.seen.dim { opacity:0.36; }
+  .hiw-below { margin-top:72px; }
+  .hiw-cta { display:flex; justify-content:space-between; align-items:center; gap:22px 40px; flex-wrap:wrap; }
+  @media (max-width:900px) {
+    .hiw-stage { grid-template-columns:1fr; gap:0; }
+    .hiw-rail { display:none; }
+    .hiw-step.seen.dim { opacity:1; }   /* mobile drops the desktop dim; plain reveal only */
+    .hiw-step { padding-bottom:32px !important; }
+    .hiw-below { margin-top:48px; }
+  }
+  @media (max-width:640px) {
+    .agent-stats-grid { grid-template-columns:1fr !important; }
+    .hiw-cta { flex-direction:column; align-items:flex-start; }
+    .hiw-step p { padding-left:0 !important; }
+  }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
 
-  html, body { overflow-x: hidden; max-width: 100vw; }
+  /* Keep html as the page scroll container (so position:sticky binds to it), but
+     use overflow-x:clip on body/#root instead of hidden — clip still prevents
+     horizontal scroll yet does NOT force overflow-y:auto, so they don't become
+     nested scroll containers that would break the §3 sticky rail. Overrides the
+     index.html shell rules (this <style> is injected later in the cascade). */
+  html { overflow-x: hidden; max-width: 100vw; }
+  body, #root { overflow-x: clip; max-width: 100vw; }
   img, svg, video { max-width: 100%; height: auto; }
 
   .nav-burger { display: none; }
@@ -427,81 +477,67 @@ function Hero({ navigate }) {
   )
 }
 
-// One phase block of the weekly schedule, revealing as it scrolls into view.
-// Used by the "How it works" sticky scrollytelling (each phase advances as you
-// scroll past the pinned value/CTA anchor).
-function SchedulePhase({ phase }) {
-  const [ref, vis] = useReveal()
-  return (
-    <div ref={ref} style={{
-      background:'#fff', border:`1px solid ${C.border}`, borderRadius:16, padding:'22px 26px',
-      opacity: vis ? 1 : 0, transform: vis ? 'none' : 'translateY(20px)',
-      transition: 'opacity .6s cubic-bezier(.22,.61,.36,1), transform .6s cubic-bezier(.22,.61,.36,1)',
-    }}>
-      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
-        <div style={{ width:8, height:8, borderRadius:'50%', background:phase.color, flexShrink:0 }} />
-        <span style={{ fontSize:13, fontWeight:500, color:phase.color, letterSpacing:'.02em' }}>{phase.phase}</span>
-        <div style={{ flex:1, height:1, background:C.border }} />
-      </div>
-      <div style={{ paddingLeft:18, display:'flex', flexDirection:'column', gap:0 }}>
-        {phase.steps.map((step, si) => (
-          <div key={si} style={{
-            display:'flex', gap:14, alignItems:'flex-start',
-            paddingBottom: si < phase.steps.length - 1 ? 14 : 0,
-            marginBottom: si < phase.steps.length - 1 ? 14 : 0,
-            borderBottom: si < phase.steps.length - 1 ? `1px dashed rgba(28,25,23,0.07)` : 'none',
-          }}>
-            <div style={{ width:56, flexShrink:0, paddingTop:1 }}>
-              <span style={{ fontSize:11, color:C.textLight, fontWeight:300, fontFamily:'DM Mono, monospace' }}>{step.time}</span>
-            </div>
-            <div style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
-              <span style={{ fontSize:14, lineHeight:1, marginTop:1 }}>{step.icon}</span>
-              <p style={{ fontSize:13, color:C.text, fontWeight:300, lineHeight:1.55 }}>{step.text}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Growth Agent Section ─────────────────────────────────────────────────────
+// ─── Growth Agent Section (§3: sticky 5-marker spine) ─────────────────────────
+// The pinned left rail is the five-stage spine (detect → PR → approve → ship →
+// measure). The right column scrolls the weekly schedule mapped to those stages;
+// an IntersectionObserver lights each marker as its step crosses the viewport
+// centre, so the per-step advance reads clearly. The pin is short (~1 viewport).
+// ≤900px the rail is dropped and the steps become a plain revealed list. The
+// stats trio + green CTA sit full-width below the spine.
 function GrowthAgentSection({ navigate }) {
   const [ref, visible] = useReveal()
+  const [statsRef, statsVis] = useReveal()
+  const [active, setActive] = useState(PREFERS_REDUCED ? 4 : 0)
+  const [seen, setSeen] = useState(() => new Set(PREFERS_REDUCED ? [0, 1, 2, 3, 4] : []))
+  const stepEls = useRef([])
 
-  const timelinePhases = [
-    {
-      phase: 'Monday',
-      color: C.accent,
-      steps: [
-        { time:'8:00 am',  icon:'📊', text:'Weekly Executive Summary sent to Telegram — traffic, bounce rate, last week\'s impact.' },
-        { time:'9:00 am',  icon:'🔍', text:'Agent reads your PostHog analytics — traffic, bounce, plus how far visitors scroll and what they click — and scans every page in your GitHub repo.' },
-        { time:'9:10 am',  icon:'🎯', text:'Identifies the #1 conversion problem across your full funnel.' },
-        { time:'9:15 am',  icon:'✍️', text:'Writes the code fix and opens a Pull Request with a Vercel preview link.' },
-        { time:'9:20 am',  icon:'📲', text:'Telegram message arrives — problem, data, solution, PR link. Reply YES to ship, NO to skip.' },
-      ]
-    },
-    {
-      phase: 'Wednesday',
-      color: C.warm,
-      steps: [
-        { time:'9:00 am',  icon:'📈', text:'Mid-week check: traffic trend, bounce rate, and top traffic sources.' },
-      ]
-    },
-    {
-      phase: '+48h after deploy',
-      color: C.yellow,
-      steps: [
-        { time:'Auto',  icon:'🔄', text:'Bounce rate check — if it rose 15 percentage points or more, the agent auto-reverts and notifies you.' },
-      ]
-    },
+  const markers = [
+    { label:'Detect',       sub:'reads analytics + repo' },
+    { label:'Pull Request', sub:'writes the fix' },
+    { label:'Approve',      sub:'one Telegram reply' },
+    { label:'Ship',         sub:'merged + deployed' },
+    { label:'Measure',      sub:'auto-reverts if worse' },
+  ]
+  const steps = [
+    { n:'01', label:'Detect',       time:'Mon · 9:00',  text:'The agent reads your PostHog analytics — traffic, bounce, how far visitors scroll and what they click — and scans every page in your GitHub repo to pinpoint the #1 conversion problem across your funnel.' },
+    { n:'02', label:'Pull Request', time:'Mon · 9:15',  text:'It writes the code fix and opens a GitHub Pull Request — with a Vercel preview link, so you can see the change before it ever goes live.' },
+    { n:'03', label:'Approve',      time:'Mon · 9:20',  text:'A Telegram message arrives with the problem, the data behind it, the fix and the PR link. Reply YES to ship or NO to skip — nothing goes live without you.' },
+    { n:'04', label:'Ship',         time:'On your YES', text:'The agent merges the Pull Request and Vercel deploys it to production automatically. No manual steps, no waiting around.' },
+    { n:'05', label:'Measure',      time:'48h later',   text:'It checks your bounce rate 48 hours after deploy — if it rose 15 points or more, the agent auto-reverts and tells you. A Wednesday mid-week check watches traffic and bounce too.' },
+  ]
+
+  // Two observers on the step blocks: a thin centre band lights the rail markers
+  // (active = the step at centre; markers ≤ active are lit), and a normal-threshold
+  // observer marks each step "seen" so it fades in once (never un-seen).
+  useEffect(() => {
+    if (PREFERS_REDUCED || typeof IntersectionObserver === 'undefined') return
+    const bandIO = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) setActive(Number(e.target.dataset.idx)) })
+    }, { rootMargin: '-48% 0px -48% 0px', threshold: 0 })
+    const seenIO = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) setSeen(prev => {
+          const idx = Number(e.target.dataset.idx)
+          if (prev.has(idx)) return prev
+          const next = new Set(prev); next.add(idx); return next
+        })
+      })
+    }, { threshold: 0.25 })
+    stepEls.current.forEach(el => { if (el) { bandIO.observe(el); seenIO.observe(el) } })
+    return () => { bandIO.disconnect(); seenIO.disconnect() }
+  }, [])
+
+  const stats = [
+    { value:'Every Monday', label:'Agent runs automatically', sub:'no manual work needed' },
+    { value:'48h', num:48, format:(n)=>`${Math.round(n)}h`, label:'Auto-rollback window', sub:'reverts if metrics drop' },
+    { value:'100%', num:100, format:(n)=>`${Math.round(n)}%`, label:'Approval stays with you', sub:'nothing ships without your OK' },
   ]
 
   return (
     <section id="growth-agent" className="growth-section" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, padding:'96px 24px' }}>
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
 
-        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:64 }}>
+        <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:56 }}>
           <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:16 }}>
             <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, flexShrink:0 }} />
             <span style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>How it works</span>
@@ -518,65 +554,82 @@ function GrowthAgentSection({ navigate }) {
           </p>
         </div>
 
-        {/* How it works + CTA side by side */}
-        <div className="agent-bottom-grid" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
-
-          <div className="hiw-schedule" style={{ display:'flex', flexDirection:'column', gap:12 }}>
-            <p style={{ fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:C.textLight, fontWeight:400, marginBottom:2 }}>Weekly schedule</p>
-            {timelinePhases.map((phase, pi) => (
-              <SchedulePhase key={pi} phase={phase} />
+        {/* sticky 5-marker spine + scrolling steps */}
+        <div className="hiw-stage">
+          <div className="hiw-rail" aria-hidden="true">
+            {markers.map((m, i) => (
+              <div key={i} className={`hiw-marker ${i <= active ? 'lit' : ''} ${i < active ? 'done' : ''} ${i === active ? 'active' : ''}`}>
+                <div className="hiw-dotcol">
+                  <div className="hiw-dot">
+                    <span className="hiw-dot-num">{i + 1}</span>
+                    <span className="hiw-dot-check">✓</span>
+                  </div>
+                  {i < markers.length - 1 && <div className="hiw-seg" />}
+                </div>
+                <div style={{ paddingTop:3 }}>
+                  <p className="hiw-mlabel">{m.label}</p>
+                  <p className="hiw-msub">{m.sub}</p>
+                </div>
+              </div>
             ))}
           </div>
 
-          <div className="hiw-anchor" style={{ display:'flex', flexDirection:'column', gap:12 }}>
-            {[
-              { value:'Every Monday', label:'Agent runs automatically', sub:'no manual work needed' },
-              { value:'48h', num:48, format:(n)=>`${Math.round(n)}h`, label:'Auto-rollback window', sub:'reverts if metrics drop' },
-              { value:'100%', num:100, format:(n)=>`${Math.round(n)}%`, label:'Approval stays with you', sub:'nothing ships without your OK' },
-            ].map((stat, i) => (
+          <div className="hiw-steps">
+            {steps.map((s, i) => (
+              <div key={i} data-idx={i} ref={el => { stepEls.current[i] = el }} className={`hiw-step ${seen.has(i) ? 'seen' : ''} ${i > active ? 'dim' : ''}`} style={{ paddingBottom: i < steps.length - 1 ? 56 : 0 }}>
+                <div style={{ display:'flex', alignItems:'baseline', gap:14, marginBottom:10 }}>
+                  <span style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:34, color:C.accent, lineHeight:1, letterSpacing:'-.02em' }}>{s.n}</span>
+                  <span style={{ fontSize:13, fontWeight:500, color:C.text, letterSpacing:'.02em', textTransform:'uppercase' }}>{s.label}</span>
+                  <span style={{ fontSize:11.5, color:C.textLight, fontFamily:'DM Mono, monospace', marginLeft:'auto' }}>{s.time}</span>
+                </div>
+                <p style={{ fontSize:15, color:C.textMuted, fontWeight:300, lineHeight:1.7, maxWidth:540, paddingLeft:48 }}>{s.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* full-width below the spine: stats trio + green CTA */}
+        <div className="hiw-below">
+          <div ref={statsRef} className="agent-stats-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16, marginBottom:16 }}>
+            {stats.map((stat, i) => (
               <div key={i} style={{
-                background:'#fff', border:`1px solid ${C.border}`, borderRadius:14,
-                padding:'22px 26px',
-                opacity: visible ? 1 : 0,
-                transform: visible ? 'none' : 'translateX(16px)',
-                transition: `all .5s ease ${0.35 + i * 0.1}s`,
+                background:'#fff', border:`1px solid ${C.border}`, borderRadius:14, padding:'24px 26px',
+                opacity: statsVis ? 1 : 0, transform: statsVis ? 'none' : 'translateY(14px)', transition:`all .5s ease ${i * 0.1}s`,
               }}>
-                <p style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:30, color:C.accent, letterSpacing:'-.02em', lineHeight:1, marginBottom:6 }}>{stat.num != null ? <CountUp value={visible ? stat.num : 0} format={stat.format} /> : stat.value}</p>
-                <p style={{ fontSize:13, fontWeight:400, color:C.text, marginBottom:2 }}>{stat.label}</p>
+                <p style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:32, color:C.accent, letterSpacing:'-.02em', lineHeight:1, marginBottom:8 }}>{stat.num != null ? <CountUp value={statsVis ? stat.num : 0} format={stat.format} /> : stat.value}</p>
+                <p style={{ fontSize:13.5, fontWeight:400, color:C.text, marginBottom:3 }}>{stat.label}</p>
                 <p style={{ fontSize:12, color:C.textLight, fontWeight:300 }}>{stat.sub}</p>
               </div>
             ))}
+          </div>
 
-            <div className="agent-cta-card" style={{
-              background:C.accent, borderRadius:14, padding:'28px 26px',
-              opacity: visible ? 1 : 0,
-              transform: visible ? 'none' : 'translateY(12px)',
-              transition: 'all .6s ease .65s',
-            }}>
-              <p style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:24, color:'#fff', letterSpacing:'-.015em', marginBottom:6 }}>Ready to let the agent work?</p>
-              <p style={{ fontSize:13, color:'rgba(247,244,239,0.6)', fontWeight:300, marginBottom:20 }}>Set up in a few minutes. 14-day free trial, then €29/month. Cancel anytime.</p>
-              <div style={{ display:'flex', gap:8, flexDirection:'column' }}>
-                <button onClick={() => navigate('/agent/register')} style={{
-                  background:'#f7f4ef', color:C.text, border:'none', borderRadius:10,
-                  padding:'13px', fontSize:14, fontFamily:'Jost,sans-serif', fontWeight:500,
-                  cursor:'pointer', letterSpacing:'.02em', transition:'all .2s',
-                }}
-                  onMouseEnter={e => { e.currentTarget.style.background='#fff' }}
-                  onMouseLeave={e => { e.currentTarget.style.background='#f7f4ef' }}
-                >Start free trial →</button>
-                <button onClick={() => navigate('/agent/login')} style={{
-                  background:'transparent', color:'rgba(247,244,239,0.9)',
-                  border:'1px solid rgba(247,244,239,0.35)', borderRadius:10,
-                  padding:'12px', fontSize:13, fontFamily:'Jost,sans-serif', fontWeight:400,
-                  cursor:'pointer', letterSpacing:'.02em', transition:'all .2s',
-                }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor='rgba(247,244,239,0.6)'; e.currentTarget.style.color='#f7f4ef' }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(247,244,239,0.35)'; e.currentTarget.style.color='rgba(247,244,239,0.9)' }}
-                >Log in</button>
-              </div>
+          <div className="hiw-cta agent-cta-card" style={{ background:C.accent, borderRadius:16, padding:'28px 32px' }}>
+            <div style={{ maxWidth:440 }}>
+              <p style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:26, color:'#fff', letterSpacing:'-.015em', marginBottom:6 }}>Ready to let the agent work?</p>
+              <p style={{ fontSize:13.5, color:'rgba(247,244,239,0.62)', fontWeight:300 }}>Set up in a few minutes. 14-day free trial, then €29/month. Cancel anytime.</p>
+            </div>
+            <div className="hiw-cta-actions" style={{ display:'flex', gap:10, flexShrink:0 }}>
+              <button onClick={() => navigate('/agent/register')} style={{
+                background:'#f7f4ef', color:C.text, border:'none', borderRadius:10,
+                padding:'13px 22px', fontSize:14, fontFamily:'Jost,sans-serif', fontWeight:500,
+                cursor:'pointer', letterSpacing:'.02em', transition:'all .2s', whiteSpace:'nowrap',
+              }}
+                onMouseEnter={e => { e.currentTarget.style.background='#fff' }}
+                onMouseLeave={e => { e.currentTarget.style.background='#f7f4ef' }}
+              >Start free trial →</button>
+              <button onClick={() => navigate('/agent/login')} style={{
+                background:'transparent', color:'rgba(247,244,239,0.9)',
+                border:'1px solid rgba(247,244,239,0.35)', borderRadius:10,
+                padding:'12px 22px', fontSize:13.5, fontFamily:'Jost,sans-serif', fontWeight:400,
+                cursor:'pointer', letterSpacing:'.02em', transition:'all .2s', whiteSpace:'nowrap',
+              }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor='rgba(247,244,239,0.6)'; e.currentTarget.style.color='#f7f4ef' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(247,244,239,0.35)'; e.currentTarget.style.color='rgba(247,244,239,0.9)' }}
+              >Log in</button>
             </div>
           </div>
         </div>
+
       </div>
     </section>
   )
