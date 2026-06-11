@@ -177,6 +177,30 @@ const CSS = `
     .hiw-step p { padding-left:0 !important; }
   }
 
+  /* ── §4 Showcase — the dashboard "boots up" once on scroll-enter: the chrome
+     border draws (an SVG perimeter, pathLength-normalised so it's size-agnostic),
+     the shell + sidebar + main fade in in sequence, the KPIs count up (gated on
+     the booted flag), and the approval card's ring settles last. One-time; settled
+     immediately under reduced-motion (transitions collapse, booted=true at once). */
+  .dash-boot { position:relative; }
+  .dash-boot-border { position:absolute; inset:0; z-index:4; pointer-events:none; }
+  .dash-boot-border rect { stroke-dasharray:100; stroke-dashoffset:100; }
+  .dash-boot.in .dash-boot-border rect { transition:stroke-dashoffset 1.05s cubic-bezier(.22,.61,.36,1); stroke-dashoffset:0; }
+  .dash-boot.in .dash-boot-border { animation:dashBorderFade .5s ease 1.05s forwards; }
+  @keyframes dashBorderFade { to { opacity:0; } }
+  .dash-boot .dash-preview-shell { opacity:0; transition:opacity .55s ease .15s; }
+  .dash-boot.in .dash-preview-shell { opacity:1; }
+  .dash-boot .dp-leftnav { opacity:0; transform:translateX(-8px); transition:opacity .5s ease .4s, transform .5s ease .4s; }
+  .dash-boot.in .dp-leftnav { opacity:1; transform:none; }
+  .dash-boot .dp-main { opacity:0; transition:opacity .55s ease .55s; }
+  .dash-boot.in .dp-main { opacity:1; }
+  .dash-boot .dash-mc { box-shadow:0 10px 34px rgba(196,125,14,0.13), 0 0 0 0 rgba(196,125,14,0) !important; transition:box-shadow .55s ease .95s; }
+  .dash-boot.in .dash-mc { box-shadow:0 10px 34px rgba(196,125,14,0.13), 0 0 0 3px rgba(196,125,14,0.07) !important; }
+  @media (prefers-reduced-motion: reduce) {
+    .dash-boot-border { display:none !important; }
+    .dash-boot .dash-preview-shell, .dash-boot .dp-leftnav, .dash-boot .dp-main { opacity:1 !important; transform:none !important; }
+  }
+
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:#f7f4ef; }
   ::-webkit-scrollbar-thumb { background:rgba(28,25,23,0.12); border-radius:3px; }
@@ -644,7 +668,7 @@ function MockMissionControl({ run, DC }) {
   const conf = a.confidence_score
   const lbl = { fontSize:9.5, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600, color:DC.textLight, marginBottom:6 }
   return (
-    <div style={{
+    <div className="dash-mc" style={{
       background:DC.bgCard, border:`1px solid ${DC.yellowMid}`, borderRadius:12, overflow:'hidden',
       boxShadow:`0 10px 34px rgba(196,125,14,0.13), 0 0 0 3px ${DC.yellowSoft}`,
     }}>
@@ -710,7 +734,7 @@ function MiniSpark({ data, color, w = 46, h = 20 }) {
 }
 
 // ─── Agent Dashboard Preview ───────────────────────────────────────────────────
-function AgentDashboardPreview({ navigate }) {
+function AgentDashboardPreview({ navigate, booted = true }) {
   const runs          = demoData.runs
   const funnelPages   = demoData.funnelPages
   const learnings     = demoData.learnings
@@ -1006,7 +1030,7 @@ function AgentDashboardPreview({ navigate }) {
                     {k.spark && <MiniSpark data={sparkData} color={DC.accent} />}
                   </div>
                   <p style={{ fontFamily:'Instrument Serif, serif', fontSize:32, fontWeight:400, color: k.accent ? DC.accent : DC.text, lineHeight:1, marginBottom:3 }}>
-                    <CountUp value={k.value} />
+                    <CountUp value={booted ? k.value : 0} />
                   </p>
                   <p style={{ fontSize:10, color:DC.textLight, fontWeight:300 }}>{k.sub}</p>
                 </div>
@@ -1603,6 +1627,7 @@ function WhySection() {
 // ─── Showcase: dashboard mock + site network (example data) ───────────────────
 function ShowcaseSection({ navigate }) {
   const [ref, visible] = useReveal()
+  const [bootRef, booted] = useReveal()
   return (
     <section className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, padding:'96px 24px' }}>
       <div style={{ maxWidth:1060, margin:'0 auto' }}>
@@ -1616,8 +1641,12 @@ function ShowcaseSection({ navigate }) {
           </p>
         </div>
 
-        <div style={{ opacity:visible?1:0, transform:visible?'none':'translateY(20px)', transition:'all .6s ease .12s' }}>
-          <AgentDashboardPreview navigate={navigate} />
+        {/* the dashboard boots up once on scroll-enter (see .dash-boot CSS) */}
+        <div ref={bootRef} className={`dash-boot ${booted?'in':''}`}>
+          <svg className="dash-boot-border" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true">
+            <rect x="0" y="0" width="100%" height="100%" rx="16" ry="16" fill="none" stroke={C.accent} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pathLength="100" />
+          </svg>
+          <AgentDashboardPreview navigate={navigate} booted={booted} />
         </div>
         <p style={{ fontSize:11.5, color:C.textLight, fontWeight:300, marginTop:12, textAlign:'center', letterSpacing:'.02em' }}>
           Interactive preview with example data — your real dashboard appears here after onboarding.
