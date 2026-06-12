@@ -609,6 +609,65 @@ function fileToRoutePath(filePath) {
 }
 
 // ─── ROLLBACK CHECK ───────────────────────────────────────────────────────────
+
+// Capture the "after" screenshot for any deployed run that still lacks one.
+// Deliberately decoupled from the bounce-rate measurement in handleRollbackCheck:
+// the screenshot is a pure visual artifact for the public timeline / dashboard,
+// so it must not inherit the bounce gates (PostHog host filter + >=100 sessions
+// per side) or the tight [48h,96h] comparison window. Selection is idempotent
+// (screenshot_after IS NULL) and the pass is both batch-capped and time-boxed,
+// so a one-time backlog drains across successive weekly crons without ever
+// risking the function's wall-clock budget. Returns the number captured.
+async function backfillAfterScreenshots(handlerStart) {
+  const BACKFILL_MAX         = 5      // hard ceiling of captures per invocation
+  // Never START a capture past this elapsed (measured from handlerStart, which
+  // also covers the bounce loop that ran first). captureScreenshot can block up
+  // to ~35s, so 22s here keeps the whole invocation under ~57s of a 60s budget.
+  const BACKFILL_DEADLINE_MS = 22000
+  const fortyEightHoursAgo   = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+
+  // Deployed >=48h ago, still missing an after-shot. Newest-first so the runs a
+  // visitor is most likely viewing on the public timeline get captured first.
+  const { data: pending } = await supabase
+    .from('agent_runs')
+    .select('id, subscription_id')
+    .eq('status', 'deployed')
+    .is('screenshot_after', null)
+    .lte('completed_at', fortyEightHoursAgo)
+    .order('completed_at', { ascending: false })
+    .limit(BACKFILL_MAX)
+
+  if (!pending || pending.length === 0) return 0
+
+  let captured = 0
+  for (const run of pending) {
+    if (Date.now() - handlerStart > BACKFILL_DEADLINE_MS) break
+    try {
+      const { data: conn } = await supabase
+        .from('agent_connections').select('website_url')
+        .eq('subscription_id', run.subscription_id).single()
+      if (!conn?.website_url) continue
+
+      // Always shoot the site ROOT, never a fileToRoutePath-derived route: that
+      // maps e.g. src/pages/Home.jsx → "/home", a non-route on a client-rendered
+      // SPA (loads the empty shell → solid black). Root always renders and keeps
+      // before/after comparable — same target the before-shot used.
+      const shot = await captureScreenshot(conn.website_url)
+      if (!shot) continue
+
+      // Re-assert IS NULL on write so a concurrent cron can't double-write.
+      await supabase.from('agent_runs')
+        .update({ screenshot_after: shot })
+        .eq('id', run.id)
+        .is('screenshot_after', null)
+      captured++
+    } catch (e) {
+      console.error(`[after_screenshot_backfill] run=${run.id}:`, e?.message)
+    }
+  }
+  return captured
+}
+
 async function handleRollbackCheck(res) {
   // The sole deterministic rollback trigger: site-wide bounce rate rose by at
   // least this many percentage points in the 48h after a change merged. The
@@ -617,6 +676,7 @@ async function handleRollbackCheck(res) {
   // (supabase/functions/agent-run/receipt-builder.ts). Format-contract dedup,
   // same reason as encryptSecret: Node and Deno can't share a module cleanly.
   const ROLLBACK_BOUNCE_PP_THRESHOLD = 15
+  const handlerStart = Date.now()
 
   // Promote DNA entries that have stayed deployed for 7+ days to 'success'.
   await promotePendingDNAToSuccess().catch(e => console.error('DNA promote error:', e))
@@ -624,17 +684,20 @@ async function handleRollbackCheck(res) {
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
   const ninetyTwoHoursAgo  = new Date(Date.now() - 96 * 60 * 60 * 1000).toISOString()
 
+  // Bounce/rollback measurement runs FIRST and on the full budget — it is the
+  // safety-critical path and its [48h,96h] window is single-shot (a run missed
+  // this week is >96h old next week and never measured). The cosmetic
+  // after-screenshot backfill runs afterwards with whatever budget remains, so
+  // a screenshot backlog can never starve the rollback check.
   const { data: deployedRuns } = await supabase
     .from('agent_runs').select('*')
     .eq('status', 'deployed')
     .gte('completed_at', ninetyTwoHoursAgo)
     .lte('completed_at', fortyEightHoursAgo)
 
-  if (!deployedRuns || deployedRuns.length === 0) {
-    return res.json({ success: true, message: 'No runs to evaluate for rollback' })
-  }
-
-  for (const run of deployedRuns) {
+  // Note: no early-return when empty — the after-screenshot backfill below must
+  // still run even on weeks with nothing in the bounce window.
+  for (const run of (deployedRuns || [])) {
     try {
       const { data: conn } = await supabase
         .from('agent_connections').select('*')
@@ -713,12 +776,8 @@ async function handleRollbackCheck(res) {
       const bounceDelta    = bounceAfter - bounceBefore
       const shouldRollback = bounceDelta >= ROLLBACK_BOUNCE_PP_THRESHOLD
 
-      // 3a: capture after-screenshot at the site ROOT — the same target as the
-      // before-shot. Not a fileToRoutePath-derived route: that maps e.g.
-      // src/pages/Home.jsx → "/home", a non-existent route in a client-rendered
-      // SPA (loads the empty shell → black). Root always renders and keeps
-      // before/after comparable.
-      const screenshotAfter = await captureScreenshot(conn.website_url)
+      // (after-screenshot is captured separately by backfillAfterScreenshots,
+      // decoupled from this bounce gate — see top of handleRollbackCheck.)
 
       // Stage 3.6: the metric is the SITE-WIDE bounce rate (PostHog $pageview
       // counts across every route, not filtered to the edited page). Storing
@@ -755,7 +814,6 @@ async function handleRollbackCheck(res) {
       // Persist new agent_runs columns (Part 1) for the public timeline + dashboard
       await supabase.from('agent_runs').update({
         bounce_rate_after: bounceAfter,
-        screenshot_after:  screenshotAfter,
         ...(shouldRollback ? { rollback_reason: 'metrics_dropped' } : {}),
       }).eq('id', run.id)
 
@@ -869,7 +927,14 @@ async function handleRollbackCheck(res) {
     }
   }
 
-  return res.json({ success: true, checked: deployedRuns.length })
+  // After-screenshot backfill (decoupled from the bounce gates above): capture
+  // an after-shot for every deployed run still missing one, regardless of
+  // traffic volume or approval timing. Runs LAST so it can never starve the
+  // rollback measurement of wall-clock budget. See backfillAfterScreenshots.
+  const afterShotsCaptured = await backfillAfterScreenshots(handlerStart)
+    .catch(e => { console.error('after-screenshot backfill error:', e); return 0 })
+
+  return res.json({ success: true, checked: deployedRuns?.length || 0, afterShotsCaptured })
 }
 
 // ─── WEEKLY SUMMARY ───────────────────────────────────────────────────────────
