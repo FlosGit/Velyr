@@ -270,7 +270,14 @@ async function handleEnforceSubscriptions(res) {
     .lt('created_at', startTokenCutoff)
   if (stGcError) console.warn('[enforce-subscriptions] start-token GC failed:', stGcError.message)
 
-  return res.json({ ok: true, ran_at: now })
+  // Capture any missing public-timeline "after" screenshots. Piggybacked on this
+  // daily cron (in addition to the weekly rollback_check) so a deployed run's
+  // after-shot lands within ~24h instead of waiting up to a week for Wednesday.
+  // Internally capped + time-boxed; best-effort, must not fail the sweep above.
+  const afterShotsCaptured = await backfillAfterScreenshots(Date.now())
+    .catch(e => { console.error('[enforce-subscriptions] after-screenshot backfill failed:', e); return 0 })
+
+  return res.json({ ok: true, ran_at: now, afterShotsCaptured })
 }
 
 export default async function handler(req, res) {
@@ -624,16 +631,21 @@ async function backfillAfterScreenshots(handlerStart) {
   // also covers the bounce loop that ran first). captureScreenshot can block up
   // to ~35s, so 22s here keeps the whole invocation under ~57s of a 60s budget.
   const BACKFILL_DEADLINE_MS = 22000
-  const fortyEightHoursAgo   = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+  // Small propagation delay so the customer's own redeploy (their CI rebuilding
+  // from the merged PR) has landed before we shoot — otherwise the "after" shot
+  // would still show the pre-merge page. This is NOT a measurement window: a
+  // screenshot only needs the change to be live, nothing more. (The 48h bounce
+  // window in handleRollbackCheck is unrelated and must not gate this.)
+  const minDeployAge = new Date(Date.now() - 15 * 60 * 1000).toISOString()
 
-  // Deployed >=48h ago, still missing an after-shot. Newest-first so the runs a
+  // Deployed (live) and still missing an after-shot. Newest-first so the runs a
   // visitor is most likely viewing on the public timeline get captured first.
   const { data: pending } = await supabase
     .from('agent_runs')
     .select('id, subscription_id')
     .eq('status', 'deployed')
     .is('screenshot_after', null)
-    .lte('completed_at', fortyEightHoursAgo)
+    .lte('completed_at', minDeployAge)
     .order('completed_at', { ascending: false })
     .limit(BACKFILL_MAX)
 
