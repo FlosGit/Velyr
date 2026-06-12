@@ -94,7 +94,12 @@ async function getActiveSubId(chatId) {
     .from('agent_connections')
     .select('subscription_id, verification_code_id, verified_at, agent_subscriptions!inner(subscription_status, status)')
     .eq('telegram_chat_id', chatId)
-    .eq('agent_subscriptions.subscription_status', 'active')
+    // Trial customers have subscription_status='trialing' (Stripe) and get full
+    // feature access — the cron run-eligibility queries accept both (api/agent/
+    // run.js:880,1005). The Telegram trust gate must match, or trial users get
+    // "subscription no longer active" for every command (incl. YES/NO approval)
+    // and can never approve the PRs the agent opens for them.
+    .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
     .eq('agent_subscriptions.status', 'active')
     .not('verification_code_id', 'is', null)
     .not('verified_at',          'is', null)
