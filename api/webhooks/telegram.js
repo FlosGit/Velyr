@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
-import { App } from '@octokit/app'
-import { Octokit } from '@octokit/rest'
 import crypto from 'node:crypto'
+import { getOctokit } from '../_lib/github-app.js'
+import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -36,22 +36,6 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-}
-
-async function getOctokit(installationId) {
-  const app = new App({
-    appId: process.env.GITHUB_APP_ID,
-    privateKey: Buffer.from(
-      process.env.GITHUB_APP_PRIVATE_KEY_BASE64, 'base64'
-    ).toString('utf-8')
-  })
-
-  const { data: { token } } = await app.octokit.request(
-    'POST /app/installations/{installation_id}/access_tokens',
-    { installation_id: installationId }
-  )
-
-  return new Octokit({ auth: token })
 }
 
 async function sendMessage(chatId, text, extra = {}) {
@@ -377,14 +361,9 @@ async function handleApprove(runId, chatId) {
   }
 
   if (prInfo.merged) {
-    // Already merged — just flip the DB and tell the user we reconciled.
-    await supabase.from('agent_runs').update({ status: 'deployed', completed_at: new Date().toISOString() }).eq('id', runId)
-    await supabase.from('agent_business_dna').insert({
-      subscription_id: run.subscription_id, run_id: runId,
-      fix_type: run.analysis_result?.change_type || 'other',
-      outcome: 'pending',
-      notes: `Approved (YES, already merged): ${(run.analysis_result?.problem || '').slice(0, 400)}`,
-    })
+    // Already merged — reconcile the DB to 'deployed' and tell the user. Same
+    // reconcile path the GitHub pull_request webhook uses for a manual merge.
+    await reconcileDeployed(supabase, run, prInfo.merge_commit_sha, { approvalLabel: 'YES, already merged' })
     return sendMessage(chatId, `✅ <b>Already merged.</b> (Reconciled — the PR was merged out-of-band, status updated.)`)
   }
   if (prInfo.state === 'closed') {
@@ -432,23 +411,14 @@ async function handleApprove(runId, chatId) {
     return sendMessage(chatId, `❌ Merge failed: ${escapeHtml(err?.message || 'GitHub error')}.\n\nThe run stays in <b>waiting_approval</b> — fix the issue and reply <b>YES</b> again, or <b>NO</b> to skip.`)
   }
 
-  await supabase.from('agent_runs').update({ status: 'deployed', completed_at: new Date().toISOString(), merge_commit_sha: mergeSha }).eq('id', runId)
+  // Reconcile to 'deployed' (+ merge SHA, + DNA / setup install-stamp). Same
+  // helper the GitHub pull_request webhook calls for a manual merge.
+  const result = await reconcileDeployed(supabase, run, mergeSha, { approvalLabel: 'YES' })
 
-  // ── Setup-PR YES: record installed_at, skip DNA (no conversion logic) ──────
-  if (run.run_type === 'setup_posthog') {
-    await supabase.from('agent_connections')
-      .update({ posthog_snippet_installed_at: new Date().toISOString() })
-      .eq('subscription_id', run.subscription_id)
+  // Setup-PR YES → "analytics installed"; conversion fix → "deploying" message.
+  if (result.kind === 'setup_installed') {
     return sendMessage(chatId, `✅ <b>Analytics installed.</b> Your next run will use real visitor data.`)
   }
-
-  // 3d: Business DNA — record as 'pending'; the 48h rollback check will promote to 'success' after 7 days deployed
-  await supabase.from('agent_business_dna').insert({
-    subscription_id: run.subscription_id, run_id: runId,
-    fix_type: run.analysis_result?.change_type || 'other',
-    outcome: 'pending',
-    notes: `Approved (YES): ${(run.analysis_result?.problem || '').slice(0, 400)}`,
-  })
 
   await sendMessage(
     chatId,
@@ -472,108 +442,35 @@ async function handleReject(runId, chatId) {
   if (run.status !== 'waiting_approval')
     return sendMessage(chatId, '⚠️ This run is no longer waiting for approval.')
 
-  // ── Setup-PR: foreign-choice NO → explicit permanent decline, no PR ───────
-  // The user saw the transparency Telegram and chose to skip. No PR was opened
-  // (the choice row has no pr_number), so skip the PR-close block entirely.
-  if (run.run_type === 'setup_posthog_foreign_choice') {
-    await supabase.from('agent_connections')
-      .update({ posthog_snippet_declined: true })
-      .eq('subscription_id', run.subscription_id)
-    await supabase.from('agent_runs')
-      .update({ status: 'rejected', rollback_reason: 'user_rejected' })
-      .eq('id', runId)
-    return sendMessage(chatId, `Understood — I won't ask again. Re-enable tracking from your dashboard anytime.`)
-  }
-
-  // Stage 4.7: actually close the PR and delete the branch on reject. We used
-  // to just flip status in the DB and leave the PR dangling on GitHub, which
-  // (a) confused users who saw an open PR for a "rejected" run, and (b) left
-  // an `agent/fix-*` branch around that could be re-merged later by anyone
-  // with repo write access. Both ops are best-effort — DB state is still
-  // flipped to 'rejected' even if GitHub returns 404/410/permissions issues.
+  // Close the PR + delete the agent/* branch on GitHub, then reconcile the DB
+  // to 'rejected'. Both the GitHub cleanup (Stage 4.7: don't leave a dangling
+  // PR / re-mergeable agent/* branch) and the DB effects (status, rollback
+  // reason, DNA / setup-retry) are shared with the GitHub pull_request webhook
+  // (closed-without-merge), so a manual close lands the run in exactly the same
+  // state as this Telegram NO. closeRejectedPr is a no-op for foreign-choice
+  // rows (no pr_number); everything is best-effort — DB state is the source of
+  // truth even if GitHub returns 404/410/permissions issues.
   const { data: conn } = await supabase
     .from('agent_connections')
     .select('github_installation_id, github_repo_owner, github_repo_name')
     .eq('subscription_id', run.subscription_id)
     .single()
-  if (conn?.github_installation_id && run.pr_number) {
-    try {
-      const octokit = await getOctokit(conn.github_installation_id)
-      // Close the PR (state=closed, not merged)
-      await octokit.rest.pulls.update({
-        owner: conn.github_repo_owner,
-        repo:  conn.github_repo_name,
-        pull_number: run.pr_number,
-        state: 'closed',
-      })
-      // Find and delete the branch the PR was on
-      const { data: prInfo } = await octokit.rest.pulls.get({
-        owner: conn.github_repo_owner,
-        repo:  conn.github_repo_name,
-        pull_number: run.pr_number,
-      })
-      const branchRef = prInfo?.head?.ref
-      if (branchRef && branchRef.startsWith('agent/')) {
-        await octokit.rest.git.deleteRef({
-          owner: conn.github_repo_owner,
-          repo:  conn.github_repo_name,
-          ref:   `heads/${branchRef}`,
-        }).catch(err => {
-          // 422 = already deleted, 404 = branch gone — both fine
-          if (err?.status !== 404 && err?.status !== 422) {
-            console.warn(`[reject] branch delete failed for ${branchRef}:`, err?.message)
-          }
-        })
-      }
-    } catch (err) {
-      console.warn(`[reject] PR close/delete failed for run ${runId} PR #${run.pr_number}:`, err?.message)
-    }
-  }
 
-  // Stamp completed_at on rejection. handleApprove already sets it on deploy;
-  // reject didn't. The ID-less `note <reason>` flow orders rejected runs by
-  // *when they were skipped* — without this it could only fall back to
-  // created_at and would pick the youngest-CREATED run, not the most recently
-  // skipped one (matters only when several rejected runs coexist, e.g. testing).
-  await supabase.from('agent_runs').update({
-    status: 'rejected',
-    rollback_reason: 'user_rejected',
-    completed_at: new Date().toISOString(),
-  }).eq('id', runId)
+  await closeRejectedPr(conn, run, { close: true })
+  const result = await reconcileRejected(supabase, run, { rejectLabel: 'NO' })
 
-  // ── Setup-PR NO: retry once, then permanently decline ────────────────────
-  if (run.run_type === 'setup_posthog') {
-    const { data: connForRetry } = await supabase
-      .from('agent_connections')
-      .select('posthog_snippet_retry_count')
-      .eq('subscription_id', run.subscription_id)
-      .single()
-    const retryCount = connForRetry?.posthog_snippet_retry_count || 0
-    if (retryCount < 1) {
-      await supabase.from('agent_connections')
-        .update({ posthog_snippet_retry_count: retryCount + 1 })
-        .eq('subscription_id', run.subscription_id)
+  switch (result.kind) {
+    case 'setup_retry':
       return sendMessage(chatId, `⏭️ Skipped for now — I'll offer it once more next run.`)
-    } else {
-      await supabase.from('agent_connections')
-        .update({ posthog_snippet_declined: true })
-        .eq('subscription_id', run.subscription_id)
+    case 'foreign_declined':
+    case 'setup_declined':
       return sendMessage(chatId, `Understood — I won't ask again. Re-enable tracking from your dashboard anytime.`)
-    }
+    default: // 'fix_rejected'
+      return sendMessage(
+        chatId,
+        `❌ <b>PR skipped.</b> The agent will analyze again on the next scheduled run.\n\n<i>Optionally tell me why — reply <b>note &lt;reason&gt;</b> and I'll attach it to this run.</i>`
+      )
   }
-
-  // 3d: Business DNA — record rollback so future runs avoid the pattern
-  await supabase.from('agent_business_dna').insert({
-    subscription_id: run.subscription_id, run_id: runId,
-    fix_type: run.analysis_result?.change_type || 'other',
-    outcome: 'rollback',
-    notes: `User rejected (NO): ${(run.analysis_result?.problem || '').slice(0, 400)}`,
-  })
-
-  await sendMessage(
-    chatId,
-    `❌ <b>PR skipped.</b> The agent will analyze again on the next scheduled run.\n\n<i>Optionally tell me why — reply <b>note &lt;reason&gt;</b> and I'll attach it to this run.</i>`
-  )
 }
 
 // ─── BUSINESS DNA ─────────────────────────────────────────────────────────────
