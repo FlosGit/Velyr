@@ -316,6 +316,37 @@ async function handleFinalize(req, res) {
     // Non-fatal: the connection is already written; surface success.
   }
 
+  // Auto-fire the first run now (intent: 'single_run') so the analytics Setup-PR
+  // lands immediately instead of consuming next Monday's scheduled run. Same 2s-
+  // abort fire-and-forget pattern as discover_structure; the Edge function writes
+  // the run row + Setup-PR. Deliberately does NOT touch last_manual_run_at — an
+  // auto-run must not consume the user's daily manual-run allowance. Non-fatal:
+  // any failure here still leaves onboarding successful (Monday cron is the
+  // backstop).
+  {
+    const edgeUrl    = `${SUPABASE_URL}/functions/v1/agent-run`
+    const controller = new AbortController()
+    const timeoutId  = setTimeout(() => controller.abort(), 2000)
+    try {
+      await fetch(edgeUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ intent: 'single_run', subscriptionId }),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      // AbortError = our 2s timeout → the request landed and the Edge run started.
+      if (err?.name !== 'AbortError') {
+        console.error('onboarding/finalize: first-run dispatch failed:', err?.message || err)
+      }
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   return res.status(200).json({ ok: true })
 }
 

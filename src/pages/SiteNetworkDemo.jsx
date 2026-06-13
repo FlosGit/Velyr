@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { SiteNetwork } from '../components/SiteNetwork.jsx'
 import { mockSiteNetworkData } from '../data/mockSiteNetwork.js'
 
-const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garant:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&family=DM+Mono:wght@400&display=swap');`
+const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&family=DM+Mono:wght@400&display=swap');`
 
 const STATUS_FILL = {
   neutral:         '#a8a39a',
@@ -42,7 +42,7 @@ export default function SiteNetworkDemo({ navigate }) {
           <div style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: '#2a5c45', marginBottom: 4, fontWeight: 500 }}>
             Stage 2 — Component preview
           </div>
-          <div style={{ fontFamily: 'Cormorant Garant, serif', fontSize: 22, fontWeight: 400, color: '#1c1917' }}>
+          <div style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 22, fontWeight: 400, color: '#1c1917' }}>
             Site Network
           </div>
         </div>

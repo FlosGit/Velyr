@@ -6,7 +6,7 @@
 //   onNodeClick?:  (node) => void  — click-through stub; wired to detail panel in Stage 4+
 //   style?:        CSSProperties   — applied to the outer container (set height here)
 //   fonts?:        { sans?, serif?, mono? }
-//                  Defaults to Jost/Cormorant Garant/DM Mono (onboarding context).
+//                  Defaults to Jost/Cormorant Garamond/DM Mono (onboarding context).
 //                  Pass DM Sans/Instrument Serif/DM Mono for dashboard context.
 //
 // Layout: d3-force simulation run synchronously to convergence.
@@ -411,7 +411,7 @@ const revealWaveOf = (n) =>
 
 export function SiteNetwork({ data, onNodeClick, style, fonts = {}, reveal = false }) {
   const fSans  = fonts.sans  ?? 'Jost, sans-serif'
-  const fSerif = fonts.serif ?? 'Cormorant Garant, serif'
+  const fSerif = fonts.serif ?? 'Cormorant Garamond, serif'
   const fMono  = fonts.mono  ?? 'DM Mono, monospace'
 
   const containerRef = useRef(null)

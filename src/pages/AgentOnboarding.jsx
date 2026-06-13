@@ -18,7 +18,7 @@ const C = {
 }
 
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garant:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&family=DM+Mono:wght@400&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&family=DM+Mono:wght@400&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { overflow-x: hidden; max-width: 100vw; }
   body { background: #f7f4ef; font-family: 'Jost', sans-serif; font-weight: 300; -webkit-font-smoothing: antialiased; }
@@ -170,7 +170,7 @@ function Step0({ onNext }) {
   return (
     <div>
       <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 1 of 5</p>
-      <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Requirements check
       </h2>
       <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 28 }}>
@@ -257,7 +257,7 @@ function Step1({ onNext, onBack, navigate }) {
   return (
     <div>
       <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 5</p>
-      <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Your website
       </h2>
       <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 16 }}>
@@ -421,7 +421,7 @@ function Step2({ onNext, onBack, user, subscriptionId, formData }) {
   const heading = (
     <>
       <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 3 of 5</p>
-      <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect GitHub
       </h2>
     </>
@@ -543,7 +543,7 @@ function Step3({ onNext, onBack }) {
   return (
     <div>
       <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 4 of 5</p>
-      <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Analytics — zero setup
       </h2>
       <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
@@ -654,7 +654,7 @@ function Step4({ onNext, onBack, loading }) {
   return (
     <div>
       <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 5 of 5</p>
-      <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect Telegram
       </h2>
       <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
@@ -778,14 +778,14 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
     <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '20px 28px' }}>
         <Logo size={20} />
-        <span style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 500, fontSize: 18, color: C.text }}>Velyr</span>
+        <span style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 500, fontSize: 18, color: C.text }}>Velyr</span>
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px 24px' }}>
         <p style={{ fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: C.accent, marginBottom: 6, fontWeight: 500 }}>
           {phase === 'building' ? 'Mapping your site' : phase === 'polling' ? 'Mapping your site' : 'All set'}
         </p>
-        <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 30, letterSpacing: '-.015em', color: C.text, marginBottom: 18 }}>
+        <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 30, letterSpacing: '-.015em', color: C.text, marginBottom: 18 }}>
           {domain}
         </h2>
 
@@ -1174,7 +1174,7 @@ export default function AgentOnboarding({ navigate }) {
         <div style={{ width: '100%', maxWidth: 520 }}>
           <div onClick={() => navigate('/')} style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 40, cursor: 'pointer', justifyContent: 'center' }}>
             <Logo size={22} />
-            <span style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 500, fontSize: 20, color: C.text }}>Velyr</span>
+            <span style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 500, fontSize: 20, color: C.text }}>Velyr</span>
             <span style={{ fontSize: 11, color: C.textLight, fontWeight: 300 }}>/ Growth Agent Setup</span>
           </div>
 

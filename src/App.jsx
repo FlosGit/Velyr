@@ -123,10 +123,21 @@ export default function App() {
     }
     if (hash.includes('access_token') || hash.includes('type=signup')) {
       let pending = null
+      // Cross-device: the confirmation email's emailRedirectTo carries
+      // ?next=subscription (set in AgentAuth signUp). Reading it here means a
+      // user who confirms on a different device than they registered on still
+      // gets routed to checkout — localStorage/sessionStorage (same-device only)
+      // remain the fallback for the Google-OAuth implicit flow.
       try {
-        pending = localStorage.getItem('postLoginCheckout')
-          || sessionStorage.getItem('postLoginCheckout')
+        const nextParam = new URLSearchParams(window.location.search).get('next')
+        if (nextParam === 'subscription') pending = 'subscription'
       } catch {}
+      if (!pending) {
+        try {
+          pending = localStorage.getItem('postLoginCheckout')
+            || sessionStorage.getItem('postLoginCheckout')
+        } catch {}
+      }
       if (pending === 'subscription') {
         // Send the user through PostSignup which will wait for the Supabase
         // session and then trigger Stripe. Keep the hash so supabase-js can

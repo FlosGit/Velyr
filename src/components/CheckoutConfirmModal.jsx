@@ -60,7 +60,7 @@ export default function CheckoutConfirmModal({ type, open, onCancel, onConfirm, 
         <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, fontWeight: 500, marginBottom: 10 }}>
           Subscription summary
         </p>
-        <h3 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 24, color: C.text, marginBottom: 18, letterSpacing: '-.015em' }}>
+        <h3 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 24, color: C.text, marginBottom: 18, letterSpacing: '-.015em' }}>
           {title}
         </h3>
 

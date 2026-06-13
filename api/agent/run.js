@@ -63,7 +63,7 @@ const LLM_MAX_TOKENS_PLAYBOOK   = Number(process.env.LLM_MAX_TOKENS_PLAYBOOK   |
 const LLM_INPUT_EUR_PER_M       = Number(process.env.LLM_INPUT_EUR_PER_M      || '3.0')
 const LLM_OUTPUT_EUR_PER_M      = Number(process.env.LLM_OUTPUT_EUR_PER_M     || '15.0')
 const LLM_MAX_PROMPT_BYTES      = Number(process.env.LLM_MAX_PROMPT_BYTES     || String(500 * 1024))
-const MONTHLY_SPEND_CAP_EUR     = Number(process.env.AGENT_MONTHLY_SPEND_CAP_EUR || '2.0')
+const MONTHLY_SPEND_CAP_EUR     = Number(process.env.AGENT_MONTHLY_SPEND_CAP_EUR || '20.0')
 
 async function getMonthlySpend(subscriptionId) {
   const period = new Date().toISOString().slice(0, 7)
@@ -290,7 +290,7 @@ export default async function handler(req, res) {
   }
 
   // ── Authenticated user actions (Supabase JWT) ─────────────────────────────
-  if (action === 'update-settings' || action === 'export-dna' || action === 'reenable_snippet') {
+  if (action === 'update-settings' || action === 'export-dna' || action === 'reenable_snippet' || action === 'trigger_run') {
     const authHeader = req.headers.authorization
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' })
     const token = authHeader.replace('Bearer ', '')
@@ -300,6 +300,7 @@ export default async function handler(req, res) {
     if (action === 'update-settings')  return handleUpdateSettings(req, res, user)
     if (action === 'export-dna')       return handleExportDNA(req, res, user)
     if (action === 'reenable_snippet') return handleReenableSnippet(req, res, user)
+    if (action === 'trigger_run')      return handleTriggerRun(req, res, user)
   }
 
   // ── Account actions (quick — stay in Vercel) ──────────────────────────────
@@ -1357,6 +1358,103 @@ async function handleReenableSnippet(req, res, user) {
     .eq('subscription_id', sub.id)
   if (error) return res.status(500).json({ error: error.message })
   return res.status(200).json({ success: true })
+}
+
+// ─── Trigger a manual run ("Run now", Supabase JWT) ───────────────────────────
+// Fires a single-subscription run on the Edge Function (intent: 'single_run' —
+// the same pipeline as the Monday cron, scoped to one sub). Guards:
+//   • subscription must be active (not paused) + subscription_status active/trialing
+//   • no run already in-flight (running/waiting_approval) — also protects the
+//     "at most one waiting_approval per subscription" invariant
+//   • at most ONE manual run per 24h (last_manual_run_at)
+// The post-onboarding auto-run and the scheduled cron runs deliberately do NOT
+// set last_manual_run_at, so they don't consume the daily allowance.
+// subscriptionId is derived from the authenticated user — never from the request
+// body (no IDOR; the user never calls the Edge Function directly).
+const MANUAL_RUN_COOLDOWN_MS = 24 * 60 * 60 * 1000
+async function handleTriggerRun(req, res, user) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+
+  const { data: sub, error: subErr } = await supabase
+    .from('agent_subscriptions')
+    .select('id, status, subscription_status, last_manual_run_at')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  if (subErr) {
+    console.error('[agent/run] trigger_run subscription lookup failed:', subErr.message)
+    return res.status(500).json({ error: 'Could not load your subscription. Try again.' })
+  }
+  if (!sub) return res.status(404).json({ error: 'No subscription found' })
+
+  if (sub.status === 'paused') {
+    return res.status(409).json({ error: 'Your agent is paused. Resume it first, then run.' })
+  }
+  if (!['active', 'trialing'].includes(sub.subscription_status)) {
+    return res.status(402).json({ error: 'Your subscription is not active.' })
+  }
+
+  // In-flight guard: never start a second run while one is running or awaiting
+  // approval. This is also what makes the post-onboarding auto-run safe — the
+  // dashboard button stays blocked until the user answers that first Setup-PR.
+  const { data: inflight } = await supabase
+    .from('agent_runs')
+    .select('id')
+    .eq('subscription_id', sub.id)
+    .in('status', ['running', 'waiting_approval'])
+    .limit(1)
+    .maybeSingle()
+  if (inflight) {
+    return res.status(409).json({ error: 'A run is already in progress. Wait for it to finish, or respond to the pending PR in Telegram.' })
+  }
+
+  // Daily limit: at most one manual run per 24h.
+  if (sub.last_manual_run_at) {
+    const last    = new Date(sub.last_manual_run_at).getTime()
+    const elapsed = Date.now() - last
+    if (elapsed < MANUAL_RUN_COOLDOWN_MS) {
+      const nextManualRunAt = new Date(last + MANUAL_RUN_COOLDOWN_MS).toISOString()
+      res.setHeader('Retry-After', String(Math.ceil((MANUAL_RUN_COOLDOWN_MS - elapsed) / 1000)))
+      return res.status(429).json({ error: 'You can trigger one manual run per day. Your scheduled runs keep going automatically.', nextManualRunAt })
+    }
+  }
+
+  // Fire the Edge Function (single_run) — same 2s-abort fire-and-forget pattern
+  // as the cron full-run dispatch. AbortError = the request was sent and the
+  // Edge run is (almost certainly) starting.
+  const edgeUrl    = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agent-run`
+  const controller = new AbortController()
+  const timeoutId  = setTimeout(() => controller.abort(), 2000)
+  let dispatched = true
+  try {
+    await fetch(edgeUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ intent: 'single_run', subscriptionId: sub.id }),
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      dispatched = false
+      console.error('[agent/run] trigger_run dispatch failed:', err?.message || String(err))
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+
+  if (!dispatched) {
+    return res.status(502).json({ error: 'Could not start the run. Please try again.' })
+  }
+
+  // Only consume the daily allowance after a confirmed dispatch.
+  const nextManualRunAt = new Date(Date.now() + MANUAL_RUN_COOLDOWN_MS).toISOString()
+  await supabase.from('agent_subscriptions')
+    .update({ last_manual_run_at: new Date().toISOString() })
+    .eq('id', sub.id)
+
+  return res.status(200).json({ success: true, triggered: true, nextManualRunAt })
 }
 
 // ─── Export DNA Playbook (Supabase JWT) ───────────────────────────────────────

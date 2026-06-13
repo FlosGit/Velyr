@@ -31,7 +31,7 @@ const C = {
 }
 
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garant:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { overflow-x: hidden; max-width: 100vw; }
   body { background: #f7f4ef; font-family: 'Jost', sans-serif; font-weight: 300; -webkit-font-smoothing: antialiased; }
@@ -221,7 +221,7 @@ export default function AgentAuth({ navigate, mode = 'login' }) {
           {/* Logo */}
           <div onClick={() => navigate('/')} style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 40, cursor: 'pointer', justifyContent: 'center' }}>
             <Logo size={22} />
-            <span style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 500, fontSize: 20, color: C.text }}>Velyr</span>
+            <span style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 500, fontSize: 20, color: C.text }}>Velyr</span>
             <span style={{ fontSize: 11, color: C.textLight, fontWeight: 300 }}>/ Growth Agent</span>
           </div>
 
@@ -243,7 +243,7 @@ export default function AgentAuth({ navigate, mode = 'login' }) {
               ))}
             </div>
 
-            <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 26, letterSpacing: '-.015em', marginBottom: 6, color: C.text }}>
+            <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 26, letterSpacing: '-.015em', marginBottom: 6, color: C.text }}>
               {tab === 'login' ? 'Welcome back' : 'Get started'}
             </h2>
             <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, marginBottom: 24, lineHeight: 1.6 }}>

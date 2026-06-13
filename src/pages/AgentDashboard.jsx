@@ -750,12 +750,25 @@ function RevenueEstimator({runs, impactMetrics}) {
 }
 
 // ─── AGENT STATUS SIDEBAR ─────────────────────────────────────────────────────
-function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelectRun}) {
+function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelectRun, onTriggerRun, triggerLoading, triggerMessage}) {
   const isPaused  = subscription?.status==='paused'
   const activeRun = runs.find(r=>r.status==='running')
   const isRunning = !!activeRun
   const lastRun   = runs[0]||null
   const pending   = runs.filter(r=>r.status==='waiting_approval')
+
+  // "Run now" gating: blocked while a run is running/awaiting approval (this is
+  // also what stops a double-run right after the post-onboarding auto-run), or
+  // within the 24h manual-run cooldown (last_manual_run_at). Scheduled cron runs
+  // and the auto-run never set last_manual_run_at, so they don't consume it.
+  const inFlight             = isRunning || pending.length > 0
+  const lastManualMs         = subscription?.last_manual_run_at ? new Date(subscription.last_manual_run_at).getTime() : 0
+  const manualCooldownLeftMs = lastManualMs ? Math.max(0, 24*3600000 - (Date.now() - lastManualMs)) : 0
+  const runNowDisabled       = isPaused || inFlight || manualCooldownLeftMs > 0 || triggerLoading
+  const runNowLabel = triggerLoading ? '…'
+    : inFlight ? '⏳ Run in progress'
+    : manualCooldownLeftMs > 0 ? `Next run in ${manualCooldownLeftMs >= 3600000 ? Math.ceil(manualCooldownLeftMs/3600000)+'h' : '<1h'}`
+    : '▶ Run now'
 
   // FIX #4: memoize so nextMonday9am() is not recomputed on every render cycle
   const target = useMemo(() => nextMonday9am(), [])
@@ -858,7 +871,24 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
         {/* Pending-approval block removed — the pending PR is shown once, in
             PRMissionControl (main column) + the header badge. */}
 
-        <div style={{padding:'12px 16px'}}>
+        <div style={{padding:'12px 16px',display:'flex',flexDirection:'column',gap:8}}>
+          {!isPaused && (
+            <button className="btn" onClick={onTriggerRun} disabled={runNowDisabled} style={{
+              width:'100%',padding:'9px',borderRadius:7,fontSize:12,fontWeight:500,
+              background:runNowDisabled?'transparent':C.accent,
+              color:runNowDisabled?C.textLight:'#fff',
+              border:`1px solid ${runNowDisabled?C.border:C.accent}`,
+              cursor:runNowDisabled?'not-allowed':'pointer',
+            }}>
+              {runNowLabel}
+            </button>
+          )}
+          {triggerMessage && (
+            <p style={{fontSize:11,lineHeight:1.5,color:triggerMessage.error?C.red:C.accent}}>{triggerMessage.text}</p>
+          )}
+          {!isPaused && !inFlight && manualCooldownLeftMs===0 && !triggerMessage && (
+            <p style={{fontSize:10,color:C.textLight,lineHeight:1.4,textAlign:'center'}}>One manual run/day · scheduled runs continue automatically</p>
+          )}
           <button className="btn" onClick={onTogglePause} disabled={actionLoading} style={{
             width:'100%',padding:'9px',borderRadius:7,fontSize:12,
             background:isPaused?C.accent:'transparent',
@@ -902,7 +932,7 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
 }
 
 // ─── OVERVIEW PAGE ────────────────────────────────────────────────────────────
-function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading}) {
+function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage}) {
   const activeRun = runs.find(r=>r.status==='running')
   const pendingRun = runs.find(r=>r.status==='waiting_approval')
   // Hide the Top Insights column entirely when there's nothing to show (day-1),
@@ -957,6 +987,9 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
         onTogglePause={onTogglePause}
         actionLoading={actionLoading}
         onSelectRun={onSelectRun}
+        onTriggerRun={onTriggerRun}
+        triggerLoading={triggerLoading}
+        triggerMessage={triggerMessage}
       />
     </div>
   )
@@ -2236,6 +2269,8 @@ export default function AgentDashboard({ navigate }) {
   const [selected,       setSelected]       = useState(null)
   const [subscription,   setSubscription]   = useState(null)
   const [actionLoading,  setActionLoading]  = useState(false)
+  const [triggerLoading, setTriggerLoading] = useState(false)
+  const [triggerMessage, setTriggerMessage] = useState(null) // { text, error }
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteError,    setDeleteError]    = useState(null)  // FIX #11: track deletion errors
   const [activePage,     setActivePage]     = useState('overview')
@@ -2471,6 +2506,38 @@ export default function AgentDashboard({ navigate }) {
     const data=await res.json()
     if(data.success) setSubscription(prev=>({...prev,status:data.status}))
     setActionLoading(false)
+  }
+
+  // "Run now" — fires a single manual run (api/agent/run.js?action=trigger_run).
+  // Server enforces: active + not paused, no run in-flight, max 1/day. We
+  // optimistically stamp last_manual_run_at so the button locks immediately, and
+  // surface 409/429/402 errors inline. fetchData polling (every 30s) picks up the
+  // new 'running' run.
+  async function handleTriggerRun() {
+    if (triggerLoading || isDemo) return
+    setTriggerLoading(true)
+    setTriggerMessage(null)
+    try {
+      const token = await getToken()
+      const res = await fetch('/api/agent/run?action=trigger_run', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.triggered) {
+        if (data.nextManualRunAt) {
+          setSubscription(prev => prev ? { ...prev, last_manual_run_at: new Date().toISOString() } : prev)
+        }
+        setTriggerMessage({ text: 'Run started — your agent is analyzing now.', error: false })
+        fetchData()
+      } else {
+        setTriggerMessage({ text: data.error || 'Could not start the run. Please try again.', error: true })
+      }
+    } catch {
+      setTriggerMessage({ text: 'Could not start the run. Please try again.', error: true })
+    } finally {
+      setTriggerLoading(false)
+    }
   }
 
   async function handleSaveSettings(payload) {
@@ -2765,6 +2832,9 @@ export default function AgentDashboard({ navigate }) {
                     onSelectRun={setSelected}
                     onTogglePause={handleTogglePause}
                     actionLoading={actionLoading}
+                    onTriggerRun={handleTriggerRun}
+                    triggerLoading={triggerLoading}
+                    triggerMessage={triggerMessage}
                   />
                 )}
 

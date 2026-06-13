@@ -22,14 +22,14 @@ export const C = {
 // .blog-* classes baked into contentHtml by scripts/lib/blog.mjs) plus index /
 // category chrome.
 export const BLOG_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garant:wght@300;400;500&family=Jost:wght@300;400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Jost:wght@300;400;500&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { overflow-x: hidden; max-width: 100vw; }
   body { background: ${C.bg}; color: ${C.ink}; font-family: 'Jost', sans-serif; font-weight: 300; -webkit-font-smoothing: antialiased; }
   img, svg, video { max-width: 100%; }
   .blog-wrap { max-width: 760px; margin: 0 auto; padding: 56px 24px 96px; }
-  .blog-wrap h1 { font-family: 'Cormorant Garant', serif; font-weight: 300; font-size: clamp(32px, 5vw, 52px); letter-spacing: -.025em; line-height: 1.1; word-break: break-word; margin: 14px 0 18px; }
-  .blog-wrap h2 { font-family: 'Cormorant Garant', serif; font-weight: 400; font-size: 26px; letter-spacing: -.015em; margin: 40px 0 14px; color: ${C.ink}; word-break: break-word; }
+  .blog-wrap h1 { font-family: 'Cormorant Garamond', serif; font-weight: 300; font-size: clamp(32px, 5vw, 52px); letter-spacing: -.025em; line-height: 1.1; word-break: break-word; margin: 14px 0 18px; }
+  .blog-wrap h2 { font-family: 'Cormorant Garamond', serif; font-weight: 400; font-size: 26px; letter-spacing: -.015em; margin: 40px 0 14px; color: ${C.ink}; word-break: break-word; }
   .blog-wrap h3 { font-family: 'Jost', sans-serif; font-weight: 500; font-size: 17px; margin: 26px 0 8px; color: ${C.ink}; }
   .blog-wrap p, .blog-wrap li { color: ${C.muted}; line-height: 1.78; font-size: 16px; font-weight: 300; overflow-wrap: anywhere; }
   .blog-wrap ul, .blog-wrap ol { padding-left: 22px; margin: 12px 0; }
@@ -72,7 +72,7 @@ export const BLOG_CSS = `
 
   .blog-card { display: block; background: ${C.card}; border: 1px solid ${C.border}; border-radius: 12px; padding: 18px 20px; margin: 12px 0; text-decoration: none !important; transition: border-color .2s, transform .15s; }
   .blog-card:hover { border-color: rgba(28,25,23,0.18); transform: translateY(-1px); }
-  .blog-card-title { font-family: 'Cormorant Garant', serif; font-weight: 500; font-size: 20px; color: ${C.ink}; letter-spacing: -.01em; }
+  .blog-card-title { font-family: 'Cormorant Garamond', serif; font-weight: 500; font-size: 20px; color: ${C.ink}; letter-spacing: -.01em; }
   .blog-card-desc { font-size: 14.5px; color: ${C.muted}; line-height: 1.6; margin-top: 6px; }
 
   @media (max-width: 600px) {
@@ -102,7 +102,7 @@ export function BlogNav({ navigate }) {
     <nav className="blog-nav" style={{ borderBottom: `1px solid ${C.border}`, padding: '0 24px', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(247,244,239,0.95)' }}>
       <button onClick={() => navigate('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9 }}>
         <Logo size={24} />
-        <span style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 500, fontSize: 20, color: C.ink, letterSpacing: '-.01em' }}>Velyr</span>
+        <span style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 500, fontSize: 20, color: C.ink, letterSpacing: '-.01em' }}>Velyr</span>
       </button>
       <button onClick={() => navigate('/blog')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: C.faint, fontFamily: 'Jost, sans-serif', fontWeight: 300, transition: 'color .2s' }}
         onMouseEnter={(e) => (e.target.style.color = C.muted)}

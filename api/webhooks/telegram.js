@@ -249,7 +249,7 @@ async function findPendingRunForChat(chatId) {
     .eq('status', 'waiting_approval')
     .order('created_at', { ascending: false })
     .limit(1)
-    .single()
+    .maybeSingle()
 
   return run?.id || null
 }
@@ -305,7 +305,7 @@ async function handleApprove(runId, chatId) {
     .select('*')
     .eq('id', runId)
     .eq('subscription_id', subscriptionId)
-    .single()
+    .maybeSingle()
 
   if (!run) return sendMessage(chatId, '❌ Run not found.')
   if (run.status !== 'waiting_approval')
@@ -441,7 +441,7 @@ async function handleReject(runId, chatId) {
     .select('*')
     .eq('id', runId)
     .eq('subscription_id', subscriptionId)
-    .single()
+    .maybeSingle()
 
   if (!run) return sendMessage(chatId, '❌ Run not found.')
   if (run.status !== 'waiting_approval')
@@ -581,7 +581,7 @@ async function handleNote(runId, reason, chatId) {
     .select('subscription_id, analysis_result')
     .eq('id', runId)
     .eq('subscription_id', subId)
-    .single()
+    .maybeSingle()
 
   if (!run) return sendMessage(chatId, '❌ Run not found.')
 

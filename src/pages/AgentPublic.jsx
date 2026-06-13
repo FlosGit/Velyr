@@ -97,7 +97,7 @@ function RunCard({ run }) {
         }}>{badge.label}</span>
       </div>
 
-      <p style={{ fontFamily: 'Cormorant Garant, serif', fontSize: 22, fontWeight: 300, color: C.text, lineHeight: 1.3, letterSpacing: '-.01em', marginBottom: 18 }}>
+      <p style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 22, fontWeight: 300, color: C.text, lineHeight: 1.3, letterSpacing: '-.01em', marginBottom: 18 }}>
         {run.problem || 'No problem description'}
       </p>
 
@@ -198,7 +198,7 @@ export default function AgentPublic({ navigate, slug }) {
     return (
       <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Jost, sans-serif', padding: 24 }}>
         <div style={{ textAlign: 'center', maxWidth: 420 }}>
-          <p style={{ fontFamily: 'Cormorant Garant, serif', fontSize: 36, fontWeight: 300, color: C.text, marginBottom: 12 }}>Not found</p>
+          <p style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 36, fontWeight: 300, color: C.text, marginBottom: 12 }}>Not found</p>
           <p style={{ fontSize: 14, color: C.textLight, fontWeight: 300, marginBottom: 24 }}>This public agent timeline doesn't exist or has been made private.</p>
           <button className="v-press" onClick={() => navigate('/')} style={{ background: C.text, color: '#fff', border: 'none', borderRadius: 10, padding: '12px 24px', fontSize: 13, fontFamily: 'Jost, sans-serif', fontWeight: 500, cursor: 'pointer' }}>
             ← Back to Velyr
@@ -211,7 +211,7 @@ export default function AgentPublic({ navigate, slug }) {
   return (
     <div className="ap-page-root" style={{ minHeight: '100vh', background: C.bg, fontFamily: 'Jost, sans-serif', color: C.text }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garant:wght@300;400&family=Jost:wght@300;400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Jost:wght@300;400;500&display=swap');
         html, body { overflow-x: hidden; max-width: 100vw; }
         img, svg, video { max-width: 100%; }
         .ap-page-root { overflow-x: hidden; }
@@ -233,7 +233,7 @@ export default function AgentPublic({ navigate, slug }) {
         borderBottom: `1px solid ${C.border}`, padding: '14px 24px',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
       }}>
-        <a href="/" onClick={(e) => { e.preventDefault(); navigate('/') }} style={{ fontFamily: 'Cormorant Garant, serif', fontSize: 18, fontWeight: 400, color: C.text, textDecoration: 'none', letterSpacing: '-.01em' }}>
+        <a href="/" onClick={(e) => { e.preventDefault(); navigate('/') }} style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 18, fontWeight: 400, color: C.text, textDecoration: 'none', letterSpacing: '-.01em' }}>
           Velyr
         </a>
         <button className="ap-nav-cta v-press" onClick={() => navigate('/agent/register')} style={{
@@ -251,7 +251,7 @@ export default function AgentPublic({ navigate, slug }) {
           <p style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: C.accent, fontWeight: 500, marginBottom: 10 }}>
             Growth Agent · Public Timeline
           </p>
-          <h1 className="ap-hero-h1" style={{ fontFamily: 'Cormorant Garant, serif', fontSize: 44, fontWeight: 300, color: C.text, lineHeight: 1.1, letterSpacing: '-.02em', marginBottom: 8 }}>
+          <h1 className="ap-hero-h1" style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 44, fontWeight: 300, color: C.text, lineHeight: 1.1, letterSpacing: '-.02em', marginBottom: 8 }}>
             {data?.website_url || ''}
           </h1>
           <p style={{ fontSize: 14, color: C.textLight, fontWeight: 300 }}>
@@ -312,7 +312,7 @@ export default function AgentPublic({ navigate, slug }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap',
         }}>
           <div>
-            <p style={{ fontFamily: 'Cormorant Garant, serif', fontSize: 28, fontWeight: 300, marginBottom: 6, letterSpacing: '-.02em', color: '#fff' }}>
+            <p style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 28, fontWeight: 300, marginBottom: 6, letterSpacing: '-.02em', color: '#fff' }}>
               Want this for your website?
             </p>
             <p style={{ fontSize: 14, color: 'rgba(247,244,239,0.7)', fontWeight: 300 }}>

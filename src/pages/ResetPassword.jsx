@@ -8,7 +8,7 @@ const C = {
 }
 
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garant:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { overflow-x: hidden; max-width: 100vw; }
   body { background: #f7f4ef; font-family: 'Jost', sans-serif; font-weight: 300; -webkit-font-smoothing: antialiased; }
@@ -127,12 +127,12 @@ export default function ResetPassword({ navigate }) {
           <div className="rp-card" style={{ width: '100%', maxWidth: 420 }}>
             <div onClick={() => navigate('/')} style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 40, cursor: 'pointer', justifyContent: 'center' }}>
               <Logo size={22} />
-              <span style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 500, fontSize: 20, color: C.text }}>Velyr</span>
+              <span style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 500, fontSize: 20, color: C.text }}>Velyr</span>
               <span style={{ fontSize: 11, color: C.textLight, fontWeight: 300 }}>/ Growth Agent</span>
             </div>
             <div className="rp-card-inner" style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 18, padding: '36px 32px', boxShadow: '0 4px 32px rgba(28,25,23,0.07)', textAlign: 'center' }}>
               <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
-              <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 26, color: C.text, marginBottom: 10 }}>Link expired</h2>
+              <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 26, color: C.text, marginBottom: 10 }}>Link expired</h2>
               <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
                 This reset link is invalid or has expired. Please request a new one.
               </p>
@@ -154,7 +154,7 @@ export default function ResetPassword({ navigate }) {
           <div className="rp-card" style={{ width: '100%', maxWidth: 420 }}>
             <div className="rp-card-inner" style={{ background: C.bgCard, border: `1px solid rgba(42,92,69,0.25)`, borderRadius: 18, padding: '36px 32px', boxShadow: '0 4px 32px rgba(28,25,23,0.07)', textAlign: 'center' }}>
               <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
-              <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 26, color: C.text, marginBottom: 10 }}>Password updated</h2>
+              <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 26, color: C.text, marginBottom: 10 }}>Password updated</h2>
               <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7 }}>
                 Your password has been changed. Redirecting to login…
               </p>
@@ -175,12 +175,12 @@ export default function ResetPassword({ navigate }) {
 
           <div onClick={() => navigate('/')} style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 40, cursor: 'pointer', justifyContent: 'center' }}>
             <Logo size={22} />
-            <span style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 500, fontSize: 20, color: C.text }}>Velyr</span>
+            <span style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 500, fontSize: 20, color: C.text }}>Velyr</span>
             <span style={{ fontSize: 11, color: C.textLight, fontWeight: 300 }}>/ Growth Agent</span>
           </div>
 
           <div className="rp-card-inner" style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 18, padding: '36px 32px', boxShadow: '0 4px 32px rgba(28,25,23,0.07)' }}>
-            <h2 style={{ fontFamily: 'Cormorant Garant, serif', fontWeight: 400, fontSize: 26, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+            <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 26, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
               Set new password
             </h2>
             <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, marginBottom: 24, lineHeight: 1.6 }}>

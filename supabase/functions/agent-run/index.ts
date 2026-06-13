@@ -74,11 +74,14 @@ const LLM_PRICING_EUR_PER_M = {
   OUTPUT: Number(Deno.env.get('LLM_OUTPUT_EUR_PER_M') || '15.0'),
 }
 
-// Monthly spend ceiling PER SUBSCRIPTION. Default €2.00 — typical weekly run
-// is €0.20-0.40, plus the monthly roast (€0.05) and any export-dna calls. A
-// €2 ceiling gives ~3-4× headroom vs normal usage and protects against a
-// runaway repo. Override via AGENT_MONTHLY_SPEND_CAP_EUR.
-const MONTHLY_SPEND_CAP_EUR = Number(Deno.env.get('AGENT_MONTHLY_SPEND_CAP_EUR') || '2.0')
+// Monthly spend ceiling PER SUBSCRIPTION. Default €20.00. A full conversion run
+// is €0.20-0.40; with the "Run now" button (max 1 manual run/day ≈ 30/month) on
+// top of the ~4-5 Monday cron runs, the worst case is ~35 full runs/month ≈ €14
+// (+ roast €0.05 + export-dna). €20 covers that worst case with headroom while
+// still tripping on a genuinely runaway repo. Setup-PR / skip runs cost €0 or
+// just the ranker (~€0.05), so realistic usage is far below the cap. Override
+// via AGENT_MONTHLY_SPEND_CAP_EUR.
+const MONTHLY_SPEND_CAP_EUR = Number(Deno.env.get('AGENT_MONTHLY_SPEND_CAP_EUR') || '20.0')
 
 function byteLength(s: string): number {
   return new TextEncoder().encode(s).length
@@ -514,6 +517,24 @@ Deno.serve(async (req) => {
       const result = await discoverStructurePreview(body.subscriptionId)
       return new Response(JSON.stringify(result), {
         headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    if (body?.intent === 'single_run') {
+      // One-subscription run. Fired by the post-onboarding auto-run
+      // (api/onboarding.js finalize) and the "Run now" button
+      // (api/agent/run.js ?action=trigger_run). Reuses processConnection — same
+      // pipeline, lock, setup-PR gate and spend cap as the Monday cron. Like the
+      // full run it's fire-and-forget from a 2s-abort caller, so the heavy work
+      // MUST outlive the dropped connection via EdgeRuntime.waitUntil (otherwise
+      // EarlyDrop reaps the isolate). Return 202 immediately.
+      console.log('[run] single-run branch entered — dispatching background task')
+      const work = handleSingleRun(body.subscriptionId).catch((err: any) =>
+        console.error('[run] SINGLE_RUN FAILED', err?.message, err?.stack)
+      )
+      EdgeRuntime.waitUntil(work)
+      return new Response(JSON.stringify({ accepted: true }), {
+        status: 202, headers: { 'Content-Type': 'application/json' },
       })
     }
 
@@ -2928,6 +2949,47 @@ async function releaseRunLock(subscriptionId: string) {
   } catch (err: any) {
     console.warn(`[run-lock] release timed out for ${subscriptionId} (self-heals via TTL):`, err?.message)
   }
+}
+
+// Run the pipeline for a SINGLE subscription (post-onboarding auto-run + the
+// dashboard "Run now" button). Mirrors one iteration of handleFullRun's worker:
+// same eligibility filter, same lock, same processConnection — so a single run
+// behaves identically to a Monday cron run for that subscription (incl. the
+// setup-PR gate, dedupe, spend cap and no-data gate). Never throws.
+async function handleSingleRun(subscriptionId: string) {
+  console.log(`[run] handleSingleRun start sub=${subscriptionId}`)
+  if (!subscriptionId) return { success: false, error: 'subscriptionId required' }
+  await cleanupStaleRuns()
+
+  // Same eligibility filter as handleFullRun (active + active/trialing), but
+  // scoped to this one subscription. Not eligible (paused, cancelled, no
+  // connection) → no-op, never a crash.
+  const { data: conn } = await supabase
+    .from('agent_connections').select('*, agent_subscriptions!inner(*)')
+    .eq('subscription_id', subscriptionId)
+    .eq('agent_subscriptions.status', 'active')
+    .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
+    .maybeSingle()
+  if (!conn) {
+    console.log(`[run] single-run: no eligible connection for ${subscriptionId} — skipping`)
+    return { success: true, message: 'no eligible connection' }
+  }
+
+  // Same advisory lock as the cron worker → an auto-run, a manual run and the
+  // Monday cron can never process the same subscription concurrently.
+  const got = await acquireRunLock(subscriptionId)
+  if (!got) {
+    console.log(`[run] single-run: lock held for ${subscriptionId} — already running, skipping`)
+    return { success: true, message: 'already running' }
+  }
+  try {
+    await processConnection(conn)
+  } catch (err: any) {
+    console.error(`[handleSingleRun] processConnection threw for ${subscriptionId}:`, err?.message)
+  } finally {
+    await releaseRunLock(subscriptionId)
+  }
+  return { success: true, processed: 1 }
 }
 
 async function handleFullRun() {
