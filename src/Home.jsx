@@ -183,7 +183,7 @@ const CSS = `
      the booted flag), and the approval card's ring settles last. One-time; settled
      immediately under reduced-motion (transitions collapse, booted=true at once). */
   .dash-boot { position:relative; }
-  .dash-boot-border { position:absolute; inset:0; z-index:4; pointer-events:none; }
+  .dash-boot-border { position:absolute; inset:0; width:100%; height:100%; display:block; z-index:4; pointer-events:none; }
   .dash-boot-border rect { stroke-dasharray:100; stroke-dashoffset:100; }
   .dash-boot.in .dash-boot-border rect { transition:stroke-dashoffset 1.05s cubic-bezier(.22,.61,.36,1); stroke-dashoffset:0; }
   .dash-boot.in .dash-boot-border { animation:dashBorderFade .5s ease 1.05s forwards; }
