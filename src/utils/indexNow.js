@@ -1,7 +1,7 @@
 // Bing/Yandex IndexNow submitter. POSTs a batch of URLs to the IndexNow API so
 // participating search engines re-crawl them immediately instead of waiting for
 // the next sitemap sweep. The key is published as a flat file at
-// /db20abff66ce473f8ff4aa472a842fbf.txt (public/), which is how IndexNow proves
+// /a8425d52b07f44328eb7ad62c553a65a.txt (public/), which is how IndexNow proves
 // ownership of velyr.io.
 //
 // Uses the shared global fetch (works in the browser and Node 18+). Resolves
@@ -9,7 +9,7 @@
 // there are no URLs to submit. Rejects only on a network-level failure.
 
 const INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow'
-const INDEXNOW_KEY = 'db20abff66ce473f8ff4aa472a842fbf'
+const INDEXNOW_KEY = 'a8425d52b07f44328eb7ad62c553a65a'
 const HOST = 'velyr.io'
 
 export async function submitToIndexNow(urls) {
