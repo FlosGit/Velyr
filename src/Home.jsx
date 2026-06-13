@@ -592,7 +592,7 @@ function GrowthAgentSection({ navigate }) {
   }, [])
 
   const stats = [
-    { value:'Every Monday', label:'Agent runs automatically', sub:'no manual work needed' },
+    { value:'Every Monday', label:'Agent runs automatically', sub:'plus on-demand runs anytime' },
     { value:'48h', num:48, format:(n)=>`${Math.round(n)}h`, label:'Auto-rollback window', sub:'reverts if metrics drop' },
     { value:'100%', num:100, format:(n)=>`${Math.round(n)}%`, label:'Approval stays with you', sub:'nothing ships without your OK' },
   ]
@@ -611,7 +611,7 @@ function GrowthAgentSection({ navigate }) {
             <em style={{ fontStyle:'italic', color:C.warm }}>always improving.</em>
           </h2>
           <p style={{ fontSize:17, color:C.textMuted, lineHeight:1.72, fontWeight:300, maxWidth:520 }}>
-            A semi-autonomous AI agent that analyses your analytics, writes conversion fixes, and deploys them — with your approval. Every week, automatically.
+            A semi-autonomous AI agent that analyses your analytics, writes conversion fixes, and deploys them — with your approval. Every week, automatically — or on demand, the moment you want it.
           </p>
           <p style={{ fontSize:12, color:C.textLight, fontWeight:300, marginTop:12, letterSpacing:'.01em' }}>
             Requires a React, Next.js, or Vite site hosted on GitHub + Vercel.
@@ -1236,7 +1236,14 @@ function AgentDashboardPreview({ navigate, booted = true }) {
                 </div>
               </div>
 
-              <div style={{ padding:'10px 14px' }}>
+              <div style={{ padding:'10px 14px', display:'flex', flexDirection:'column', gap:7 }}>
+                <div style={{
+                  width:'100%', padding:'8px', borderRadius:7, fontSize:11, fontWeight:500,
+                  background:DC.accent, color:'#fff',
+                  border:`1px solid ${DC.accent}`,
+                  textAlign:'center', cursor:'default',
+                }}>▶ Run now</div>
+                <p style={{ fontSize:9, color:DC.textLight, textAlign:'center', lineHeight:1.4 }}>One run/day · weekly runs continue automatically</p>
                 <div style={{
                   width:'100%', padding:'8px', borderRadius:7, fontSize:11,
                   background:'transparent', color:DC.textMuted,
@@ -1426,7 +1433,7 @@ function Pricing({ navigate }) {
   const [ref, visible] = useReveal()
   const [allFeaturesOpen, setAllFeaturesOpen] = useState(false)
 
-  const agentFeaturesTop = ['AI analyses your repo + analytics weekly','Writes the code fix automatically','Reply YES or NO via Telegram','Auto-rollback if metrics drop','Competitor weekly scan']
+  const agentFeaturesTop = ['AI analyses your repo + analytics — weekly or on demand','Writes the code fix automatically','Reply YES or NO via Telegram','Auto-rollback if metrics drop','Competitor weekly scan']
   const agentFeaturesExtra = ['Identifies #1 conversion problem','Opens a GitHub Pull Request','Brand Guardrails — your rules enforced','Full funnel analysis (all pages)','Reads scroll depth + click behavior','Weekly summary on Telegram','Monthly roast report — brutal honesty','Business DNA — learns over time','Public impact timeline (shareable)']
 
   return (
@@ -1519,7 +1526,8 @@ function FAQ() {
   const [open, setOpen] = useState(null)
 
   const agentItems = [
-    { q:'What is the Growth Agent?', a:'The Growth Agent is a semi-autonomous AI that runs every Monday. It reads your real PostHog analytics and your GitHub repo, finds the biggest conversion problem, writes the code fix, opens a Pull Request, and sends you a Telegram message — reply YES to deploy or NO to skip. All automatically.' },
+    { q:'What is the Growth Agent?', a:'The Growth Agent is a semi-autonomous AI that runs every Monday — and on demand whenever you want. It reads your real PostHog analytics and your GitHub repo, finds the biggest conversion problem, writes the code fix, opens a Pull Request, and sends you a Telegram message — reply YES to deploy or NO to skip. All automatically.' },
+    { q:'When does it start — and can I run it myself?', a:'The agent gets to work the moment you finish setup — no waiting for Monday. After that it runs on its own every Monday morning, and you can trigger an extra run yourself any time from the dashboard with the Run now button (up to once a day) — handy right after you ship something new.' },
     { q:'Do I have to approve every change before it goes live?', a:'Yes, always. Nothing ships without your explicit approval. You receive a Telegram message with the problem, the data behind it, the solution, and the PR link. Reply YES to deploy it, or NO to skip it.' },
     { q:"What happens if the agent's change makes things worse?", a:'The agent checks your bounce rate 48 hours after every deployment. If it increased by 15+ percentage points, it automatically creates a rollback PR, merges it, and notifies you via Telegram. Your site reverts without any manual work.' },
     { q:'What are Brand Guardrails?', a:'Rules you set in your dashboard that the agent must follow on every run — tone of voice, things it can never do, elements it must never change. Any suggestion that violates your guardrails is automatically rejected.' },
