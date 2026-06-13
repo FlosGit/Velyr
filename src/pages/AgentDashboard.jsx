@@ -1988,8 +1988,8 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
   const [slug, setSlug]           = useState(subscription?.public_slug || '')
   const [competitors, setCompetitors] = useState(() => {
     const initial = subscription?.competitors || []
-    while (initial.length < 5) initial.push('')
-    return initial.slice(0, 5)
+    while (initial.length < 2) initial.push('')
+    return initial.slice(0, 2)
   })
   const [savingPublic, setSavingPublic] = useState(false)
   const [savingComp,   setSavingComp]   = useState(false)

@@ -1331,7 +1331,7 @@ async function handleUpdateSettings(req, res, user) {
       .map(u => String(u || '').trim())
       .filter(Boolean)
       .filter(u => { try { new URL(u); return true } catch { return false } })
-      .slice(0, 5)
+      .slice(0, 2)
     updates.competitors = cleaned
   }
 
