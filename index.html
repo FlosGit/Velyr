@@ -233,13 +233,38 @@
         </p>
         <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">How it works</h2>
         <ol style="line-height:1.8;color:#6b6460;font-size:15px;padding-left:20px">
-          <li>Every Monday the agent reads your PostHog analytics and scans every page in your GitHub repo.</li>
-          <li>It identifies the single highest-impact conversion fix across your full funnel and opens a Pull Request with a Vercel preview.</li>
-          <li>You get a Telegram message — reply <strong>YES</strong> to ship or <strong>NO</strong> to skip. Nothing merges without your approval.</li>
-          <li>48 hours after a merge, if site-wide bounce rate spikes, Velyr auto-opens a rollback PR.</li>
+          <li>Every Monday the agent reads your PostHog analytics (traffic, bounce rate, scroll depth, and click behavior) and scans every page in your GitHub repo.</li>
+          <li>It identifies the single highest-impact conversion problem across your full funnel — not just the homepage — and opens a Pull Request with a Vercel preview link.</li>
+          <li>You get a Telegram message summarizing the problem, the data behind it, and the proposed fix — reply <strong>YES</strong> to ship or <strong>NO</strong> to skip. Nothing merges without your approval.</li>
+          <li>48 hours after a merge, Velyr re-checks site-wide bounce rate; if it spikes by 15 percentage points or more, it automatically opens a rollback Pull Request.</li>
         </ol>
+        <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">What you get</h2>
+        <ul style="line-height:1.8;color:#6b6460;font-size:15px;padding-left:20px">
+          <li>One weekly conversion fix shipped as a reviewable GitHub Pull Request — real code, not a dashboard of suggestions you have to implement yourself.</li>
+          <li>Full-funnel analysis that maps every page in your repo and cross-references your analytics to find where visitors actually drop off.</li>
+          <li>A one-tap Telegram approval flow: every change is gated behind your explicit YES, and you see the exact diff first.</li>
+          <li>An automatic 48-hour rollback safety net if a change hurts your numbers — a measured revert, not just a promise.</li>
+          <li>Competitor tracking and Brand Guardrails — written rules the agent must respect, so off-brand suggestions are rejected before they reach you.</li>
+        </ul>
+        <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">How it's different</h2>
+        <p style="font-size:15px;line-height:1.78;color:#6b6460;max-width:640px">
+          Most conversion tools hand you a report and leave the implementation to you. Velyr writes the actual code change and opens it as a Pull Request inside your existing GitHub, Vercel, and PostHog workflow — there is no new platform to migrate to. You approve every change before it merges, and a backfiring fix reverts itself automatically. It is continuous conversion optimization that ships, with a human in the loop and a safety net underneath.
+        </p>
+        <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">Who it's for</h2>
+        <p style="font-size:15px;line-height:1.78;color:#6b6460;max-width:640px">
+          React, Next.js, or Vite sites deployed on Vercel with a GitHub repository — indie hackers, solo founders, and small SaaS teams who want ongoing conversion optimization without hiring a CRO agency or running experiments by hand. Because the agent edits source code, site builders that don't expose it (Shopify, Wix, Squarespace, Webflow) are not supported.
+        </p>
+        <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">Common questions</h2>
+        <dl style="line-height:1.78;color:#6b6460;font-size:15px">
+          <dt style="font-weight:500;color:#1c1917;margin-top:16px">Do I approve every change?</dt>
+          <dd style="margin:4px 0 0">Yes. Nothing merges without your explicit YES reply over Telegram, and you review the exact code diff in the Pull Request first.</dd>
+          <dt style="font-weight:500;color:#1c1917;margin-top:16px">What if a fix makes things worse?</dt>
+          <dd style="margin:4px 0 0">Velyr checks site-wide bounce rate 48 hours after each merge and auto-opens a revert Pull Request if it rose by 15 percentage points or more.</dd>
+          <dt style="font-weight:500;color:#1c1917;margin-top:16px">Is my code safe?</dt>
+          <dd style="margin:4px 0 0">Velyr only proposes changes as Pull Requests on your own GitHub repo. You review and approve before anything merges — it never pushes to your default branch on its own.</dd>
+        </dl>
         <p style="font-size:15px;color:#6b6460;margin-top:32px">
-          <strong>€29/month</strong> after a 14-day free trial. Built for React, Next.js, and Vite sites on Vercel with a GitHub repo. Cancel anytime.
+          <strong>€29/month</strong> after a 14-day free trial with every feature included. A credit card is required to start, you can cancel anytime during the trial without being charged, and you can cancel anytime afterwards too. Built for React, Next.js, and Vite sites on Vercel with a GitHub repo.
         </p>
         <p style="margin-top:24px">
           <a href="/agent/register" style="color:#2a5c45">Start free trial</a> ·
