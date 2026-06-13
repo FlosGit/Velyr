@@ -2442,9 +2442,13 @@ export default function AgentDashboard({ navigate }) {
   }, [user, isDemo, stripeVerified, subscription])
 
   async function fetchData() {
-    const {data:subs}=await supabase.from('agent_subscriptions').select('*').eq('auth_user_id',user.id).single()
+   try {
+    // limit(1)+maybeSingle: .single() ERRORS on 0 OR 2 rows — a stray duplicate
+    // subscription row would null out `subs` and wrongly show a paying user the
+    // "Unlock" subscribe screen. Newest row wins; 0 rows → null (no throw).
+    const {data:subs}=await supabase.from('agent_subscriptions').select('*').eq('auth_user_id',user.id).order('created_at',{ascending:false}).limit(1).maybeSingle()
     setSubscription(subs)
-    if(!subs){setLoading(false);return}
+    if(!subs) return
 
     const [runsRes, funnelRes, learningsRes, impactRes, connRes, snRes] = await Promise.all([
       supabase.from('agent_runs').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
@@ -2472,7 +2476,13 @@ export default function AgentDashboard({ navigate }) {
       console.warn('[fetchData] agent_site_network:', snRes.error.message)
     }
     setSiteNetwork(snRes.data || null)
+   } catch (err) {
+    // A network/transient failure must not strand the user on the spinner — the
+    // 30s poll (and the fast post-checkout poll) will retry. Log for debugging.
+    console.error('[fetchData] load failed:', err?.message || err)
+   } finally {
     setLoading(false)
+   }
   }
 
   async function getToken() {

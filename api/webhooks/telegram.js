@@ -320,6 +320,7 @@ async function handleApprove(runId, chatId) {
     const edgeUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agent-run`
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 2000)
+    let dispatched = true
     try {
       await fetch(edgeUrl, {
         method: 'POST',
@@ -331,11 +332,21 @@ async function handleApprove(runId, chatId) {
         signal: controller.signal,
       })
     } catch (err) {
+      // AbortError = our 2s timeout fired → the request WAS sent and the Edge
+      // function is building the PR. Any other error means the dispatch never
+      // landed: without this guard the run is stuck in 'running' (the stale sweep
+      // silently fails it ~1h later) while the user was promised a PR that never
+      // comes. Track it so we can roll the run back and ask them to retry.
       if (err?.name !== 'AbortError') {
+        dispatched = false
         console.error('[telegram] foreign_setup_pr Edge trigger failed:', err?.message)
       }
     } finally {
       clearTimeout(timeoutId)
+    }
+    if (!dispatched) {
+      await supabase.from('agent_runs').update({ status: 'waiting_approval' }).eq('id', runId)
+      return sendMessage(chatId, `⚠️ I couldn't start preparing the analytics PR just now. Please reply <b>YES</b> again in a moment.`)
     }
     return sendMessage(chatId, `⚙️ Got it — preparing the analytics PR now. I'll message you when it's ready for review.`)
   }
@@ -631,11 +642,28 @@ async function handleRemoveCompetitor(url, chatId) {
   const subId = await getActiveSubId(chatId)
   if (!subId) return notifyInactive(chatId)
 
+  // Precise match. The previous `.ilike('url', '%'+url+'%')` over-matched on a
+  // substring — removing "a.com" would also deactivate "data.com". Compare on a
+  // normalized form (lowercased, scheme + trailing slash stripped) so the user
+  // removes exactly the competitor they named, and tell them when nothing matched.
+  const norm = (u) => String(u || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  const target = norm(url)
+
+  const { data: rows } = await supabase
+    .from('agent_competitor_urls')
+    .select('id, url')
+    .eq('subscription_id', subId)
+    .eq('active', true)
+
+  const matchIds = (rows || []).filter(r => norm(r.url) === target).map(r => r.id)
+  if (matchIds.length === 0) {
+    return sendMessage(chatId, `⚠️ No tracked competitor matches <code>${escapeHtml(url)}</code>. Send <b>status</b> to see the exact URLs.`)
+  }
+
   await supabase
     .from('agent_competitor_urls')
     .update({ active: false })
-    .eq('subscription_id', subId)
-    .ilike('url', `%${url}%`)
+    .in('id', matchIds)
 
   await sendMessage(chatId, `🗑️ <b>Competitor removed.</b> The agent will no longer scan that URL.`)
 }

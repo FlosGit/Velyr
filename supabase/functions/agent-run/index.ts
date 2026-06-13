@@ -791,8 +791,11 @@ async function fetchBrandGuardrails(subscriptionId: string) {
 // benefit. The security-critical contract that MUST stay twinned is the $host
 // filter above — the engagement enrichment is additive and self-guarded.
 async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: string, posthogHost = 'https://us.i.posthog.com', hostFilter?: string | null) {
-  if (!hostFilter) {
-    console.warn('PostHog analytics skipped: no posthog_host_filter (domain) for this connection')
+  // Twin of api/agent/run.js isValidHostFilter: $host is interpolated into HogQL
+  // as a single-quoted literal, so reject anything that isn't a plain hostname
+  // (optional :port) — structural injection defense on top of the quote-escape.
+  if (!hostFilter || !/^[a-z0-9.-]+(:\d{1,5})?$/i.test(hostFilter)) {
+    console.warn('PostHog analytics skipped: missing/invalid posthog_host_filter (domain) for this connection')
     return null
   }
   try {
@@ -2276,6 +2279,19 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
   const forbidden = isForbiddenEditPath(filePath)
   if (forbidden) {
     throw new Error(`AI selected a forbidden file path: "${filePath}" matched denylist pattern ${forbidden}. Refusing to commit.`)
+  }
+
+  // Verifiable-type guard (P2-4): validateSyntax only parses the JS/TS family —
+  // for any other extension it returns ok:true WITHOUT checking, so a broken edit
+  // to a compiled template (.vue/.svelte/.astro) or markup could reach the
+  // customer's PR and break their build if merged. The supported frameworks
+  // (Next/Vite/CRA) keep conversion targets in JS/TS, so refuse out-of-family
+  // paths rather than open an unchecked edit. Keep this set in sync with
+  // validateSyntax. Throw → generic failed (honest no-PR).
+  const editExt = filePath.split('.').pop()?.toLowerCase() || ''
+  const VERIFIABLE_EDIT_EXTENSIONS = ['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx']
+  if (!VERIFIABLE_EDIT_EXTENSIONS.includes(editExt)) {
+    throw new Error(`AI selected a non-verifiable file type ".${editExt}" (${filePath}); only ${VERIFIABLE_EDIT_EXTENSIONS.join('/')} edits are syntax-checked before commit. Refusing to open an unverified PR.`)
   }
 
   const defaultBranch = await getDefaultBranch(octokit, owner, repo)

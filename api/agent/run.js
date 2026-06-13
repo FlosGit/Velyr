@@ -55,6 +55,16 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(aBuf, bBuf)
 }
 
+// posthog_host_filter is the customer's domain (window.location.host: hostname
+// with an optional :port). It's interpolated into HogQL `where` clauses as a
+// single-quoted literal. A tight hostname allowlist makes injection structurally
+// impossible (rejects quotes, spaces, HogQL syntax) on top of the single-quote
+// escaping at each call site. Anything that isn't a plain host is treated like a
+// missing host — the query is skipped, never run against the whole shared project.
+function isValidHostFilter(host) {
+  return typeof host === 'string' && /^[a-z0-9.-]+(:\d{1,5})?$/i.test(host)
+}
+
 // ─── LLM COST GUARDRAILS (mirrored from Edge Function) ───────────────────────
 // Keep these in sync with supabase/functions/agent-run/index.ts. We duplicate
 // rather than share because Vercel (Node) and Supabase (Deno) don't share a
@@ -343,13 +353,47 @@ export default async function handler(req, res) {
         }
       }
 
+      // Local teardown. Billing is now cancelled (above), so the user can never
+      // be charged for a half-deleted account. The previous version deleted only
+      // agent_runs + agent_connections + agent_subscriptions and was unwrapped:
+      // any child table without ON DELETE CASCADE (the older ones predate the
+      // migrations dir, so their FK behavior isn't guaranteed) would block the
+      // parent delete and 500 AFTER Stripe was cancelled — stranding the user in
+      // a billing-cancelled-but-data-intact state. We now delete EVERY child
+      // table keyed on subscription_id first (idempotent for the ones that do
+      // cascade), best-effort per table, before the parent + auth user.
       const subIds = subs?.map(s => s.id) || []
       if (subIds.length > 0) {
-        await supabase.from('agent_runs').delete().in('subscription_id', subIds)
-        await supabase.from('agent_connections').delete().in('subscription_id', subIds)
-        await supabase.from('agent_subscriptions').delete().in('id', subIds)
+        // Children first (parent delete would otherwise hit a RESTRICT FK).
+        const childTables = [
+          'agent_runs', 'agent_connections', 'agent_learnings', 'agent_business_dna',
+          'agent_competitor_urls', 'agent_competitor_snapshots', 'agent_funnel_pages',
+          'agent_brand_guardrails', 'agent_llm_usage', 'impact_metrics',
+          'agent_ab_tests', 'agent_site_network', 'site_structure_preview',
+          'agent_run_locks',
+        ]
+        for (const table of childTables) {
+          const { error } = await supabase.from(table).delete().in('subscription_id', subIds)
+          // 42P01 = table absent in this deployment — expected, ignore. Other
+          // errors are logged but non-fatal; a child that genuinely couldn't be
+          // cleared will surface as an FK block on the parent delete below.
+          if (error && error.code !== '42P01') {
+            console.error(`[account-delete] child delete failed for ${table}:`, error.message)
+          }
+        }
+        const { error: subDelErr } = await supabase.from('agent_subscriptions').delete().in('id', subIds)
+        if (subDelErr) {
+          console.error('[account-delete] subscription delete failed (billing already cancelled):', subDelErr.message)
+          return res.status(500).json({ error: 'Your subscription was cancelled, but the account data could not be fully removed. Please contact support to finish deletion.' })
+        }
       }
-      await supabase.auth.admin.deleteUser(user.id)
+
+      // Auth user last — cascades the auth-keyed rows (Telegram codes/tokens).
+      const { error: userDelErr } = await supabase.auth.admin.deleteUser(user.id)
+      if (userDelErr) {
+        console.error('[account-delete] auth user delete failed:', userDelErr.message)
+        return res.status(500).json({ error: 'Your account data was removed, but the login could not be deleted. Please contact support.' })
+      }
       return res.json({ success: true })
     }
   }
@@ -695,22 +739,46 @@ async function handleRollbackCheck(res) {
   await promotePendingDNAToSuccess().catch(e => console.error('DNA promote error:', e))
 
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
-  const ninetyTwoHoursAgo  = new Date(Date.now() - 96 * 60 * 60 * 1000).toISOString()
 
   // Bounce/rollback measurement runs FIRST and on the full budget — it is the
-  // safety-critical path and its [48h,96h] window is single-shot (a run missed
-  // this week is >96h old next week and never measured). The cosmetic
-  // after-screenshot backfill runs afterwards with whatever budget remains, so
-  // a screenshot backlog can never starve the rollback check.
+  // safety-critical path. The lower bound was widened from a single-shot 96h
+  // window to a multi-day lookback: the old [48h,96h] window meant a run that
+  // was skipped when this inline weekly cron was killed mid-loop (Vercel's 60s
+  // budget, looping over every subscriber) was >96h old by the next run and
+  // NEVER measured — the promised 48h impact/rollback check silently never
+  // happened for that subscriber. A lookback that spans more than the weekly
+  // cadence means a skipped run is retried on the following run instead of lost.
+  // The before/after bounce windows are anchored to each run's own completed_at
+  // (deploy±2d), so measuring later still compares the correct data; the
+  // idempotency guard below prevents re-measuring a run that WAS already handled.
+  const ROLLBACK_LOOKBACK_MS = Number(process.env.ROLLBACK_LOOKBACK_MS || String(10 * 24 * 60 * 60 * 1000))
+  const lookbackStart = new Date(Date.now() - ROLLBACK_LOOKBACK_MS).toISOString()
   const { data: deployedRuns } = await supabase
     .from('agent_runs').select('*')
     .eq('status', 'deployed')
-    .gte('completed_at', ninetyTwoHoursAgo)
+    .gte('completed_at', lookbackStart)
     .lte('completed_at', fortyEightHoursAgo)
+
+  // Idempotency: a site_wide_bounce_rate learning is written for both a real
+  // measurement AND the insufficient_data outcome, so its presence means this
+  // run was already processed. Re-measuring is pointless (the deploy±2d windows
+  // are fixed, so the result is identical) and would spam duplicate learnings /
+  // impact_metrics rows — skip those runs. One query for the whole candidate set.
+  const candidateRunIds = (deployedRuns || []).map(r => r.id)
+  const measuredRunIds  = new Set()
+  if (candidateRunIds.length > 0) {
+    const { data: priorLearnings } = await supabase
+      .from('agent_learnings')
+      .select('run_id')
+      .eq('metric_type', 'site_wide_bounce_rate')
+      .in('run_id', candidateRunIds)
+    for (const l of (priorLearnings || [])) measuredRunIds.add(l.run_id)
+  }
 
   // Note: no early-return when empty — the after-screenshot backfill below must
   // still run even on weeks with nothing in the bounce window.
   for (const run of (deployedRuns || [])) {
+    if (measuredRunIds.has(run.id)) continue   // already measured — idempotent skip
     try {
       const { data: conn } = await supabase
         .from('agent_connections').select('*')
@@ -727,8 +795,8 @@ async function handleRollbackCheck(res) {
       // No host → we can't measure this customer's bounce rate, so skip the
       // rollback decision rather than act on the wrong site's data.
       const hostFilter = conn?.posthog_host_filter
-      if (!hostFilter) {
-        console.warn(`[rollback_check] run=${run.id} sub=${run.subscription_id}: no posthog_host_filter — skipping bounce comparison`)
+      if (!hostFilter || !isValidHostFilter(hostFilter)) {
+        console.warn(`[rollback_check] run=${run.id} sub=${run.subscription_id}: missing/invalid posthog_host_filter — skipping bounce comparison`)
         continue
       }
       const hostWhere     = [`properties.$host = '${String(hostFilter).replace(/'/g, "''")}'`]
@@ -1154,8 +1222,8 @@ ${pagesLines ? `<b>Most visited:</b>\n${pagesLines}` : ''}
 // return null. Keep this $host logic in sync with the twin in
 // supabase/functions/agent-run/index.ts (getPostHogAnalytics).
 async function getPostHogAnalytics(posthogApiKey, posthogProjectId, posthogHost = 'https://us.i.posthog.com', hostFilter = null) {
-  if (!hostFilter) {
-    console.warn('PostHog analytics skipped: no posthog_host_filter (domain) for this connection')
+  if (!hostFilter || !isValidHostFilter(hostFilter)) {
+    console.warn('PostHog analytics skipped: missing/invalid posthog_host_filter (domain) for this connection')
     return null
   }
   try {

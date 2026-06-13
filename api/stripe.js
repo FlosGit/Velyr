@@ -32,7 +32,10 @@ async function handleCheckout(req, res) {
       // 14-day free trial. payment_method_collection:'always' forces the card to
       // be captured at signup (no trial-without-card), so the trial converts to
       // a paid subscription automatically at trial end with no extra step.
-      subscription_data: { trial_period_days: 14 },
+      // metadata.user_id is stamped onto the SUBSCRIPTION (not just the session)
+      // so customer.subscription.created can materialize the agent_subscriptions
+      // row even if checkout.session.completed is lost/delayed — see the webhook.
+      subscription_data: { trial_period_days: 14, metadata: { user_id: userId } },
       payment_method_collection: 'always',
       // Subscribers (incl. those in trial) go straight to onboarding so they can
       // connect GitHub and Telegram. The onboarding mount gate accepts them once

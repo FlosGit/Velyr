@@ -159,18 +159,36 @@ export default async function handler(req, res) {
 
       case 'customer.subscription.created': {
         const s = event.data.object
-        // No user_id lookup here — this event has no metadata. The row was
-        // already created (or will be created) by checkout.session.completed,
-        // keyed on stripe_customer_id. If the row doesn't exist yet (event
-        // ordering can vary), this UPDATE is a no-op and the
-        // checkout.session.completed handler will fill in the rest.
-        await supabase.from('agent_subscriptions').update({
+        const fields = {
           subscription_status:  STATE_MAP[s.status] ?? s.status,
           subscription_id:      s.id,
           current_period_end:   periodEndIso(s),
           trial_end:            trialEndIso(s),
           cancel_at_period_end: s.cancel_at_period_end === true,
-        }).eq('stripe_customer_id', s.customer)
+        }
+        // user_id is carried on subscription_data.metadata (set at checkout).
+        // When present, this event can MATERIALIZE the row — previously only
+        // checkout.session.completed could create it, so a single lost/delayed
+        // delivery of that one event left a paying customer with no row, stuck
+        // on "Setting up…" forever. Upsert keyed on user_id; status/identity
+        // columns mirror the checkout handler. status='active' is correct at
+        // creation time (no pause exists yet); subscription_status still gates
+        // payment, so an 'incomplete' sub stays run-ineligible.
+        const userId = s.metadata?.user_id || null
+        if (userId) {
+          await supabase.from('agent_subscriptions').upsert({
+            user_id:            userId,
+            auth_user_id:       userId,
+            plan:               'growth',
+            status:             'active',
+            stripe_customer_id: s.customer,
+            ...fields,
+          }, { onConflict: 'user_id' })
+        } else {
+          // Legacy subscription with no metadata: keep the no-op-if-absent update
+          // keyed on the customer (checkout.session.completed owns row creation).
+          await supabase.from('agent_subscriptions').update(fields).eq('stripe_customer_id', s.customer)
+        }
         break
       }
 

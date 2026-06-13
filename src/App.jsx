@@ -37,6 +37,21 @@ const Spinner = ({ label = 'Loading…' } = {}) => (
   </div>
 )
 
+// Shown for unmatched paths instead of silently rendering the marketing home for
+// any typo'd URL (e.g. /agetn/dashboard), which was confusing and bad for SEO.
+const NotFound = ({ navigate }) => (
+  <div style={{ minHeight: '100vh', background: '#f7f4ef', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 14, fontFamily: 'Jost, sans-serif', padding: 24, textAlign: 'center' }}>
+    <h1 style={{ fontSize: 64, fontWeight: 300, color: '#2a5c45', margin: 0, letterSpacing: '-0.02em' }}>404</h1>
+    <p style={{ fontSize: 16, color: '#1c1917', fontWeight: 300, margin: 0 }}>This page doesn’t exist.</p>
+    <button
+      onClick={() => navigate('/')}
+      style={{ marginTop: 8, padding: '10px 22px', background: '#2a5c45', color: '#f7f4ef', border: 'none', borderRadius: 999, fontFamily: 'Jost, sans-serif', fontSize: 14, cursor: 'pointer' }}
+    >
+      Back to home
+    </button>
+  </div>
+)
+
 // Renders after a Supabase email confirmation when the user originally clicked
 // "Subscribe". Waits for the Supabase session to be established (the hash
 // tokens are detected by supabase-js asynchronously), then hands off to Stripe
@@ -216,9 +231,14 @@ export default function App() {
     )
   }
 
-  return (
-    <Home
-      navigate={navigate}
-    />
-  )
+  if (path === '/') {
+    return (
+      <Home
+        navigate={navigate}
+      />
+    )
+  }
+
+  // Unknown path → 404 (previously any unmatched URL silently rendered Home).
+  return <NotFound navigate={navigate} />
 }
