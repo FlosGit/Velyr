@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase.js'
-import CheckoutConfirmModal from './CheckoutConfirmModal.jsx'
 
 const LABELS = {
   subscription: 'Start free trial – €29/month after',
@@ -33,31 +32,21 @@ export async function beginCheckout(type, navigate) {
 
 export default function SubscribeButton({ type, style = {}, className = '', navigate }) {
   const [loading, setLoading] = useState(false)
-  // Pre-checkout consent gate (recurring-charge acknowledgment for the
-  // subscription). Existing checkout logic below is unchanged — it only runs
-  // after the user actively confirms.
-  const [confirmOpen, setConfirmOpen] = useState(false)
 
-  const startActualCheckout = async () => {
+  // Start the free trial immediately — no payment/consent modal here. Nothing is
+  // charged at trial start (no card is collected); the recurring-charge consent
+  // is shown at the actual payment step (the dashboard conversion flow once the
+  // trial ends).
+  const handleClick = async () => {
     if (loading) return
     setLoading(true)
     try {
       const result = await beginCheckout(type, navigate)
       if (!result?.redirected) setLoading(false)
     } catch (err) {
-      console.error('Checkout error:', err)
+      console.error('Trial start error:', err)
       setLoading(false)
     }
-  }
-
-  const handleClick = () => {
-    if (loading) return
-    setConfirmOpen(true)
-  }
-
-  const handleConfirm = async () => {
-    setConfirmOpen(false)
-    await startActualCheckout()
   }
 
   const label = LABELS[type] || 'Buy Now'
@@ -105,14 +94,6 @@ export default function SubscribeButton({ type, style = {}, className = '', navi
       <p style={{ fontSize: 11, color: '#a09890', fontWeight: 300, textAlign: 'center', marginTop: 6 }}>
         * 14-day free trial. Cancel anytime, no charge during trial. Endpreis gem. § 19 UStG — no VAT charged.
       </p>
-
-      <CheckoutConfirmModal
-        type={type}
-        open={confirmOpen}
-        onCancel={() => setConfirmOpen(false)}
-        onConfirm={handleConfirm}
-        loading={loading}
-      />
     </>
   )
 }
