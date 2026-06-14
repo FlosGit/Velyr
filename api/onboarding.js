@@ -168,6 +168,85 @@ async function handleComplete(req, res) {
   return res.status(200).json({ ok: true })
 }
 
+// ─── action=init_subscription (POST) ─────────────────────────────────────────
+// Creates the bare agent_subscriptions row at onboarding start so the GitHub
+// step (complete_onboarding) and finalize have a row to attach to. The 14-day
+// Stripe trial is deliberately NOT created here — it is started AFTER onboarding
+// completes (api/stripe.js?action=start_trial), so the trial clock begins at
+// completion, not signup.
+//
+// The bare row is run-INELIGIBLE by design: status='active' satisfies the
+// onboarding mount gate, while subscription_status=NULL keeps the agent from
+// running (cron/manual gates require subscription_status ∈ active|trialing)
+// until start_trial fills it in. `status` is NOT NULL in the table so it must be
+// set; there is no CHECK on status/subscription_status (verified against live).
+// Idempotent: returns the caller's existing row if one already exists.
+async function handleInitSubscription(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+  if (!SERVICE_ROLE_KEY) {
+    console.error('onboarding/init_subscription: SUPABASE_SERVICE_ROLE_KEY not configured')
+    return res.status(500).json({ error: 'Onboarding is not configured. Contact support.' })
+  }
+
+  const auth = await getUser(req)
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' })
+
+  // Idempotent: reuse the caller's existing subscription row if present (any
+  // status — a returning/lapsed user keeps their row; conversion is handled by
+  // Stripe checkout, never here). user_id == auth_user_id (both hold the auth
+  // UUID), so selecting on either is equivalent.
+  const { data: existing, error: selErr } = await serviceClient
+    .from('agent_subscriptions')
+    .select('id')
+    .eq('auth_user_id', auth.user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (selErr) {
+    console.error('onboarding/init_subscription: lookup failed:', selErr.message)
+    return res.status(500).json({ error: 'Could not start onboarding. Try again.' })
+  }
+  if (existing?.id) return res.status(200).json({ subscriptionId: existing.id })
+
+  // Insert the bare row. The column split: the Stripe webhook keys on user_id,
+  // the agent system keys on auth_user_id — both carry the same Supabase auth
+  // UUID. plan must be one of starter|growth|scale (CHECK).
+  const { data: inserted, error: insErr } = await serviceClient
+    .from('agent_subscriptions')
+    .insert({
+      user_id:             auth.user.id,
+      auth_user_id:        auth.user.id,
+      email:               auth.user.email ?? null,
+      plan:                'growth',
+      status:              'active',
+      subscription_status: null,
+    })
+    .select('id')
+    .single()
+
+  if (insErr) {
+    // 23505 = a concurrent init (or the Stripe webhook) created the row first;
+    // re-read and return it so the call stays idempotent.
+    if (insErr.code === '23505') {
+      const { data: raced } = await serviceClient
+        .from('agent_subscriptions')
+        .select('id')
+        .eq('auth_user_id', auth.user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (raced?.id) return res.status(200).json({ subscriptionId: raced.id })
+    }
+    console.error('onboarding/init_subscription: insert failed:', insErr.message)
+    return res.status(500).json({ error: 'Could not start onboarding. Try again.' })
+  }
+
+  return res.status(200).json({ subscriptionId: inserted.id })
+}
+
 // ─── action=finalize (POST) ──────────────────────────────────────────────────
 // Writes the remaining (non-GitHub) connection fields server-side. This is the
 // migration of OA4's handleStep4 browser write: once the interim RLS policies
@@ -556,6 +635,7 @@ export default async function handler(req, res) {
 
   const action = req.query.action
   if (action === 'snapshot')             return handleSnapshot(req, res)
+  if (action === 'init_subscription')    return handleInitSubscription(req, res)
   if (action === 'complete')             return handleComplete(req, res)
   if (action === 'finalize')             return handleFinalize(req, res)
   if (action === 'telegram_start_token') return handleTelegramStartToken(req, res)

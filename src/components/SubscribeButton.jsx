@@ -1,19 +1,19 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase.js'
-import { startCheckout } from '../utils/startCheckout.js'
 import CheckoutConfirmModal from './CheckoutConfirmModal.jsx'
 
 const LABELS = {
   subscription: 'Start free trial – €29/month after',
 }
 
-// Higher-level checkout entry point used by CTAs. Handles the guest case:
+// Higher-level trial entry point used by CTAs. Handles the guest case:
 // - subscription + no session → persist intent (localStorage primary, sessionStorage
 //   fallback) and route to /agent/register?intent=subscription so the user can
 //   sign up; the intent is later honoured by App.jsx's post-signup handler and
 //   by AgentAuth after a manual login.
-// - signed-in user → call the shared startCheckout util, which POSTs to
-//   /api/stripe and redirects to the Stripe Checkout URL.
+// - signed-in user → go straight to onboarding. There is NO card at signup
+//   anymore: the subscription starts as a 14-day free trial created server-side
+//   once onboarding (GitHub + Telegram) completes.
 export async function beginCheckout(type, navigate) {
   const { data: { session } } = await supabase.auth.getSession()
 
@@ -26,7 +26,9 @@ export async function beginCheckout(type, navigate) {
     return { redirected: true }
   }
 
-  return startCheckout(type, session?.user?.id || null, session?.user?.email || null)
+  if (navigate) navigate('/agent/onboarding')
+  else window.location.href = '/agent/onboarding'
+  return { redirected: true }
 }
 
 export default function SubscribeButton({ type, style = {}, className = '', navigate }) {

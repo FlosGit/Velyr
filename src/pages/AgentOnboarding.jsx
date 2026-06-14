@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 
 import { supabase } from '../lib/supabase.js'
 import { MOTION_CSS } from '../lib/motion.jsx'
-import { startCheckout } from '../utils/startCheckout.js'
 import { SiteNetwork } from '../components/SiteNetwork.jsx'
 import { buildNetworkData, hubDomainFromUrl } from '../lib/siteNetworkData.js'
 
@@ -854,110 +853,44 @@ export default function AgentOnboarding({ navigate }) {
     }
   }, [])
 
-  // Subscription gate — block the onboarding form until the user has an active
-  // subscription. Without this, users could fill out 4 forms before discovering
-  // they need to pay. If they're not active, we send them straight to Stripe
-  // (success_url returns them to /agent/onboarding?session_id=... once paid).
-  //
-  // Race-condition guard: the Stripe webhook that flips subscription_status to
-  // 'active' can lag behind the user-facing redirect. To avoid bouncing a
-  // freshly-paid user back to Stripe, we verify the session_id with Stripe in
-  // parallel with polling the DB — if Stripe confirms payment, we let the user
-  // proceed even while the DB row is still being written. Only bounce when
-  // both the Stripe verify AND the DB poll have failed.
+  // Subscription gate — onboarding no longer requires a card. Ensure the bare
+  // agent_subscriptions row exists (idempotent server-side init) so the GitHub
+  // step (complete_onboarding) and finalize have a row to attach to, then let
+  // the user in. The 14-day Stripe trial is created AFTER onboarding completes
+  // (handleStep4 → /api/stripe?action=start_trial), so nothing is collected or
+  // verified with Stripe here.
   useEffect(() => {
     if (!user) return
     let cancelled = false
-    let retryTimer = null
 
-    const params = new URLSearchParams(window.location.search)
-    const fromCheckout = params.get('checkout') === 'success'
-    const sessionId = params.get('session_id')
-
-    // Persist session_id so later steps can re-verify with Stripe even after
-    // the URL is cleaned up by passGate(). Without this, handleStep4 finds no
-    // session_id and bounces freshly-paid users back to Stripe.
-    if (fromCheckout && sessionId) {
-      try { localStorage.setItem('velyr_onboarding_session_id', sessionId) } catch {}
-    }
-
-    // null = pending, true = confirmed paid subscription, false = no/invalid session
-    let stripeResult = null
-    let dbExhausted = false
-    let gatePassed = false
-
-    const passGate = () => {
-      if (gatePassed || cancelled) return
-      gatePassed = true
-      if (fromCheckout) window.history.replaceState({}, '', '/agent/onboarding')
-      setGateChecked(true)
-    }
-
-    const maybeBounceToStripe = async () => {
-      if (cancelled || gatePassed) return
-      // Wait until BOTH signals have settled before sending the user away.
-      if (stripeResult === null || !dbExhausted) return
-      if (stripeResult === true) return
-      await startCheckout('subscription', user.id, user.email)
-    }
-
-    const verifyStripeSession = async () => {
-      if (!fromCheckout || !sessionId) {
-        stripeResult = false
-        maybeBounceToStripe()
-        return
-      }
+    ;(async () => {
       try {
-        const res = await fetch(
-          `/api/stripe?action=verify_session&session_id=${encodeURIComponent(sessionId)}`
-        )
-        const json = await res.json()
+        const { data: { session } } = await supabase.auth.getSession()
+        if (cancelled || !session) return
+        const res = await fetch('/api/onboarding?action=init_subscription', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        })
+        const json = await res.json().catch(() => ({}))
         if (cancelled) return
-        // 'no_payment_required' = trial checkout (card captured, nothing charged yet).
-        const paid = (json.paymentStatus === 'paid' || json.paymentStatus === 'no_payment_required') && json.type === 'subscription'
-        stripeResult = paid
-        if (paid) passGate()
-        else maybeBounceToStripe()
-      } catch {
-        if (cancelled) return
-        stripeResult = false
-        maybeBounceToStripe()
+        if (res.ok && json.subscriptionId) {
+          setSubscriptionId(json.subscriptionId)
+        } else {
+          console.error('[onboarding] init_subscription failed:', json.error || res.status)
+        }
+      } catch (err) {
+        if (!cancelled) console.error('[onboarding] init_subscription error:', err)
+      } finally {
+        // Always clear the gate so the user can proceed; the GitHub step
+        // re-checks subscriptionId and shows a clear error if init truly failed.
+        if (!cancelled) setGateChecked(true)
       }
-    }
+    })()
 
-    const checkSubscription = async (attempt = 0) => {
-      if (cancelled || gatePassed) return
-
-      const { data: sub } = await supabase
-        .from('agent_subscriptions')
-        .select('id, status')
-        .eq('user_id', user.id)
-        .single()
-      if (cancelled || gatePassed) return
-
-      if (sub?.id) setSubscriptionId(sub.id)
-
-      if (sub?.status === 'active') {
-        passGate()
-        return
-      }
-
-      // Webhook hasn't caught up yet — retry every 2s for up to ~15s.
-      if (fromCheckout && attempt < 7) {
-        retryTimer = setTimeout(() => checkSubscription(attempt + 1), 2000)
-        return
-      }
-
-      dbExhausted = true
-      maybeBounceToStripe()
-    }
-
-    verifyStripeSession()
-    checkSubscription()
-    return () => {
-      cancelled = true
-      if (retryTimer) clearTimeout(retryTimer)
-    }
+    return () => { cancelled = true }
   }, [user])
 
   const handleStep0 = ()     => setStep(1)
@@ -989,85 +922,17 @@ export default function AgentOnboarding({ navigate }) {
     const allData = { ...formData, ...data }
 
     try {
-      // Payment gate — the Stripe webhook creates the agent_subscriptions row on
-      // checkout.session.completed. Onboarding must NOT activate the agent without
-      // a paid subscription, so require one before writing the connection.
-      //
-      // Same race-condition guard as the mount gate: the webhook can lag the
-      // user-facing redirect, so poll the DB for up to ~15s and verify the
-      // Stripe session in parallel. A paid user is never sent back to Stripe.
-      //
-      // session_id may have been stripped from the URL by the mount gate's
-      // passGate(), so fall back to localStorage where we stashed it on arrival.
-      const params = new URLSearchParams(window.location.search)
-      const urlSessionId = params.get('session_id')
-      let storedSessionId = null
-      try { storedSessionId = localStorage.getItem('velyr_onboarding_session_id') } catch {}
-      const sessionId = urlSessionId || storedSessionId
-      console.log('[onboarding/step4] session_id from URL:', urlSessionId, '| from localStorage:', storedSessionId, '| using:', sessionId)
-
-      const stripePromise = (async () => {
-        if (!sessionId) {
-          console.log('[onboarding/step4] no session_id available — stripe verify skipped')
-          return false
-        }
-        try {
-          const res = await fetch(
-            `/api/stripe?action=verify_session&session_id=${encodeURIComponent(sessionId)}`
-          )
-          const json = await res.json()
-          console.log('[onboarding/step4] verify_session response:', json)
-          // 'no_payment_required' = trial checkout (card captured, nothing charged yet).
-          return (json.paymentStatus === 'paid' || json.paymentStatus === 'no_payment_required') && json.type === 'subscription'
-        } catch (err) {
-          console.log('[onboarding/step4] verify_session error:', err)
-          return false
-        }
-      })()
-
-      let sub = null
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const { data: row, error: pollErr } = await supabase
-          .from('agent_subscriptions')
-          .select('id, status')
-          .eq('user_id', user.id)
-          .single()
-        console.log(`[onboarding/step4] db poll attempt ${attempt}:`, { row, error: pollErr })
-        if (row?.status === 'active') {
-          sub = row
-          break
-        }
-        if (attempt < 7) await new Promise(r => setTimeout(r, 2000))
-      }
-
-      if (!sub) {
-        // DB never reflected an active subscription. Check Stripe before
-        // bouncing — if the user genuinely paid, send them to the dashboard
-        // (the webhook will catch up on its own) instead of charging twice.
-        const stripePaid = await stripePromise
-        console.log('[onboarding/step4] db exhausted, stripePaid =', stripePaid)
-        if (stripePaid) {
-          console.log('[onboarding/step4] Stripe confirms payment — routing to dashboard')
-          // Fix 5 skipped: at this point `sub` is null (that's the entry
-          // condition for this branch), so we have no subscription row to
-          // UPDATE auth_user_id on. A UPSERT keyed on user_id would race the
-          // Stripe webhook's INSERT and could clobber columns it owns
-          // (stripe_customer_id, subscription_id, current_period_end, …).
-          // The dashboard's verify-session fallback handles the user-facing
-          // gap; setting auth_user_id when the webhook fires is a separate
-          // server-side fix.
-          //
-          // localStorage cleanup intentionally NOT done here — the dashboard's
-          // own verify effect owns cleanup after it confirms with Stripe.
-          navigate('/agent/dashboard')
-          return
-        }
-        console.log('[onboarding/step4] bouncing to Stripe checkout (no DB row + Stripe verify failed)')
-        await startCheckout('subscription', user.id, user.email)
+      // No payment gate here: onboarding collects no card. The bare
+      // agent_subscriptions row was created at mount (init_subscription) and its
+      // id is in `subscriptionId`. The 14-day Stripe trial is started AFTER
+      // finalize succeeds (start_trial below), so the clock begins at completion.
+      if (!subscriptionId) {
+        setError('Your session expired. Refresh the page and try again.')
+        setLoading(false)
         return
       }
 
-      // Update subscription row with onboarding-supplied details
+      // Persist the onboarding-supplied details onto the row.
       const subUpdate = await supabase
         .from('agent_subscriptions')
         .update({
@@ -1076,27 +941,26 @@ export default function AgentOnboarding({ navigate }) {
           plan: 'growth',
           telegram_chat_id: allData.telegramChatId,
         })
-        .eq('id', sub.id)
-      console.log('[onboarding/step4] agent_subscriptions update result:', { data: subUpdate.data, error: subUpdate.error, status: subUpdate.status })
+        .eq('id', subscriptionId)
+      console.log('[onboarding/step4] agent_subscriptions update result:', { error: subUpdate.error, status: subUpdate.status })
       if (subUpdate.error) throw subUpdate.error
 
       // OA6: the verification code is re-validated AND atomically consumed
       // server-side inside finalize (no browser SELECT/UPDATE on
       // telegram_verification_codes anymore). We just thread the codeId
       // captured at Step 4 entry.
-      // OA5: the agent_connections write is now SERVER-SIDE. The browser can no
-      // longer write that table (the interim RLS write policies were retired in
+      // OA5: the agent_connections write is SERVER-SIDE. The browser can no
+      // longer write that table (interim RLS write policies retired in
       // 20260522_retire_interim_oauth_rls.sql), so we POST the remaining,
       // non-GitHub fields to /api/onboarding?action=finalize, which writes them
       // with the service role after re-checking ownership + that the GitHub
-      // step (complete_onboarding) already ran. The GitHub columns were written
-      // by that RPC at the GitHub step (closes OA3-A) and are not touched here.
+      // step (complete_onboarding) already ran.
       const { data: { session } } = await supabase.auth.getSession()
       const finalizeRes = await fetch('/api/onboarding?action=finalize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({
-          subscriptionId: sub.id,
+          subscriptionId,
           websiteUrl: allData.websiteUrl,
           posthogApiKey: null,        // zero-setup onboarding collects no key
           posthogProjectId: null,
@@ -1113,19 +977,24 @@ export default function AgentOnboarding({ navigate }) {
         throw new Error(finalizeJson.error || 'Could not finish onboarding.')
       }
 
-      // OA4: the OAuth redirect stashed form data under this key; onboarding is
-      // finished now, so clear it. (The separate velyr_onboarding_session_id key
-      // cleanup is intentionally still left to the dashboard's verify effect.)
+      // Onboarding is complete → START THE 14-DAY TRIAL now (Stripe-native, NO
+      // card). Best-effort: if it fails, the dashboard has an idempotent fallback
+      // that starts the trial on next load, so we never block the finale on it.
+      try {
+        await fetch('/api/stripe?action=start_trial', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session?.access_token}` },
+        })
+      } catch (e) {
+        console.warn('[onboarding/step4] start_trial failed (dashboard fallback will retry):', e?.message)
+      }
+
+      // OA4: the OAuth redirect stashed form data under this key; clear it now.
       try { localStorage.removeItem('velyr_onboarding_data') } catch {}
 
-      // localStorage cleanup intentionally NOT done here — the dashboard's
-      // verify effect owns cleanup after confirming with Stripe. Removing the
-      // key here would make the dashboard's fallback read null and bounce
-      // freshly-onboarded users to "Unlock your Growth Agent".
-      //
-      // Stage 3: instead of jumping straight to the dashboard, show the
-      // first-connect build finale (step 5). It animates the structure preview
-      // and then routes to the Overview (or skips straight there on any failure).
+      // Stage 3: show the first-connect build finale (step 5) instead of jumping
+      // to the dashboard; it animates the structure preview, then routes to
+      // Overview (or skips there on any failure).
       setLoading(false)
       setStep(5)
     } catch (err) {

@@ -10,6 +10,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+// CONVERSION checkout. As of the no-card-trial change, this path runs ONLY at
+// trial-end: the 14-day trial was created WITHOUT a payment method and Stripe's
+// trial_settings.end_behavior.missing_payment_method:'cancel' cancelled it, so
+// the user clicks "Restart" to subscribe for real. It charges €29 immediately
+// (NO trial_period_days) and reuses the existing Stripe customer from the lapsed
+// trial so we don't orphan/duplicate customers. First-time users never reach
+// here — they start a no-card trial through onboarding (api/onboarding.js
+// init_subscription → api/stripe.js start_trial).
 async function handleCheckout(req, res) {
   const { type, userId, userEmail } = req.body
 
@@ -24,27 +32,40 @@ async function handleCheckout(req, res) {
 
   const APP_URL = process.env.VITE_APP_URL
 
+  // Reuse the trial's Stripe customer when we have one (the expected conversion
+  // case). Fall back to customer_email only defensively — a converting user
+  // should always have a customer from their trial.
+  let stripeCustomerId = null
+  try {
+    const { data: sub } = await supabase
+      .from('agent_subscriptions')
+      .select('stripe_customer_id')
+      .eq('user_id', userId)
+      .maybeSingle()
+    stripeCustomerId = sub?.stripe_customer_id || null
+  } catch (e) {
+    console.warn('Stripe checkout: customer lookup failed, falling back to email:', e?.message)
+  }
+
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       line_items: [{ price: process.env.STRIPE_PRICE_GROWTH, quantity: 1 }],
       allow_promotion_codes: true,
-      // 14-day free trial. payment_method_collection:'always' forces the card to
-      // be captured at signup (no trial-without-card), so the trial converts to
-      // a paid subscription automatically at trial end with no extra step.
-      // metadata.user_id is stamped onto the SUBSCRIPTION (not just the session)
-      // so customer.subscription.created can materialize the agent_subscriptions
-      // row even if checkout.session.completed is lost/delayed — see the webhook.
-      subscription_data: { trial_period_days: 14, metadata: { user_id: userId } },
-      payment_method_collection: 'always',
-      // Subscribers (incl. those in trial) go straight to onboarding so they can
-      // connect GitHub and Telegram. The onboarding mount gate accepts them once
-      // the webhook has written the row (status 'active', subscription_status
-      // 'active' or 'trialing').
-      success_url: `${APP_URL}/agent/onboarding?checkout=success&session_id={CHECKOUT_SESSION_ID}&type=subscription`,
+      // No trial — charge now (payment_method_collection defaults to 'always'
+      // for subscription mode, so a card is required). metadata.user_id is
+      // stamped onto the SUBSCRIPTION so customer.subscription.created can flip
+      // the agent_subscriptions row to 'active' even if checkout.session
+      // .completed is lost/delayed — see the webhook.
+      subscription_data: { metadata: { user_id: userId } },
+      // `customer` and `customer_email` are mutually exclusive in Checkout.
+      ...(stripeCustomerId
+        ? { customer: stripeCustomerId }
+        : { customer_email: userEmail }),
+      // The user is already onboarded; return them to the dashboard.
+      success_url: `${APP_URL}/agent/dashboard?checkout=success`,
       cancel_url:  `${APP_URL}/agent/dashboard?checkout=cancelled`,
       client_reference_id: userId,
-      customer_email: userEmail,
       metadata: { type, user_id: userId },
     })
 
@@ -52,6 +73,99 @@ async function handleCheckout(req, res) {
   } catch (err) {
     console.error('Stripe checkout error:', err)
     return res.status(500).json({ error: err.message })
+  }
+}
+
+// Start the 14-day trial WITHOUT collecting a payment method. Called once,
+// AFTER onboarding completes (so the trial clock begins at completion, not
+// signup). No payment method is attached, so this CANNOT charge anything. At
+// trial end with still no card, missing_payment_method:'cancel' cancels the sub
+// → the webhook flips subscription_status to 'cancelled' and access is gated →
+// the user converts via handleCheckout above.
+async function handleStartTrial(req, res) {
+  const authHeader = req.headers.authorization
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  const token = authHeader.slice(7)
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+  if (authError || !user) return res.status(401).json({ error: 'Invalid token' })
+
+  const { data: sub, error: subErr } = await supabase
+    .from('agent_subscriptions')
+    .select('id, onboarding_completed_at, stripe_customer_id, email')
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (subErr) {
+    console.error('start_trial: subscription lookup failed:', subErr.message)
+    return res.status(500).json({ error: 'Could not start your trial. Try again.' })
+  }
+  if (!sub) {
+    return res.status(400).json({ error: 'No subscription found. Restart onboarding.' })
+  }
+
+  // The trial clock starts AFTER onboarding completes.
+  if (!sub.onboarding_completed_at) {
+    return res.status(400).json({ error: 'Finish onboarding before starting your trial.' })
+  }
+
+  // Idempotent: an existing customer id means the trial (or a converted sub)
+  // already exists — never create a second trial / second customer.
+  if (sub.stripe_customer_id) {
+    return res.status(200).json({ ok: true, alreadyStarted: true })
+  }
+
+  try {
+    // Idempotency keys make a retry return the SAME customer/sub (no duplicates)
+    // for 24h; within that window the customer.subscription.created webhook also
+    // backfills stripe_customer_id, so the guard above short-circuits a retry.
+    const customer = await stripe.customers.create(
+      { email: sub.email || user.email || undefined, metadata: { user_id: user.id } },
+      { idempotencyKey: `velyr_trial_cust_${user.id}` },
+    )
+    const subscription = await stripe.subscriptions.create(
+      {
+        customer: customer.id,
+        items: [{ price: process.env.STRIPE_PRICE_GROWTH }],
+        trial_period_days: 14,
+        trial_settings: { end_behavior: { missing_payment_method: 'cancel' } },
+        metadata: { user_id: user.id },
+      },
+      { idempotencyKey: `velyr_trial_sub_${user.id}` },
+    )
+
+    const trialEndIso = subscription.trial_end
+      ? new Date(subscription.trial_end * 1000).toISOString() : null
+    const periodEndTs = subscription.items?.data?.[0]?.current_period_end
+      ?? subscription.current_period_end
+    const periodEndIso = periodEndTs ? new Date(periodEndTs * 1000).toISOString() : null
+
+    // Write the billing columns onto the existing (bare) row. The
+    // customer.subscription.created webhook fires too and upserts the same
+    // values (idempotent backstop); both converge on subscription_status
+    // 'trialing'.
+    const { error: updErr } = await supabase
+      .from('agent_subscriptions')
+      .update({
+        status:               'active',
+        subscription_status:  'trialing',
+        stripe_customer_id:   customer.id,
+        subscription_id:      subscription.id,
+        trial_end:            trialEndIso,
+        current_period_end:   periodEndIso,
+        cancel_at_period_end: false,
+      })
+      .eq('id', sub.id)
+    if (updErr) {
+      // The Stripe sub exists; the webhook will reconcile the row. Surface ok so
+      // the user proceeds — the dashboard shows 'trialing' once either write lands.
+      console.error('start_trial: row update failed (webhook will reconcile):', updErr.message)
+    }
+
+    return res.status(200).json({ ok: true })
+  } catch (err) {
+    console.error('start_trial: Stripe error:', err?.message || String(err))
+    return res.status(500).json({ error: 'Could not start your trial. Try again.' })
   }
 }
 
@@ -128,8 +242,9 @@ export default async function handler(req, res) {
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  if (action === 'checkout') return handleCheckout(req, res)
-  if (action === 'portal')   return handlePortal(req, res)
+  if (action === 'checkout')    return handleCheckout(req, res)
+  if (action === 'portal')      return handlePortal(req, res)
+  if (action === 'start_trial') return handleStartTrial(req, res)
 
-  return res.status(400).json({ error: 'Invalid action. Use ?action=checkout, portal, or verify_session' })
+  return res.status(400).json({ error: 'Invalid action. Use ?action=checkout, portal, start_trial, or verify_session' })
 }

@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase.js'
-import { startCheckout } from '../utils/startCheckout.js'
 
 function readPendingIntent() {
   try {
@@ -153,14 +152,14 @@ export default function AgentAuth({ navigate, mode = 'login' }) {
       const { data, error: err } = await supabase.auth.signInWithPassword({ email, password })
       if (err) { setError('Incorrect email or password.'); setLoading(false); return }
 
-      // Resume a pending Stripe checkout — check localStorage first (survives
-      // tab restarts), then sessionStorage as a fallback.
+      // Resume a pending subscription intent — no card at signup anymore, so a
+      // pending "subscription" routes to onboarding to start the free trial (the
+      // trial subscription is created server-side once onboarding completes).
       const pending = readPendingIntent()
       if (pending === 'subscription') {
         clearPendingIntent()
-        const result = await startCheckout(pending, data?.user?.id, data?.user?.email)
-        if (result?.redirected) return
-        console.error('Resume checkout failed:', result?.error)
+        navigate('/agent/onboarding')
+        return
       }
 
       navigate('/agent/dashboard')

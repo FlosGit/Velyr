@@ -1962,10 +1962,10 @@ function StripeSubscriptionPanel({ navigate }) {
 
         {!isActive && !isTrialing && !isPastDue && !isCancelled && (
           <div style={{ background:'rgba(26,25,22,0.03)', border:`1px solid ${C.border}`, borderRadius:9, padding:'14px', textAlign:'center' }}>
-            <p style={{ fontSize:13, color:C.textMuted, fontWeight:300, marginBottom:12 }}>No active subscription. Unlock the Growth Agent to start getting weekly improvements.</p>
+            <p style={{ fontSize:13, color:C.textMuted, fontWeight:300, marginBottom:12 }}>No active subscription yet. Finish setup to start your 14-day free trial — no card required.</p>
             <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
-              <button onClick={subscribeNow} disabled={subscribeLoading} className="btn v-press" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, opacity: subscribeLoading ? 0.7 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer' }}>
-                {subscribeLoading ? 'Opening Stripe…' : 'Start free trial — €29/mo after →'}
+              <button onClick={() => navigate('/agent/onboarding')} className="btn v-press" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, cursor:'pointer' }}>
+                Start free trial — €29/mo after →
               </button>
             </div>
           </div>
@@ -2339,60 +2339,15 @@ export default function AgentDashboard({ navigate }) {
     return () => { document.body.style.overflow = ''; window.removeEventListener('keydown', onKey) }
   }, [drawerOpen])
 
-  // Parallel Stripe verify on mount. Uses the session_id stashed in
-  // localStorage during onboarding (mount gate of AgentOnboarding.jsx) with
-  // sessionStorage as a fallback. Lets the dashboard treat a freshly-paid
-  // user as subscribed while the Stripe webhook is still writing the
-  // agent_subscriptions row.
-  //
-  // Hard 3s timeout via AbortController: if Stripe verify hangs we settle the
-  // gate (stripeVerified=false, verifyDone=true) so users never stare at a
-  // spinner. The dashboard's regular DB polling will still catch the row
-  // when it arrives.
+  // Onboarding collects no card anymore, so there is no Stripe checkout session
+  // to verify here, and the agent_subscriptions row always exists before the
+  // dashboard loads (it's created at onboarding start). Settle the gate
+  // immediately: the "Unlock" screen below only shows when there is genuinely no
+  // row (a user who never onboarded).
   useEffect(() => {
     if (!user || isDemo) return
-    let cancelled = false
-    let sessionId = null
-    try { sessionId = localStorage.getItem('velyr_onboarding_session_id') } catch {}
-    if (!sessionId) {
-      try { sessionId = sessionStorage.getItem('velyr_onboarding_session_id') } catch {}
-    }
-    if (!sessionId) {
-      setStripeVerified(false)
-      setVerifyDone(true)
-      return
-    }
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 3000)
-    ;(async () => {
-      try {
-        const res = await fetch(
-          `/api/stripe?action=verify_session&session_id=${encodeURIComponent(sessionId)}`,
-          { signal: controller.signal }
-        )
-        const json = await res.json()
-        if (cancelled) return
-        clearTimeout(timeoutId)
-        // 'no_payment_required' = trial checkout (card captured, nothing charged yet).
-        const paid = (json.paymentStatus === 'paid' || json.paymentStatus === 'no_payment_required') && json.type === 'subscription'
-        setStripeVerified(paid)
-        setVerifyDone(true)
-        if (paid) {
-          try { localStorage.removeItem('velyr_onboarding_session_id') } catch {}
-          try { sessionStorage.removeItem('velyr_onboarding_session_id') } catch {}
-        }
-      } catch {
-        if (!cancelled) {
-          setStripeVerified(false)
-          setVerifyDone(true)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-      clearTimeout(timeoutId)
-      controller.abort()
-    }
+    setStripeVerified(false)
+    setVerifyDone(true)
   }, [user, isDemo])
 
   useEffect(() => {
@@ -2440,6 +2395,31 @@ export default function AgentDashboard({ navigate }) {
     }, 2000)
     return () => clearInterval(t)
   }, [user, isDemo, stripeVerified, subscription])
+
+  // Trial-start fallback: if onboarding completed but the post-finalize
+  // start_trial didn't land (subscription_status still null + no Stripe
+  // customer), kick it off here. start_trial is idempotent server-side, so a
+  // re-fire is safe; once it succeeds the row gets a customer id and this stops.
+  useEffect(() => {
+    if (!user || isDemo || !subscription) return
+    if (!subscription.onboarding_completed_at) return
+    if (subscription.subscription_status || subscription.stripe_customer_id) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (cancelled || !session) return
+        await fetch('/api/stripe?action=start_trial', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        })
+        if (!cancelled) fetchData()
+      } catch (e) {
+        console.warn('[dashboard] start_trial fallback failed:', e?.message)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [user, isDemo, subscription])
 
   async function fetchData() {
    try {
@@ -2790,15 +2770,15 @@ export default function AgentDashboard({ navigate }) {
               <div className="fade-up" style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:16,padding:'48px 32px',textAlign:'center',maxWidth:480,margin:'0 auto'}}>
                 <p style={{fontSize:32,marginBottom:14}}>🤖</p>
                 <h2 style={{fontFamily:'Instrument Serif,serif',fontWeight:400,fontSize:28,marginBottom:10,color:C.text}}>Unlock your Growth Agent</h2>
-                <p style={{fontSize:13,color:C.textMuted,lineHeight:1.7,marginBottom:24}}>Subscribe to start getting weekly improvements. You'll connect GitHub and Telegram right after checkout.</p>
-                <button className="btn" onClick={handleSubscribe} disabled={subscribeLoading} style={{
-                  background: subscribeLoading ? C.accent : C.text, color:C.bg, border:'none', borderRadius:9,
+                <p style={{fontSize:13,color:C.textMuted,lineHeight:1.7,marginBottom:24}}>Start your 14-day free trial — no card required. You'll connect GitHub and Telegram in onboarding.</p>
+                <button className="btn" onClick={() => navigate('/agent/onboarding')} style={{
+                  background: C.text, color:C.bg, border:'none', borderRadius:9,
                   padding:'13px 26px', fontSize:14, fontFamily:'DM Sans,sans-serif', fontWeight:500,
-                  opacity: subscribeLoading ? 0.85 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer',
+                  cursor:'pointer',
                 }}
-                  onMouseEnter={e=>{ if (!subscribeLoading) e.currentTarget.style.background=C.accent }}
-                  onMouseLeave={e=>{ if (!subscribeLoading) e.currentTarget.style.background=C.text }}
-                >{subscribeLoading ? 'Opening Stripe…' : 'Subscribe — €29/mo →'}</button>
+                  onMouseEnter={e=>{ e.currentTarget.style.background=C.accent }}
+                  onMouseLeave={e=>{ e.currentTarget.style.background=C.text }}
+                >Start free trial →</button>
                 <div style={{ marginTop: 22 }}>
                   <button
                     onClick={() => { setDeleteError(null); setShowDeleteConfirm(true) }}

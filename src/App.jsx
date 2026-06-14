@@ -1,6 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
 import { supabase } from './lib/supabase.js'
-import { startCheckout } from './utils/startCheckout.js'
 import Home from './Home.jsx'
 import Impressum from './pages/Impressum.jsx'
 import PrivacyPolicy from './pages/PrivacyPolicy.jsx'
@@ -77,17 +76,16 @@ function PostSignup({ navigate }) {
       return
     }
 
-    const trigger = async (user) => {
+    const trigger = async () => {
       if (cancelled) return
       try { localStorage.removeItem('postLoginCheckout') } catch {}
       try { sessionStorage.removeItem('postLoginCheckout') } catch {}
       // Strip the hash/query before handing off so a back-button doesn't re-loop.
       window.history.replaceState({}, '', '/agent/post-signup')
-      const result = await startCheckout(pending, user?.id || null, user?.email || null)
-      if (!result?.redirected && !cancelled) {
-        // Stripe didn't take over — bail to dashboard so the user isn't stranded.
-        navigate('/agent/dashboard')
-      }
+      // No card at signup anymore: a "subscription" intent now means "start the
+      // free trial", set up through onboarding (GitHub + Telegram). The trial
+      // subscription is created server-side once onboarding completes.
+      if (!cancelled) navigate('/agent/onboarding')
     }
 
     ;(async () => {

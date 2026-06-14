@@ -211,7 +211,10 @@ export default async function handler(req, res) {
       }
 
       case 'customer.subscription.trial_will_end': {
-        // Fires ~3 days before trial_end. Nudge the customer on Telegram.
+        // Fires ~3 days before trial_end. In the no-card trial flow there is NO
+        // payment method on file, so at trial end Stripe's
+        // trial_settings.end_behavior.missing_payment_method:'cancel' CANCELS the
+        // sub (it does NOT auto-charge). Nudge the customer to add a card.
         const s = event.data.object
         const { data: sub } = await supabase
           .from('agent_subscriptions')
@@ -222,8 +225,8 @@ export default async function handler(req, res) {
           await sendTelegram(
             sub.telegram_chat_id,
             '⏳ <b>Your Velyr trial ends in 3 days.</b>\n\n' +
-            "You'll be automatically charged €29 and your Growth Agent keeps running — no action needed.\n\n" +
-            'Want to stop? Cancel anytime before the trial ends from your dashboard and you won\'t be charged.'
+            "There's no card on file, so your Growth Agent will pause when the trial ends — you won't be charged.\n\n" +
+            'To keep your improvements coming, add your card from your dashboard to continue at €29/mo. Cancel anytime.'
           )
         }
         break
