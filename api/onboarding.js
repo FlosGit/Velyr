@@ -32,6 +32,11 @@ const SERVICE_ROLE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
 const STATE_SECRET      = process.env.GITHUB_OAUTH_STATE_SECRET
 const SESSION_COOKIE    = 'velyr_oauth_session'
 const DEFAULT_PH_HOST   = 'https://us.i.posthog.com'
+// Hosting platforms the onboarding platform-selection step may record. Kept in
+// sync with the CHECK constraint in 20260614_hosting_provider.sql. The agent runs
+// purely through GitHub PRs, so this is informational only — no run-path logic
+// branches on it. 'vercel' is the historical default for legacy connections.
+const HOSTING_PROVIDERS = ['vercel', 'netlify', 'render', 'railway', 'cloudflare_pages']
 
 // Anon client used only to validate the bearer token → user.
 const authClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -268,9 +273,14 @@ async function handleFinalize(req, res) {
 
   const {
     subscriptionId, websiteUrl, posthogApiKey, posthogProjectId,
-    posthogHost, telegramChatId, verificationCodeId,
+    posthogHost, telegramChatId, verificationCodeId, hostingProvider,
   } = req.body || {}
   if (!subscriptionId) return res.status(400).json({ error: 'Missing subscriptionId.' })
+
+  // Defensive validation: an absent/invalid value falls back to 'vercel' (the DB
+  // default + historical assumption) so a stale client or crafted body can never
+  // hit the CHECK constraint with a 500 — it lands as a clean, known value.
+  const provider = HOSTING_PROVIDERS.includes(hostingProvider) ? hostingProvider : 'vercel'
 
   // Ownership + GitHub-step gate. github_installation_verified_at is non-null
   // only after complete_onboarding ran, so this also proves the GitHub step is
@@ -377,6 +387,7 @@ async function handleFinalize(req, res) {
       telegram_chat_id:      telegramChatId ?? null,
       verification_code_id:  verificationCodeId ?? null,
       verified_at:           new Date().toISOString(),
+      hosting_provider:      provider,
     })
     .eq('subscription_id', subscriptionId)
   if (updErr) {

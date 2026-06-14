@@ -131,7 +131,7 @@ function StepIndicator({ current, total }) {
 
 // ─── STEP 0: Requirements ────────────────────────────────────────────────────
 function Step0({ onNext }) {
-  const [checks, setChecks] = useState({ github: null, vercel: null, react: null, admin: null, telegram: null })
+  const [checks, setChecks] = useState({ github: null, hosting: null, react: null, admin: null, telegram: null })
 
   const requirements = [
     {
@@ -140,9 +140,9 @@ function Step0({ onNext }) {
       fixText: 'Create a free GitHub account', fixUrl: 'https://github.com/signup',
     },
     {
-      key: 'vercel', icon: '▲', title: 'Deployed via Vercel',
-      desc: 'Your site must be connected to Vercel for automatic deployment after each approved fix.',
-      fixText: 'Connect your repo to Vercel (free)', fixUrl: 'https://vercel.com/new',
+      key: 'hosting', icon: '🚀', title: 'Auto-deploy from GitHub',
+      desc: 'Your repo must auto-deploy on merge — works with Vercel, Netlify, Render, Railway, or Cloudflare Pages.',
+      fixText: 'Set up auto-deploy (free tiers available)', fixUrl: 'https://vercel.com/new',
     },
     {
       key: 'react', icon: '⚛️', title: 'React, Next.js, or Vite project',
@@ -168,7 +168,7 @@ function Step0({ onNext }) {
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 1 of 5</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 1 of 6</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Requirements check
       </h2>
@@ -255,7 +255,7 @@ function Step1({ onNext, onBack, navigate }) {
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 5</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 6</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Your website
       </h2>
@@ -419,7 +419,7 @@ function Step2({ onNext, onBack, user, subscriptionId, formData }) {
 
   const heading = (
     <>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 3 of 5</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 3 of 6</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect GitHub
       </h2>
@@ -537,11 +537,75 @@ function Step2({ onNext, onBack, user, subscriptionId, formData }) {
   )
 }
 
-// ─── STEP 3: Analytics ───────────────────────────────────────────────────────
+// ─── STEP 4: Hosting platform ─────────────────────────────────────────────────
+// Records which platform deploys the customer's repo. The agent works identically
+// on all of them (it only opens a PR; the host auto-deploys on merge), so this is
+// stored for clarity/future-proofing and never branches the run path.
+const HOSTING_OPTIONS = [
+  { value: 'vercel',           icon: '▲',  label: 'Vercel' },
+  { value: 'netlify',          icon: '◆',  label: 'Netlify' },
+  { value: 'render',           icon: '●',  label: 'Render' },
+  { value: 'railway',          icon: '🚆', label: 'Railway' },
+  { value: 'cloudflare_pages', icon: '☁',  label: 'Cloudflare Pages' },
+]
+
+function StepPlatform({ onNext, onBack }) {
+  const [selected, setSelected] = useState('vercel')
+
+  return (
+    <div>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 4 of 6</p>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+        Where is it deployed?
+      </h2>
+      <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
+        Pick the platform that hosts your repo. The agent works the same on all of them — it opens a pull request and your host deploys it automatically once you approve.
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+        {HOSTING_OPTIONS.map((opt) => {
+          const isSel = selected === opt.value
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              className="req-item"
+              onClick={() => setSelected(opt.value)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+                border: `1px solid ${isSel ? 'rgba(42,92,69,0.45)' : C.border}`,
+                borderRadius: 12, background: isSel ? 'rgba(42,92,69,0.05)' : '#fff',
+                padding: '14px 16px', cursor: 'pointer', fontFamily: 'Jost, sans-serif',
+              }}
+            >
+              <span style={{ fontSize: 18, flexShrink: 0, width: 22, textAlign: 'center' }}>{opt.icon}</span>
+              <span style={{ flex: 1, fontSize: 14, fontWeight: isSel ? 500 : 300, color: C.text }}>{opt.label}</span>
+              <span style={{
+                width: 18, height: 18, flexShrink: 0, borderRadius: '50%',
+                border: `1px solid ${isSel ? C.accent : 'rgba(28,25,23,0.2)'}`,
+                background: isSel ? C.accent : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {isSel && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
+        <button className="ob-btn" onClick={() => onNext({ hostingProvider: selected })}>Continue →</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── STEP 5: Analytics (zero-setup) ───────────────────────────────────────────
 function Step3({ onNext, onBack }) {
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 4 of 5</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 5 of 6</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Analytics — zero setup
       </h2>
@@ -652,7 +716,7 @@ function Step4({ onNext, onBack, loading }) {
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 5 of 5</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 6 of 6</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect Telegram
       </h2>
@@ -914,7 +978,9 @@ export default function AgentOnboarding({ navigate }) {
       } catch { /* non-fatal */ }
     })()
   }
-  const handleStep3 = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(4) }
+  // Platform-selection step (records hosting_provider only; no run-path effect).
+  const handlePlatform = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(4) }
+  const handleStep3 = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(5) }
 
   const handleStep4 = async (data) => {
     setLoading(true)
@@ -962,6 +1028,7 @@ export default function AgentOnboarding({ navigate }) {
         body: JSON.stringify({
           subscriptionId,
           websiteUrl: allData.websiteUrl,
+          hostingProvider: allData.hostingProvider,  // platform-selection step (Step 4)
           posthogApiKey: null,        // zero-setup onboarding collects no key
           posthogProjectId: null,
           posthogHost: 'https://us.i.posthog.com',
@@ -996,7 +1063,7 @@ export default function AgentOnboarding({ navigate }) {
       // to the dashboard; it animates the structure preview, then routes to
       // Overview (or skips there on any failure).
       setLoading(false)
-      setStep(5)
+      setStep(6)
     } catch (err) {
       console.error('[onboarding/step4] failed:', {
         message: err?.message,
@@ -1027,7 +1094,7 @@ export default function AgentOnboarding({ navigate }) {
 
   // Stage 3: first-connect build finale takes over full-screen (the graph needs
   // more width than the 520px step card).
-  if (step === 5) {
+  if (step === 6) {
     return (
       <>
         <style>{CSS + MOTION_CSS}</style>
@@ -1048,12 +1115,13 @@ export default function AgentOnboarding({ navigate }) {
           </div>
 
           <div className="ob-card ob-card-inner" style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 18, padding: '36px 32px', boxShadow: '0 4px 32px rgba(28,25,23,0.07)' }}>
-            <StepIndicator current={step} total={5} />
+            <StepIndicator current={step} total={6} />
             {step === 0 && <Step0 onNext={handleStep0} />}
             {step === 1 && <Step1 onNext={handleStep1} onBack={() => setStep(0)} navigate={navigate} />}
             {step === 2 && <Step2 onNext={handleStep2} onBack={() => setStep(1)} user={user} subscriptionId={subscriptionId} formData={formData} />}
-            {step === 3 && <Step3 onNext={handleStep3} onBack={() => setStep(2)} />}
-            {step === 4 && <Step4 onNext={handleStep4} onBack={() => setStep(3)} loading={loading} />}
+            {step === 3 && <StepPlatform onNext={handlePlatform} onBack={() => setStep(2)} />}
+            {step === 4 && <Step3 onNext={handleStep3} onBack={() => setStep(3)} />}
+            {step === 5 && <Step4 onNext={handleStep4} onBack={() => setStep(4)} loading={loading} />}
             {error && (
               <div style={{ marginTop: 16, background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.2)', borderRadius: 8, padding: '10px 13px', fontSize: 13, color: C.red }}>
                 {error}
