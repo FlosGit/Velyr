@@ -53,6 +53,6 @@ export const FAQS = [
   },
   {
     q: 'Which sites are supported?',
-    a: 'React, Next.js, or Vite projects deployed on Vercel with a GitHub repo. Not supported: Shopify, Wix, Squarespace, Webflow.'
+    a: 'React, Next.js, or Vite projects in a GitHub repo that auto-deploys — Vercel, Netlify, Render, Railway or Cloudflare Pages. Not supported: Shopify, Wix, Squarespace, Webflow.'
   },
 ]

@@ -372,6 +372,7 @@ function CardIcon({ name, size = 22 }) {
     share:    <><circle cx="6" cy="12" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M7.9 11l8.2-4M7.9 13l8.2 4"/></>,
     git:      <><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="17" cy="8" r="2.2"/><path d="M6 8.2v7.6"/><path d="M17 10.2c0 4-4.4 3.6-6.4 5"/></>,
     triangle: <path d="M12 4.5 20.5 19.5H3.5z"/>,
+    deploy:   <><path d="M6.5 18a3.5 3.5 0 0 1-.4-6.98 5 5 0 0 1 9.7-1.2A3.6 3.6 0 0 1 17 18"/><path d="M12 12.5v6"/><path d="m9.5 15 2.5-2.5 2.5 2.5"/></>,
     code:     <><path d="M9 8.5 5.5 12 9 15.5"/><path d="M15 8.5 18.5 12 15 15.5"/></>,
     key:      <><circle cx="8" cy="15" r="3.2"/><path d="M10.3 12.7 20 3"/><path d="M16.5 6.5l2.5 2.5"/><path d="M14 9l2 2"/></>,
     send:     <><path d="M21 3 10.5 13.5"/><path d="M21 3l-6.7 18-3.8-8.2L2.3 9.2 21 3z"/></>,
@@ -564,9 +565,9 @@ function GrowthAgentSection({ navigate }) {
   ]
   const steps = [
     { n:'01', label:'Detect',       time:'Mon · 9:00',  text:'The agent reads your PostHog analytics — traffic, bounce, how far visitors scroll and what they click — and scans every page in your GitHub repo to pinpoint the #1 conversion problem across your funnel.' },
-    { n:'02', label:'Pull Request', time:'Mon · 9:15',  text:'It writes the code fix and opens a GitHub Pull Request — with a Vercel preview link, so you can see the change before it ever goes live.' },
+    { n:'02', label:'Pull Request', time:'Mon · 9:15',  text:'It writes the code fix and opens a GitHub Pull Request — with a preview deploy from your host, so you can see the change before it ever goes live.' },
     { n:'03', label:'Approve',      time:'Mon · 9:20',  text:'A Telegram message arrives with the problem, the data behind it, the fix and the PR link. Reply YES to ship or NO to skip — nothing goes live without you.' },
-    { n:'04', label:'Ship',         time:'On your YES', text:'The agent merges the Pull Request and Vercel deploys it to production automatically. No manual steps, no waiting around.' },
+    { n:'04', label:'Ship',         time:'On your YES', text:'The agent merges the Pull Request and your host deploys it to production automatically. No manual steps, no waiting around.' },
     { n:'05', label:'Measure',      time:'48h later',   text:'It checks your bounce rate 48 hours after deploy — if it rose 15 points or more, the agent auto-reverts and tells you. A Wednesday mid-week check watches traffic and bounce too.' },
   ]
 
@@ -614,7 +615,7 @@ function GrowthAgentSection({ navigate }) {
             A semi-autonomous AI agent that analyses your analytics, writes conversion fixes, and deploys them — with your approval. Every week, automatically — or on demand, the moment you want it.
           </p>
           <p style={{ fontSize:12, color:C.textLight, fontWeight:300, marginTop:12, letterSpacing:'.01em' }}>
-            Requires a React, Next.js, or Vite site hosted on GitHub + Vercel.
+            Requires a React, Next.js, or Vite site on GitHub that auto-deploys — Vercel, Netlify, Render, Railway or Cloudflare Pages.
           </p>
         </div>
 
@@ -1366,7 +1367,7 @@ function AgentRequirements() {
 
   const requirements = [
     { icon:'git',      title:'GitHub repo',             desc:'Your website code lives in a GitHub repository the agent can read and open PRs against.' },
-    { icon:'triangle', title:'Vercel deploy',           desc:'Your site is connected to Vercel so approved fixes auto-deploy after you reply YES.' },
+    { icon:'deploy',   title:'Auto-deploy from Git',    desc:'Your repo auto-deploys on merge — Vercel, Netlify, Render, Railway or Cloudflare Pages — so approved fixes go live after you reply YES.' },
     { icon:'code',     title:'React, Next.js or Vite',  desc:'The agent writes React/JSX code. Plain HTML or other frameworks are not supported.' },
     { icon:'key',      title:'Admin access',             desc:'You can install GitHub Apps on the repo and merge Pull Requests.' },
     { icon:'send',     title:'Telegram account',         desc:'Weekly approvals arrive on Telegram — reply YES or NO to deploy or skip each fix.' },

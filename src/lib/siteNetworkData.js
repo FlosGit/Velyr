@@ -56,12 +56,13 @@ export function labelFromNode(n) {
   return n.componentName || n.id.split('/').pop().replace(/\.[^.]+$/, '')
 }
 
-// Hub label from website_url. Deploy subdomains (*.vercel.app / *.netlify.app)
-// show the project slug, not the full deploy host.
+// Hub label from website_url. Deploy subdomains (Vercel/Netlify *.app, Cloudflare
+// Pages *.pages.dev, Render *.onrender.com, Railway *.up.railway.app) show the
+// project slug, not the full deploy host.
 export function hubDomainFromUrl(websiteUrl) {
   let host
   try { host = new URL(websiteUrl || '').hostname.replace(/^www\./, '') } catch { return null }
-  const m = host.match(/^(.+?)\.(?:vercel|netlify)\.app$/i)
+  const m = host.match(/^(.+?)\.(?:vercel\.app|netlify\.app|pages\.dev|onrender\.com|up\.railway\.app)$/i)
   return m ? m[1] : host
 }
 

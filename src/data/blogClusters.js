@@ -52,7 +52,7 @@ export const CLUSTERS = [
     slug: 'automation',
     title: 'AI Agents & PR Automation',
     description:
-      'How AI agents open pull requests, the approval-gate pattern, and safely automating conversion fixes and rollbacks inside a GitHub + Vercel workflow.',
+      'How AI agents open pull requests, the approval-gate pattern, and safely automating conversion fixes and rollbacks inside a GitHub-based deploy workflow.',
     intent: 'How do I automate [X] with pull requests / an AI agent?',
     schemaType: 'TechArticle',
   },
