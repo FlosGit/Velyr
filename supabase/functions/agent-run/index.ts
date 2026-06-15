@@ -370,6 +370,165 @@ async function decryptSecret(stored: string | null | undefined): Promise<string 
   return new TextDecoder().decode(pt)
 }
 
+// Write-side twin of decryptSecret, re-introduced for the Shopify token-refresh
+// path. The Edge Function previously only DECRYPTED (legacy PostHog rows), so
+// encryptSecret was deleted; but refreshing a Shopify token rotates BOTH the
+// access and refresh token and we must persist them encrypted, with no Node side
+// doing it for us. Must stay byte-compatible with the `enc:v1:` wire format in
+// api/_lib/secret-crypto.js and shopify-oauth/index.ts (update all three together
+// if the format changes). Storage layout is Node's iv(12) || tag(16) || ct;
+// Web Crypto emits ct || tag, so we reorder (inverse of decryptSecret above).
+// Canonical empty/absent → null (matches secret-crypto.js).
+async function encryptSecret(plaintext: string | null | undefined): Promise<string | null> {
+  if (plaintext == null || plaintext === '') return null
+  const key = await getEncryptionKey()
+  const iv  = crypto.getRandomValues(new Uint8Array(12))
+  const sealed = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(String(plaintext))),
+  )
+  const ct  = sealed.subarray(0, sealed.length - 16)
+  const tag = sealed.subarray(sealed.length - 16)
+  const out = new Uint8Array(iv.length + tag.length + ct.length)
+  out.set(iv, 0)
+  out.set(tag, iv.length)
+  out.set(ct, iv.length + tag.length)
+  let bin = ''
+  for (let i = 0; i < out.length; i++) bin += String.fromCharCode(out[i])
+  return ENC_PREFIX + btoa(bin)
+}
+
+// ─── SHOPIFY TOKEN REFRESH (Eager, once per connection) ──────────────────────
+// Shopify offline access tokens issued via the `expiring=1` grant live ~60 min;
+// the refresh token lives 90 days and is SINGLE-USE — Shopify rotates it (and
+// invalidates the old one) on every refresh, returning a NEW refresh_token with a
+// fresh 90-day expiry. So a refresh MUST persist the new refresh_token or the next
+// run is locked out and the merchant has to re-consent.
+//
+// STRATEGY = eager: refresh once at the top of the Shopify code path, then reuse
+// the returned token for the whole theme-read burst. Mirrors getOctokit's "mint
+// one token per processConnection, reuse it" pattern. A single connection's
+// processing is minutes — well under the 60-min token life — so a token validated
+// here cannot expire mid-run, making per-call (lazy) expiry checks redundant.
+//
+// CONCURRENCY: call this ONLY from inside the per-subscription advisory lock
+// (processConnection), never an unlocked path — that lock is what stops two runs
+// racing to rotate the same single-use refresh token. Belt-and-suspenders: even
+// without the lock, Shopify's single-use rotation means only ONE of two racers
+// can succeed (the loser gets 400 invalid_grant and writes nothing), so the
+// unconditional writeback below cannot clobber a winner's fresh token.
+//
+// Refresh request (Shopify-documented, form-encoded):
+//   POST https://{shop}/admin/oauth/access_token
+//   client_id, client_secret, grant_type=refresh_token, refresh_token
+// Response: access_token, expires_in, refresh_token (new), refresh_token_expires_in, scope.
+const SHOPIFY_API_KEY        = Deno.env.get('SHOPIFY_API_KEY') || ''
+const SHOPIFY_API_SECRET     = Deno.env.get('SHOPIFY_API_SECRET') || ''
+// Refresh if the access token is absent or within this skew window of expiry.
+const SHOPIFY_TOKEN_SKEW_MS  = Number(Deno.env.get('SHOPIFY_TOKEN_SKEW_MS') || String(5 * 60 * 1000))
+
+type ShopifyTokenResult =
+  | { ok: true; accessToken: string; refreshed: boolean }
+  | { ok: false; reason: 'needs_reconsent' | 'not_configured' | 'refresh_failed'; message: string }
+
+async function refreshShopifyToken(conn: any): Promise<ShopifyTokenResult> {
+  const shop = conn.shopify_shop_domain
+  const now  = Date.now()
+
+  // Fast path: access token still comfortably valid → return it untouched (no
+  // refresh, no rotation). Falls through to refresh if the stored value can't be
+  // read (e.g. key rotation) so we self-heal rather than fail.
+  const expMs = conn.shopify_token_expires_at ? Date.parse(conn.shopify_token_expires_at) : NaN
+  if (Number.isFinite(expMs) && expMs - now > SHOPIFY_TOKEN_SKEW_MS) {
+    const current = await decryptSecret(conn.shopify_access_token)
+    if (current) return { ok: true, accessToken: current, refreshed: false }
+  }
+
+  if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+    return { ok: false, reason: 'not_configured', message: 'SHOPIFY_API_KEY / SHOPIFY_API_SECRET not configured' }
+  }
+
+  // Refresh token past its 90-day life → honest re-consent; never attempt a doomed
+  // exchange (and never fabricate a half-connection).
+  const refreshExpMs = conn.shopify_refresh_token_expires_at ? Date.parse(conn.shopify_refresh_token_expires_at) : NaN
+  if (Number.isFinite(refreshExpMs) && refreshExpMs <= now) {
+    return { ok: false, reason: 'needs_reconsent', message: 'Shopify refresh token expired — the merchant must reconnect the store.' }
+  }
+
+  const refreshToken = await decryptSecret(conn.shopify_refresh_token)
+  if (!refreshToken) {
+    return { ok: false, reason: 'needs_reconsent', message: 'No Shopify refresh token on file — the merchant must reconnect the store.' }
+  }
+
+  let json: any
+  try {
+    const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: new URLSearchParams({
+        client_id:     SHOPIFY_API_KEY,
+        client_secret: SHOPIFY_API_SECRET,
+        grant_type:    'refresh_token',
+        refresh_token: refreshToken,
+      }).toString(),
+      signal: AbortSignal.timeout(15000),
+    })
+    json = await res.json().catch(() => ({}))
+    if (!res.ok || !json?.access_token) {
+      // 400 invalid_grant ⇒ the refresh token is dead (already used / revoked) ⇒
+      // re-consent; anything else is a transient/refresh failure the caller retries.
+      const reason = res.status === 400 ? 'needs_reconsent' : 'refresh_failed'
+      slog('warn', 'shopify_token_refresh_rejected', { subscriptionId: conn.subscription_id, status: res.status })
+      return { ok: false, reason, message: `Shopify token refresh failed (HTTP ${res.status})` }
+    }
+  } catch (e: any) {
+    return { ok: false, reason: 'refresh_failed', message: `Shopify token refresh threw: ${e?.message || String(e)}` }
+  }
+
+  const newAccess  = json.access_token as string
+  const newRefresh = (json.refresh_token ?? null) as string | null
+  const newExpiresAt = Number.isFinite(json.expires_in)
+    ? new Date(now + json.expires_in * 1000).toISOString() : null
+  const newRefreshExpiresAt = Number.isFinite(json.refresh_token_expires_in)
+    ? new Date(now + json.refresh_token_expires_in * 1000).toISOString() : null
+
+  const [encAccess, encRefresh] = await Promise.all([encryptSecret(newAccess), encryptSecret(newRefresh)])
+
+  // Unconditional writeback (CAS unnecessary — see the single-use note above). A
+  // rotated refresh token is single-use and irreplaceable: losing it to a transient
+  // DB hiccup leaves the OLD (now-dead) token on the row, forcing the NEXT run to
+  // read a dead token and needlessly re-consent the merchant. So retry the persist
+  // ONCE (immediate, no backoff — it's a single statement). The supabase builder is
+  // a one-shot thenable, so rebuild it per attempt via this thunk.
+  const persistTokens = () => dbWrite(
+    supabase.from('agent_connections').update({
+      shopify_access_token:             encAccess,
+      shopify_refresh_token:            encRefresh,
+      shopify_token_expires_at:         newExpiresAt,
+      shopify_refresh_token_expires_at: newRefreshExpiresAt,
+    }).eq('id', conn.id),
+    DB_TIMEOUT_MS, 'shopify_token_refresh_update'
+  ).catch((e: any) => ({ error: e }))
+
+  let writeback = await persistTokens()
+  if (writeback.error) writeback = await persistTokens()
+  if (writeback.error) {
+    // Both attempts failed → the rotated token is lost from the DB and the next run
+    // will be forced into needless merchant re-consent. That's a real incident, not a
+    // warning: error level + a distinct, alertable event name. This run still proceeds
+    // with the fresh in-memory token set below.
+    slog('error', 'shopify_token_writeback_failed_final', { subscriptionId: conn.subscription_id, error: writeback.error.message })
+  }
+
+  // Reflect the rotation in-memory so the rest of this run sees the fresh token
+  // (the rotation is real at Shopify regardless of whether the DB write landed).
+  conn.shopify_access_token             = encAccess
+  conn.shopify_refresh_token            = encRefresh
+  conn.shopify_token_expires_at         = newExpiresAt
+  conn.shopify_refresh_token_expires_at = newRefreshExpiresAt
+
+  return { ok: true, accessToken: newAccess, refreshed: true }
+}
+
 // ─── DEFAULT BRANCH (Stage 4.4) ──────────────────────────────────────────────
 // Stop hard-coding 'main'. Fetches the repo's actual default branch once per
 // caller (no global cache — Edge Function instances are short-lived). Falls
