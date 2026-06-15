@@ -4,9 +4,9 @@ import { Octokit } from 'npm:@octokit/rest@20'
 import { throttling } from 'npm:@octokit/plugin-throttling@8'
 import { parse as babelParse } from 'npm:@babel/parser@7.27.0'
 import { discoverFrameworkAndStructure, detectLintInfo, type MapResult, type LintInfo, type TreeEntry } from './repo-mapper.ts'
-import { buildImportGraph, type ImportGraph } from './import-graph.ts'
+import { buildImportGraph, type ImportGraph, type GraphNode } from './import-graph.ts'
 import { rankComponentsForConversion, type RankerResult } from './component-ranker.ts'
-import { readDeepContext, type DeepContext } from './deep-reader.ts'
+import { readDeepContext, type DeepContext, type DeepComponent } from './deep-reader.ts'
 import { buildReceipt } from './receipt-builder.ts'
 import { fileToRoutePath } from './route-map.ts'
 
@@ -527,6 +527,238 @@ async function refreshShopifyToken(conn: any): Promise<ShopifyTokenResult> {
   conn.shopify_refresh_token_expires_at = newRefreshExpiresAt
 
   return { ok: true, accessToken: newAccess, refreshed: true }
+}
+
+// ─── SHOPIFY THEME READ (Step 1 — read-only; not yet wired into processConnection) ──
+// Reads the conversion-relevant Liquid of a Shopify theme via the Admin GraphQL
+// API. VERIFIED against shopify.dev (admin-graphql 2026-04): the `theme(id){ files }`
+// query requires only `read_themes` to read file BODIES — the theme-asset exemption
+// is needed solely for the WRITE mutations (themeFilesUpsert/Copy, themeCreate),
+// which is why this stays strictly read-only.
+//
+// The DB stores the numeric theme id (the GID's trailing segment, e.g.
+// shopify_main_theme_id); we rebuild the GID here. `files(first:…)` accepts up to
+// 2500 but is payload-size-capped, so we MUST loop on pageInfo.hasNextPage/endCursor
+// (bounded by SHOPIFY_THEME_MAX_PAGES). `body` is a UNION — Liquid/templates come
+// back as ...Text { content }; ...Base64/...Url are for binary assets we filter out
+// anyway, so on a kept file a non-Text body is logged + skipped, never crashed.
+//
+// Filtering is done with the `filenames` glob arg (payload reduction + ensures we
+// reach the conversion files under the page cap) AND an authoritative client-side
+// re-filter (SHOPIFY_KEEP_RE) — defense in depth, since the glob is a best-effort
+// superset, not a strict allowlist.
+const SHOPIFY_API_VERSION      = '2026-04'  // keep in sync with shopify-oauth/index.ts
+const SHOPIFY_THEME_MAX_PAGES  = Number(Deno.env.get('SHOPIFY_THEME_MAX_PAGES') || '10')
+// Conversion surface only: templates (incl. OS2.0 *.json), sections, snippets.
+// assets/ (compiled CSS/JS/images), locales/ (translations), config/ are excluded.
+const SHOPIFY_THEME_FILE_GLOBS = ['templates/*', 'sections/*', 'snippets/*']
+const SHOPIFY_KEEP_RE          = /^(templates|sections|snippets)\//
+
+export interface ShopifyThemeFile { filename: string; content: string; size: number }
+
+type ShopifyThemeReadResult =
+  | { ok: true; files: ShopifyThemeFile[]; pagesRead: number; truncatedAtPageCap: boolean }
+  | { ok: false; reason: 'unauthorized' | 'graphql_error' | 'request_failed'; message: string }
+
+const SHOPIFY_THEME_FILES_QUERY = `query VelyrThemeFiles($themeId: ID!, $cursor: String, $globs: [String!]) {
+  theme(id: $themeId) {
+    files(first: 250, after: $cursor, filenames: $globs) {
+      edges {
+        node {
+          filename
+          size
+          contentType
+          body {
+            ... on OnlineStoreThemeFileBodyText { content }
+            ... on OnlineStoreThemeFileBodyBase64 { contentBase64 }
+            ... on OnlineStoreThemeFileBodyUrl { url }
+          }
+        }
+        cursor
+      }
+      pageInfo { hasNextPage endCursor }
+      userErrors { code filename }
+    }
+  }
+}`
+
+async function readShopifyTheme(
+  shop: string,
+  themeIdNumeric: number | string,
+  accessToken: string,
+): Promise<ShopifyThemeReadResult> {
+  const themeGid = `gid://shopify/OnlineStoreTheme/${themeIdNumeric}`
+  const endpoint = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`
+
+  const files: ShopifyThemeFile[] = []
+  let cursor: string | null = null
+  let pagesRead = 0
+
+  for (; pagesRead < SHOPIFY_THEME_MAX_PAGES; pagesRead++) {
+    let res: Response
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          query: SHOPIFY_THEME_FILES_QUERY,
+          variables: { themeId: themeGid, cursor, globs: SHOPIFY_THEME_FILE_GLOBS },
+        }),
+        signal: AbortSignal.timeout(20000),
+      })
+    } catch (e: any) {
+      return { ok: false, reason: 'request_failed', message: `Shopify theme read threw: ${e?.message || String(e)}` }
+    }
+
+    // 401 → access token dead/expired. Surface distinctly so the caller's
+    // retry-on-401 can refresh via refreshShopifyToken and re-invoke.
+    if (res.status === 401) {
+      return { ok: false, reason: 'unauthorized', message: 'Shopify returned 401 reading theme files' }
+    }
+
+    const json: any = await res.json().catch(() => ({}))
+    if (!res.ok || json?.errors) {
+      slog('warn', 'shopify_theme_read_graphql_error', { shop, status: res.status, errors: JSON.stringify(json?.errors ?? '').slice(0, 300) })
+      return { ok: false, reason: 'graphql_error', message: `Shopify theme files query failed (HTTP ${res.status})` }
+    }
+
+    const conn = json?.data?.theme?.files
+    if (!conn) {
+      // theme(id) resolved null (wrong/stale theme id) or files connection absent.
+      slog('warn', 'shopify_theme_read_no_connection', { shop, themeGid })
+      return { ok: false, reason: 'graphql_error', message: 'theme.files missing from response (theme not found / wrong id?)' }
+    }
+    if (Array.isArray(conn.userErrors) && conn.userErrors.length) {
+      slog('warn', 'shopify_theme_read_user_errors', { shop, userErrors: JSON.stringify(conn.userErrors).slice(0, 300) })
+    }
+
+    for (const edge of conn.edges || []) {
+      const node = edge?.node
+      if (!node?.filename) continue
+      if (!SHOPIFY_KEEP_RE.test(node.filename)) continue   // authoritative client-side re-filter
+      const content = node.body?.content
+      if (typeof content === 'string') {
+        files.push({ filename: node.filename, content, size: Number(node.size) || 0 })
+      } else {
+        // Base64 / Url body on a kept liquid file shouldn't happen — log + skip.
+        slog('warn', 'shopify_theme_read_nontext_body', { shop, filename: node.filename, contentType: node.contentType ?? null })
+      }
+    }
+
+    if (!conn.pageInfo?.hasNextPage) {
+      return { ok: true, files, pagesRead: pagesRead + 1, truncatedAtPageCap: false }
+    }
+    cursor = conn.pageInfo.endCursor
+  }
+
+  // Reached the page cap with more pages outstanding — return what we have, flagged.
+  slog('warn', 'shopify_theme_read_page_cap', { shop, themeGid, pagesRead, cap: SHOPIFY_THEME_MAX_PAGES })
+  return { ok: true, files, pagesRead, truncatedAtPageCap: true }
+}
+
+// ─── SHOPIFY → EXISTING-PIPELINE ADAPTERS (Step 2) ───────────────────────────
+// Two thin adapters that map readShopifyTheme's ShopifyThemeFile[] into the exact
+// shapes the EXISTING ranker (Pass 1) and callAIForFix (Pass 2) already consume —
+// so neither of those functions changes a single line. Liquid has no JS import
+// graph, no JSX, no package.json, and no Tailwind/CSS-module conventions, so every
+// field those concepts map to is filled with an HONEST neutral default (never
+// fabricated data), each annotated with WHY. The ranker's real work on Liquid is
+// its filename-vocabulary force-include (SANITY_RE), which only needs path + name.
+
+// ~400-char body preview per node — same role as RA2's GraphNode.firstChars cache
+// (the ranker further slices it to 300 chars in its summary).
+const SHOPIFY_GRAPH_FIRSTCHARS = 400
+
+function shopifyBasename(filename: string): string {
+  return filename.split('/').pop() || filename
+}
+
+// A) ShopifyThemeFile[] → ImportGraph  (feeds rankComponentsForConversion / Pass 1).
+// The ranker reads only: nodes.length (sparse gate); node.path (summary + the
+// path-validation Set + sanityMatch); node.firstChars/.jsxElements/.depth/
+// .componentName/.framework (summary render); node.size + .jsxElements (heuristic
+// fallback). It never touches edges/unresolved/truncatedAt, so those are neutral.
+function shopifyGraph(files: ShopifyThemeFile[]): ImportGraph {
+  const nodes: GraphNode[] = files.map(f => ({
+    path:          f.filename,
+    size:          f.size,
+    firstChars:    f.content.slice(0, SHOPIFY_GRAPH_FIRSTCHARS),
+    framework:     'shopify-liquid',
+    componentName: shopifyBasename(f.filename),  // honest: the file's own name (e.g. 'hero.liquid') — feeds SANITY_RE + the summary label
+    // ── Honest neutral stubs: Liquid has no equivalent of these JS concepts ──
+    jsxElements:   [],    // Liquid emits no JSX; the ranker calls .slice/.map on this, so it MUST be an array (not undefined)
+    cssPath:       null,  // no sibling-CSS convention in a theme (CSS lives in assets/ or inline {% style %}); the ranker never reads this regardless
+    depth:         0,     // no import depth — theme files compose via {% render %}/{% section %}, not JS imports; a flat graph, every file equally shallow
+  }))
+  // There is no import graph for Liquid: no edges between files, no unresolved
+  // imports, and nothing was dropped by a traversal bound.
+  return { nodes, edges: [], unresolved: [], truncatedAt: null }
+}
+
+// B) ShopifyThemeFile[] + RankerResult → DeepContext  (feeds callAIForFix / Pass 2).
+// callAIForFix interpolates components[] and packageJsonDeps UNCONDITIONALLY (both
+// must be present), and truthy-guards tailwindTheme/globalStyles/indexHtml/llmsTxt
+// (null/'' → the block is omitted). We honor the SAME per-file (LLM_MAX_FILE_BYTES,
+// 60 KB) + total (AGENT_DEEP_CONTEXT_BYTES, 400 KB) budget as readDeepContext,
+// reading the SAME env vars so the two can't diverge in production.
+const SHOPIFY_DEEP_BUDGET_BYTES = () => Number(Deno.env.get('AGENT_DEEP_CONTEXT_BYTES') ?? '400000')
+const SHOPIFY_MAX_FILE_BYTES    = () => Number(Deno.env.get('LLM_MAX_FILE_BYTES') || String(60 * 1024))
+
+// Mirror of deep-reader.ts's truncateForLLM (same env cap, same slice-by-cap
+// behavior) so an oversized Liquid file is capped exactly like a GitHub component.
+function truncateLiquidForLLM(content: string): { content: string; truncated: boolean } {
+  const cap = SHOPIFY_MAX_FILE_BYTES()
+  const bytes = byteLength(content)
+  if (bytes <= cap) return { content, truncated: false }
+  return {
+    content: content.slice(0, cap) + `\n/* … truncated by Velyr LLM size cap (${cap}B / ${bytes}B original) … */`,
+    truncated: true,
+  }
+}
+
+function shopifyDeepContext(files: ShopifyThemeFile[], rankerResult: RankerResult): DeepContext {
+  const byName = new Map(files.map(f => [f.filename, f]))
+  const budget = SHOPIFY_DEEP_BUDGET_BYTES()
+  const components: DeepComponent[] = []
+  const skippedDueToBudget: Array<{ path: string; reason: 'budget_exceeded' }> = []
+  let totalBytes = 0
+
+  // Read in rank order (most→least conversion-relevant) so a budget cut drops the
+  // LEAST relevant files first — mirrors readDeepContext's ordering intent.
+  for (const item of rankerResult.ranked) {
+    const f = byName.get(item.path)
+    if (!f) continue   // a ranked path not in the file set — shouldn't happen (paths originate from shopifyGraph)
+    if (totalBytes >= budget) { skippedDueToBudget.push({ path: item.path, reason: 'budget_exceeded' }); continue }
+    const { content, truncated } = truncateLiquidForLLM(f.content)
+    totalBytes += byteLength(content)
+    components.push({
+      path:       f.filename,
+      content,
+      cssContent: null,   // theme CSS lives in assets/ (filtered out) or inline {% style %} (already inside `content`)
+      truncated,
+    })
+  }
+
+  return {
+    components,
+    // React/Vite-only concepts with no Liquid equivalent — callAIForFix truthy-
+    // guards each and omits the block when null.
+    tailwindTheme:   null,
+    globalStyles:    null,
+    indexHtml:       null,
+    llmsTxt:         null,
+    // Interpolated UNCONDITIONALLY in the Pass-2 prompt, so it must be a present
+    // string; '{}' is the honest "no deps" value (a theme has no package.json),
+    // matching readDeepContext's own default.
+    packageJsonDeps: '{}',
+    skippedDueToBudget,
+    skippedUnreadable: [],   // content is already in-memory from readShopifyTheme — nothing can "fail to read" here
+    totalBytes,
+  }
 }
 
 // ─── DEFAULT BRANCH (Stage 4.4) ──────────────────────────────────────────────

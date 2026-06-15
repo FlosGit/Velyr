@@ -30,7 +30,7 @@ export interface GraphNode {
   componentName: string | null                  // default export or filename
   jsxElements: string[]                         // unique capitalized tag names
   cssPath: string | null                        // sibling CSS, relative to siteRoot
-  framework: 'js' | 'svelte' | 'astro' | 'vue' | 'html'
+  framework: 'js' | 'svelte' | 'astro' | 'vue' | 'html' | 'shopify-liquid'
   // First ~400 chars of body (import/export-from header stripped). This IS the
   // content cache RA3 reads for its compact graph summary — RA3 must NOT add a
   // second blob-fetch path; read node.firstChars instead.

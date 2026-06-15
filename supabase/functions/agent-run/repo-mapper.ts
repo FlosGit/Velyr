@@ -33,6 +33,7 @@ import { fileToRoutePath } from './route-map.ts'
 export type Framework =
   | 'vite-react' | 'cra' | 'nextjs-app' | 'nextjs-pages' | 'remix'
   | 'astro' | 'sveltekit' | 'vue-vite' | 'nuxt' | 'plain-html' | 'unsupported'
+  | 'shopify-liquid'
 
 export type CssApproach =
   | 'css-modules' | 'tailwind' | 'styled-components' | 'emotion'
