@@ -526,6 +526,15 @@ async function refreshShopifyToken(conn: any): Promise<ShopifyTokenResult> {
   conn.shopify_token_expires_at         = newExpiresAt
   conn.shopify_refresh_token_expires_at = newRefreshExpiresAt
 
+  // Positive observability for the (otherwise silent) success path. refreshRotated
+  // surfaces the null-blanking risk: a refresh response without a new refresh_token
+  // would persist NULL and force the NEXT run into needless re-consent.
+  slog('info', 'shopify_token_refreshed', {
+    subscriptionId: conn.subscription_id,
+    expiresAt: newExpiresAt,
+    refreshRotated: newRefresh !== null,
+  })
+
   return { ok: true, accessToken: newAccess, refreshed: true }
 }
 
