@@ -2800,6 +2800,204 @@ async function notifyFindProblem(
 
 // ─── PROCESS SINGLE CONNECTION ───────────────────────────────────────────────
 // FIX: extracted from handleFullRun so Promise.allSettled can run them in parallel
+// ─── SHOPIFY CONNECTION ORCHESTRATOR (Step 3 — forked from processConnection) ──
+// Runs AFTER the shared run-insert + spend-cap preamble, INSTEAD of the GitHub
+// path, for a connection with a Shopify store and no GitHub repo. It reuses the
+// EXISTING two-pass LLM pipeline (rankComponentsForConversion + callAIForFix,
+// both unchanged) over Liquid theme files, and STOPS at a labelled preview — no
+// PR, no theme write (theme-WRITE access is pending Shopify approval). It must
+// never call getOctokit / repoPreflight / discoverFrameworkAndStructure /
+// buildImportGraph / readDeepContext / createPR — all assume a GitHub repo + a
+// non-null github_installation_id.
+async function sendShopifyTelegram(chatId: string | null, html: string) {
+  if (!chatId) return
+  await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: 'HTML' }),
+  }).catch(err => console.error('[shopify] telegram send failed:', err))
+}
+
+async function processShopifyConnection(conn: any, run: any, subRow: any): Promise<void> {
+  const chatId: string | null = subRow?.telegram_chat_id || null
+
+  // Terminal token-failure: honest agent_runs status + Telegram, never a
+  // fabricated success. Shared by the initial refresh and the retry-on-401 path.
+  const failToken = async (reason: 'needs_reconsent' | 'not_configured' | 'refresh_failed', message: string) => {
+    const status = reason === 'needs_reconsent' ? 'shopify_needs_reconsent'
+                 : reason === 'not_configured'  ? 'shopify_not_configured'
+                 : 'shopify_token_failed'
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status, current_step: 'done', completed_at: new Date().toISOString(), error_message: message,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_token_fail_update',
+    )
+    await sendShopifyTelegram(chatId, reason === 'needs_reconsent'
+      ? `🔌 <b>Velyr — reconnect your Shopify store</b>\n\nWe lost authorization to your store (the 90-day token expired or was revoked). Please reconnect it to resume weekly conversion analysis.`
+      : `⚠️ <b>Velyr — Shopify access problem</b>\n\n<i>${escapeHtml(message)}</i>\n\nThe agent will retry on the next run.`)
+  }
+
+  // 1. Token — refresh + single-use rotation happen inside this lock-protected
+  // path (refreshShopifyToken owns persistence + in-memory writeback).
+  const tok = await refreshShopifyToken(conn)
+  if (!tok.ok) { await failToken(tok.reason, tok.message); return }
+  let accessToken = tok.accessToken
+
+  // 2. Theme read with a SINGLE retry-on-401 (refresh once, re-read once).
+  let read = await readShopifyTheme(conn.shopify_shop_domain, conn.shopify_main_theme_id, accessToken)
+  if (!read.ok && read.reason === 'unauthorized') {
+    const tok2 = await refreshShopifyToken(conn)
+    if (!tok2.ok) { await failToken(tok2.reason, tok2.message); return }
+    accessToken = tok2.accessToken
+    read = await readShopifyTheme(conn.shopify_shop_domain, conn.shopify_main_theme_id, accessToken)
+  }
+  if (!read.ok) {
+    // unauthorized-after-retry OR graphql_error / request_failed → honest terminal.
+    slog('warn', 'shopify_theme_read_failed', { subscriptionId: conn.subscription_id, reason: read.reason, message: read.message })
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'shopify_theme_read_failed', current_step: 'done',
+        completed_at: new Date().toISOString(), error_message: read.message,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_theme_read_fail_update',
+    )
+    await sendShopifyTelegram(chatId, `⚠️ <b>Velyr — couldn't read your Shopify theme</b>\n\n<i>${escapeHtml(read.message)}</i>\n\nThe agent will retry on the next run.`)
+    return
+  }
+  const files = read.files
+  if (files.length === 0) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'skipped_no_data', current_step: 'done', completed_at: new Date().toISOString(),
+        error_message: 'No conversion-relevant Liquid files (templates/sections/snippets) in the theme.',
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_no_files_update',
+    )
+    await notifyInsufficientData(chatId, 'no conversion-relevant theme files (templates / sections / snippets) were found in your live theme')
+    return
+  }
+
+  // 3. Context — every arg below is subscription/conn/analytics-derived (NOT
+  // GitHub-derived), so it's built exactly as the GitHub path builds it.
+  const posthogApiKey = (await decryptSecret(conn.posthog_api_key)) || Deno.env.get('POSTHOG_API_KEY')!
+  const competitorUrls = await getCompetitorUrls(conn.subscription_id)
+  const [analytics, pageSpeed, previousFixes, legacyDna, competitorData, guardrails, businessDna] = await Promise.all([
+    getPostHogAnalytics(
+      posthogApiKey,
+      conn.posthog_project_id || Deno.env.get('POSTHOG_PROJECT_ID')!,
+      conn.posthog_host       || Deno.env.get('POSTHOG_HOST')!,
+      conn.posthog_host_filter,
+    ),
+    conn.website_url ? getPageSpeedScore(conn.website_url) : Promise.resolve(null),
+    getPreviousRuns(conn.subscription_id),
+    fetchBusinessDNA(conn.subscription_id),
+    competitorUrls.length > 0 ? fetchCompetitorData(competitorUrls) : Promise.resolve(null),
+    fetchBrandGuardrails(conn.subscription_id),
+    loadBusinessDNA(conn.subscription_id),
+  ])
+  const revenue = subRow?.stripe_revenue_connected
+    ? await getStripeRevenuePerVisitor(subRow.stripe_account_id || null, analytics)
+    : null
+  const dna = businessDna || legacyDna
+  // Liquid themes have no URL-page funnel map (detectAllPages is repoTree-based),
+  // so funnelAnalysis is honestly null — null-guarded in callAIForFix + the ranker.
+  const funnelAnalysis = null
+
+  // Synthetic MapResult for the Liquid theme: 'shopify-liquid' is a real Framework
+  // union member; the rest are honest neutral defaults callAIForFix renders cleanly.
+  const shopMap: MapResult = {
+    framework: 'shopify-liquid', isMonorepo: false, workspaces: [],
+    selectedWorkspacePath: '', siteRoot: '', entryPoints: [], tsConfigPaths: {},
+    cssApproach: 'unknown', tailwindConfigPath: null, globalStylesPath: null,
+    unsupportedReason: null, tsStrict: false, repoTree: [],
+  }
+
+  // Pass 1 — rank theme files (SAME ranker, SAME arg shape; shopifyGraph adapts
+  // ShopifyThemeFile[] → ImportGraph).
+  await dbWrite(
+    supabase.from('agent_runs').update({ current_step: 'ranking_components' }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_step_ranking_update',
+  )
+  const graph = shopifyGraph(files)
+  const rankerAnalyticsContext = (() => {
+    const a = analytics?.last7Days
+    if (!a) return 'No analytics data available.'
+    const top = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
+    return `Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate. Top pages: ${top || '—'}.`
+  })()
+  const rankerCallAI = (args: { system: string; user: string }) =>
+    callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
+  const rankerResult: RankerResult = await rankComponentsForConversion(
+    graph, rankerAnalyticsContext, rankerCallAI,
+    { framework: shopMap.framework, cssApproach: shopMap.cssApproach },
+  )
+  if (rankerResult.insufficient_graph) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'skipped_insufficient_graph', current_step: 'done', completed_at: new Date().toISOString(),
+        error_message: `Theme too sparse to rank (${rankerResult.node_count} file${rankerResult.node_count === 1 ? '' : 's'})`,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_insufficient_graph_update',
+    )
+    await notifyInsufficientData(chatId, `your theme had too few conversion-relevant files to analyze (${rankerResult.node_count})`)
+    return
+  }
+
+  // Pass 2 — single highest-impact fix (SAME callAIForFix, SAME arg order;
+  // shopifyDeepContext adapts the files → DeepContext, nulling React-only fields).
+  await dbWrite(
+    supabase.from('agent_runs').update({ current_step: 'finding_biggest_issue' }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_step_finding_update',
+  )
+  const deepContext = shopifyDeepContext(files, rankerResult)
+  const fixResult = await callAIForFix(
+    conn.subscription_id, shopMap, deepContext, rankerResult,
+    analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
+  )
+  if (fixResult.skip) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'skipped_low_confidence', current_step: 'done', completed_at: new Date().toISOString(),
+        error_message: `Pass 2 skipped: ${fixResult.reason || 'no confident #1 problem'}`,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_low_confidence_update',
+    )
+    await notifyInsufficientData(chatId, fixResult.reason || 'no confident high-impact fix this week')
+    return
+  }
+  // file_to_edit must be one of the ranked files (no invented paths) — mirrors the
+  // GitHub invariant; a violation throws to processConnection's shared catch.
+  const rankedPaths = rankerResult.ranked.map(r => r.path)
+  if (!fixResult.file_to_edit || !rankedPaths.includes(fixResult.file_to_edit)) {
+    throw new Error(`Shopify: AI selected file outside ranked list: "${fixResult.file_to_edit}"`)
+  }
+
+  // 5. INTERIM OUTPUT — labelled preview, NO write. Persist the analysis the same
+  // way the GitHub path does (analysis_result + problem_description) but under the
+  // distinct terminal status 'shopify_preview' so it's never mistaken for a deploy.
+  await dbWrite(
+    supabase.from('agent_runs').update({
+      status:              'shopify_preview',
+      current_step:        'done',
+      completed_at:        new Date().toISOString(),
+      analysis_result:     { ...fixResult, analytics_snapshot: analytics?.last7Days, revenue: revenue || null },
+      problem_description: fixResult.problem,
+      pages_fixed:         [fixResult.file_to_edit],
+    }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_preview_update',
+  )
+
+  const change = fixResult.code_change
+  const previewMsg =
+    `🔍 <b>Shopify Preview — would fix once write access is live</b>\n\n` +
+    `<b>Problem:</b> ${escapeHtml(fixResult.problem || '—')}\n` +
+    `<b>File:</b> <code>${escapeHtml(fixResult.file_to_edit || '—')}</code>` +
+    (fixResult.confidence ? `\n<b>Confidence:</b> ${escapeHtml(fixResult.confidence)}` : '') +
+    (change ? `\n\n<b>Find:</b>\n<pre>${escapeHtml(change.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(change.replace.slice(0, 600))}</pre>` : '') +
+    `\n\n<i>Preview only — no PR was opened and nothing was changed in your store. Theme write access is pending Shopify approval.</i>`
+  await sendShopifyTelegram(chatId, previewMsg)
+}
+
 async function processConnection(conn: any) {
   let run: any = null
 
@@ -2848,6 +3046,17 @@ async function processConnection(conn: any) {
         DB_TIMEOUT_MS, 'skipped_cost_cap_update'
       )
       await notifyCapExceeded(subRow?.telegram_chat_id || null, spendStatus.spent, spendStatus.period)
+      return
+    }
+
+    // ── Shopify fork (Step 3) ────────────────────────────────────────────────
+    // A Shopify connection has no GitHub repo (github_repo_name IS NULL). Fork
+    // here — AFTER the shared run-insert + spend-cap preamble, BEFORE getOctokit
+    // (which dereferences a null github_installation_id) — into the Liquid-theme
+    // pipeline, then return. Any throw propagates to the shared catch below. The
+    // GitHub path that follows is unchanged.
+    if (conn.shopify_shop_domain && !conn.github_repo_name) {
+      await processShopifyConnection(conn, run, subRow)
       return
     }
 

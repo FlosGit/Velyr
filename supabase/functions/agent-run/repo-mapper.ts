@@ -230,6 +230,10 @@ const ENTRY_CANDIDATES: Record<Framework, string[]> = {
   'nuxt':         ['app.vue', 'pages/index.vue'],
   'plain-html':   ['index.html'],
   'unsupported':  [],
+  // Liquid has no JS entry points; the Shopify path resolves theme files directly
+  // (readShopifyTheme) and never calls resolveEntryPoints, so this stays empty —
+  // present only to satisfy the Record<Framework, …> type.
+  'shopify-liquid': [],
 }
 
 function resolveEntryPoints(framework: Framework, siteRoot: string, tree: TreeEntry[]): string[] {
