@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+
 const SHARED_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Jost:wght@300;400;500&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,6 +37,43 @@ function Logo({ size = 24, color = '#2a5c45' }) {
 }
 
 export default function AGB({ navigate }) {
+  useEffect(() => {
+    const prevTitle = document.title
+    document.title = 'AGB — Velyr'
+    let robots = document.querySelector('meta[name="robots"]')
+    const created = !robots
+    const prevContent = robots?.getAttribute('content')
+    if (!robots) {
+      robots = document.createElement('meta')
+      robots.setAttribute('name', 'robots')
+      document.head.appendChild(robots)
+    }
+    robots.setAttribute('content', 'noindex, nofollow')
+
+    const pageUrl = 'https://velyr.io' + window.location.pathname
+
+    let canonical = document.querySelector('link[rel="canonical"]')
+    if (!canonical) { canonical = document.createElement('link'); canonical.setAttribute('rel', 'canonical'); document.head.appendChild(canonical) }
+    canonical.setAttribute('href', pageUrl)
+
+    let hreflangEn = document.querySelector('link[rel="alternate"][hreflang="en"]')
+    if (!hreflangEn) { hreflangEn = document.createElement('link'); hreflangEn.setAttribute('rel', 'alternate'); hreflangEn.setAttribute('hreflang', 'en'); document.head.appendChild(hreflangEn) }
+    hreflangEn.setAttribute('href', pageUrl)
+
+    let hreflangDefault = document.querySelector('link[rel="alternate"][hreflang="x-default"]')
+    if (!hreflangDefault) { hreflangDefault = document.createElement('link'); hreflangDefault.setAttribute('rel', 'alternate'); hreflangDefault.setAttribute('hreflang', 'x-default'); document.head.appendChild(hreflangDefault) }
+    hreflangDefault.setAttribute('href', pageUrl)
+
+    return () => {
+      document.title = prevTitle
+      if (created) robots.remove()
+      else if (prevContent != null) robots.setAttribute('content', prevContent)
+      canonical.setAttribute('href', 'https://velyr.io/')
+      hreflangEn.setAttribute('href', 'https://velyr.io/')
+      hreflangDefault.setAttribute('href', 'https://velyr.io/')
+    }
+  }, [])
+
   return (
     <>
       <style>{SHARED_CSS}</style>

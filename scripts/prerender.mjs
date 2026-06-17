@@ -78,6 +78,7 @@ const ROUTES = [
     title: 'Privacy Policy — Velyr',
     description:
       'How Velyr collects, uses, and protects your data — including PostHog analytics and GitHub repository access.',
+    robots: 'noindex, nofollow',
     fallback: legalFallback(
       'Privacy Policy',
       'This page explains what data Velyr processes, why, and your rights. Velyr uses PostHog (US-hosted) for analytics with your consent and accesses your GitHub repository only to propose changes as Pull Requests you approve.'
@@ -89,6 +90,7 @@ const ROUTES = [
     title: 'Terms & Conditions (AGB) — Velyr',
     description:
       'Velyr terms and conditions (AGB) for the €29/month AI growth agent subscription, including the 14-day free trial and cancellation.',
+    robots: 'noindex, nofollow',
     fallback: legalFallback(
       'Terms & Conditions',
       'The terms governing your use of Velyr, the €29/month AI growth agent subscription, the 14-day free trial, billing, and cancellation.'
@@ -99,6 +101,7 @@ const ROUTES = [
     path: '/impressum',
     title: 'Impressum — Velyr',
     description: 'Legal notice (Impressum) for Velyr.',
+    robots: 'noindex, nofollow',
     fallback: legalFallback(
       'Impressum',
       'Legal notice and provider identification for Velyr in accordance with German law.'
@@ -138,6 +141,9 @@ for (const r of ROUTES) {
   // titles (OG + Twitter)
   html = replaceContentAttr(html, 'property="og:title"', r.title)
   html = replaceContentAttr(html, 'name="twitter:title"', r.title)
+
+  // robots — legal pages opt out of indexing (default index.html stays index,follow)
+  if (r.robots) html = replaceContentAttr(html, 'name="robots"', r.robots)
 
   // canonical + og:url + hreflang -> route URL
   html = setRootHref(html, 'rel="canonical"', url)
@@ -351,12 +357,12 @@ for (const c of clustersWithPosts) {
 }
 
 // --- generated sitemap.xml (replaces the former hand-maintained public file) ---
+// The legal pages (/privacy, /agb, /impressum) are deliberately excluded: they
+// are noindex,nofollow (see ROUTES above), so listing them in the sitemap would
+// be a contradictory crawl signal.
 const STATIC_URLS = [
   { loc: ORIGIN + '/', lastmod: '2026-06-02', changefreq: 'weekly', priority: '1.0' },
   { loc: ORIGIN + '/faq', lastmod: '2026-06-02', changefreq: 'weekly', priority: '0.8' },
-  { loc: ORIGIN + '/privacy', lastmod: '2026-06-02', changefreq: 'monthly', priority: '0.3' },
-  { loc: ORIGIN + '/agb', lastmod: '2026-06-02', changefreq: 'monthly', priority: '0.3' },
-  { loc: ORIGIN + '/impressum', lastmod: '2026-06-02', changefreq: 'monthly', priority: '0.3' },
 ]
 const blogUrls = [
   { loc: ORIGIN + '/blog', lastmod: today(), changefreq: 'daily', priority: '0.7' },
@@ -375,7 +381,7 @@ const blogUrls = [
 ]
 const allUrls = [...STATIC_URLS, ...blogUrls]
 
-// Guard: the 5 pre-existing static URLs must never silently drop out.
+// Guard: the indexable static URLs (/ and /faq) must never silently drop out.
 const locSet = new Set(allUrls.map((u) => u.loc))
 for (const s of STATIC_URLS) {
   if (!locSet.has(s.loc)) throw new Error(`sitemap: required static URL missing: ${s.loc}`)
