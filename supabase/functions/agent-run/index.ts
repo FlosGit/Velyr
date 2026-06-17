@@ -474,10 +474,23 @@ async function refreshShopifyToken(conn: any): Promise<ShopifyTokenResult> {
     })
     json = await res.json().catch(() => ({}))
     if (!res.ok || !json?.access_token) {
-      // 400 invalid_grant ⇒ the refresh token is dead (already used / revoked) ⇒
-      // re-consent; anything else is a transient/refresh failure the caller retries.
-      const reason = res.status === 400 ? 'needs_reconsent' : 'refresh_failed'
-      slog('warn', 'shopify_token_refresh_rejected', { subscriptionId: conn.subscription_id, status: res.status })
+      // Auth failure on the refresh grant (400 OR 401) ⇒ the refresh token is dead
+      // (expired / revoked / already-used) ⇒ the merchant MUST reconnect. Shopify
+      // does NOT document a single status for a dead refresh token; it references
+      // 401 in the refresh context and prescribes re-consent for any failed refresh,
+      // and B2 empirically saw 401 (not 400) for an invalid token — so a 400-only
+      // rule would misclassify a dead token as transient and retry it forever,
+      // never prompting reconnect. Everything else (5xx, 429, other 4xx, or a 2xx
+      // with no access_token) stays 'refresh_failed' → the caller retries next run
+      // rather than forcing a needless reconnect on an unexpected status. The body
+      // `error` (invalid_grant / invalid_request) is a confirmation signal only,
+      // logged but NOT a dependency — the body may be empty/non-JSON.
+      const authFailure = res.status === 400 || res.status === 401
+      const reason = authFailure ? 'needs_reconsent' : 'refresh_failed'
+      slog('warn', 'shopify_token_refresh_rejected', {
+        subscriptionId: conn.subscription_id, status: res.status, reason,
+        error: typeof json?.error === 'string' ? json.error : undefined,
+      })
       return { ok: false, reason, message: `Shopify token refresh failed (HTTP ${res.status})` }
     }
   } catch (e: any) {
