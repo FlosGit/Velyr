@@ -938,13 +938,20 @@ async function handleRollbackCheck(res) {
             // SG3b: target the branch Shopify syncs to the live theme. Only a THEME
             // run honors the connected-branch override (mirrors createPR's isThemeRun
             // guard) so non-theme runs keep targeting the default branch exactly as
-            // today. Theme-ness is detected from the edited file living in the Shopify
-            // conversion surface (templates/sections/snippets *.liquid|*.json) — robust
-            // and independent of the best-effort discovered_framework column; non-theme
-            // runs never edit these paths. The branch-cut, current-file read, AND PR
-            // base all use the resolved branch, or a merged rollback won't sync.
+            // today. Theme-ness is detected from the edited file living in a Shopify
+            // theme directory — robust and independent of the best-effort
+            // discovered_framework column; non-theme runs never edit these paths. The
+            // branch-cut, current-file read, AND PR base all use the resolved branch, or
+            // a merged rollback won't sync.
+            // SG4a item 2: include layout/ (e.g. layout/theme.liquid — the marker
+            // isShopifyThemeRepo keys on) alongside the templates/sections/snippets
+            // conversion surface (SHOPIFY_KEEP_RE in the edge function). Today the
+            // forward analyze surface is templates/sections/snippets only, so file_to_edit
+            // is never layout/ yet; adding it keeps this guard a forward-compatible
+            // superset so a future layout/ edit can't silently roll back to the wrong
+            // branch. config/ stays out — it's forbidden-edit; assets/ is compiled.
             const defaultBranch = await getDefaultBranch(octokit, owner, repo)
-            const isThemeRun    = /^(templates|sections|snippets)\/.+\.(liquid|json)$/i.test(run.analysis_result?.file_to_edit || '')
+            const isThemeRun    = /^(layout|templates|sections|snippets)\/.+\.(liquid|json)$/i.test(run.analysis_result?.file_to_edit || '')
             const baseBranch    = (isThemeRun && conn?.shopify_connected_branch) ? conn.shopify_connected_branch : defaultBranch
             const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${baseBranch}` })
             const branchName    = `agent/rollback-${run.id.slice(0, 8)}`
