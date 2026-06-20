@@ -492,9 +492,18 @@ async function handleApprove(runId, chatId) {
     return sendMessage(chatId, `✅ <b>Analytics installed.</b> Your next run will use real visitor data.`)
   }
 
+  // SG4b item 4: a Shopify-via-GitHub theme fix goes live when Shopify syncs the
+  // merged connected branch into the live theme — NOT a Vercel deploy — so the
+  // post-merge wording must say that for a merchant. Detect theme-ness from the
+  // edited file living in a Shopify theme directory, the SAME signal SG4a's
+  // rollback guard uses (layout/templates/sections/snippets *.liquid|*.json) —
+  // reused, not reinvented. Non-theme wording stays byte-identical to before.
+  const isThemeRun = /^(layout|templates|sections|snippets)\/.+\.(liquid|json)$/i.test(run.analysis_result?.file_to_edit || '')
   await sendMessage(
     chatId,
-    `✅ <b>PR merged!</b> Vercel is deploying the change now.\n\n<i>The agent will check impact after 48h and recommend a rollback (waiting on your approval) if metrics drop.</i>`
+    isThemeRun
+      ? `✅ <b>PR merged!</b> Shopify is syncing the change to your connected theme now.\n\n<i>The agent will check impact after 48h and recommend a rollback (waiting on your approval) if metrics drop.</i>`
+      : `✅ <b>PR merged!</b> Vercel is deploying the change now.\n\n<i>The agent will check impact after 48h and recommend a rollback (waiting on your approval) if metrics drop.</i>`
   )
 }
 

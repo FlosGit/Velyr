@@ -2,15 +2,17 @@
 -- agent_connections — mixed-row guard: a connection is EITHER GitHub OR pure-Shopify
 -- (SG4a item 1)
 --
--- ⚠️ DO NOT APPLY BLIND. ADD CONSTRAINT fails if any existing row already has BOTH
--- github_repo_name AND shopify_shop_domain set. Run the violator audit FIRST:
+-- Applied directly via the Supabase SQL Editor on 2026-06-20 AFTER a zero-violator
+-- audit. ADD CONSTRAINT fails if any existing row already has BOTH github_repo_name
+-- AND shopify_shop_domain set, so the violator audit was run first and returned zero
+-- (the SG2 test row 3310b4ac had already been cleaned):
 --
 --   SELECT subscription_id, github_repo_name, shopify_shop_domain
 --   FROM public.agent_connections
 --   WHERE github_repo_name IS NOT NULL AND shopify_shop_domain IS NOT NULL;
 --
--- Only apply this migration once that audit returns ZERO rows (clean each violator
--- per-row first — the SG2 test row 3310b4ac was already cleaned, others may exist).
+-- Re-applying to a fresh environment: run that audit again and clean any violators
+-- per-row BEFORE applying.
 --
 -- WHY: processConnection routes on connection shape — a GitHub repo
 -- (github_repo_name set) takes the two-pass LLM PR flow; a pure-Shopify connection
@@ -22,9 +24,7 @@
 -- (A Shopify-via-GitHub theme connection is a GitHub connection: github_repo_name
 -- set, shopify_shop_domain NULL — so it satisfies the constraint.)
 --
--- Applied directly via the Supabase SQL Editor on <DATE> after a zero-violator
--- audit; this file reconciles the repo to the live DB. Idempotent: drop-if-exists
--- then add.
+-- This file reconciles the repo to the live DB. Idempotent: drop-if-exists then add.
 -- ════════════════════════════════════════════════════════════════════════════
 
 alter table public.agent_connections
