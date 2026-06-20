@@ -114,6 +114,29 @@ async function getActiveSubId(chatId) {
   return data?.subscription_id ?? null
 }
 
+// Approval-path (RUN-scoped) counterpart to getActiveSubId. A YES/NO targets a
+// specific run, so — unlike getActiveSubId, which is sub-scoped and deliberately
+// refuses when >1 connection shares a chat — we resolve EVERY subscription this
+// chat is verified to control and let the caller authorize by the run's own
+// subscription. This is what keeps approval working when two connections share one
+// telegram chat (SG3a). Same trust gates as getActiveSubId (verified binding +
+// active/trialing subscription). Returns [] when none / on error (fail closed).
+async function getChatAuthorizedSubIds(chatId) {
+  const { data, error } = await supabase
+    .from('agent_connections')
+    .select('subscription_id, agent_subscriptions!inner(subscription_status, status)')
+    .eq('telegram_chat_id', chatId)
+    .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
+    .eq('agent_subscriptions.status', 'active')
+    .not('verification_code_id', 'is', null)
+    .not('verified_at',          'is', null)
+  if (error) {
+    console.error('[telegram] getChatAuthorizedSubIds query error for chat_id', chatId, error)
+    return []
+  }
+  return [...new Set((data || []).map(r => r.subscription_id).filter(Boolean))]
+}
+
 async function notifyInactive(chatId) {
   await sendMessage(chatId, 'Your Velyr subscription is no longer active. Visit velyr.io to reactivate.')
 }
@@ -239,19 +262,48 @@ async function handleStart(message, startPayload) {
 // maybeRunSnippetSetup prevents double-opening Setup-PRs. This query is therefore
 // always unambiguous.
 async function findPendingRunForChat(chatId) {
-  const subscriptionId = await getActiveSubId(chatId)
-  if (!subscriptionId) return null
+  // SG3a: resolve across EVERY subscription the chat controls (not a single sub),
+  // and take the NEWEST waiting_approval run instead of .maybeSingle() — so a chat
+  // with >1 eligible run degrades to "newest" rather than nulling out and bricking
+  // approval. The preferred, unambiguous path is reply-based (resolveApprovalRunId);
+  // this bare-fallback only fires for a "yes"/"no" with no reply context.
+  const subIds = await getChatAuthorizedSubIds(chatId)
+  if (subIds.length === 0) return null
 
-  const { data: run } = await supabase
+  const { data: runs } = await supabase
     .from('agent_runs')
     .select('id')
-    .eq('subscription_id', subscriptionId)
+    .in('subscription_id', subIds)
     .eq('status', 'waiting_approval')
     .order('created_at', { ascending: false })
     .limit(1)
-    .maybeSingle()
 
-  return run?.id || null
+  return runs?.[0]?.id || null
+}
+
+// SG3a: which run does a bare YES/NO target? PREFERRED — the user replied to a
+// specific approval message, so reply_to_message.message_id pins the exact run via
+// agent_runs.telegram_message_id. Unambiguous no matter how many connections share
+// the chat. The .in(subIds) clause is the ownership guard: the pinned run's
+// subscription must be one this chat controls. FALLBACK (no reply, or the reply
+// pointed at a stale/non-approval message) — the chat-based newest-run lookup.
+async function resolveApprovalRunId(message, chatId) {
+  const repliedId = message.reply_to_message?.message_id
+  if (repliedId != null) {
+    const subIds = await getChatAuthorizedSubIds(chatId)
+    if (subIds.length > 0) {
+      const { data: run } = await supabase
+        .from('agent_runs')
+        .select('id')
+        .eq('telegram_message_id', repliedId)
+        .eq('status', 'waiting_approval')
+        .in('subscription_id', subIds)
+        .maybeSingle()
+      if (run?.id) return run.id
+    }
+    // Reply didn't resolve a live approval — fall through to the chat-based lookup.
+  }
+  return findPendingRunForChat(chatId)
 }
 
 // ─── FIND LATEST REJECTED CONVERSION-FIX RUN FOR CHAT ────────────────────────
@@ -297,14 +349,18 @@ async function findLatestRejectedRunForChat(chatId) {
 
 // ─── APPROVE ────────────────────────────────────────────────────────────────
 async function handleApprove(runId, chatId) {
-  const subscriptionId = await getActiveSubId(chatId)
-  if (!subscriptionId) return notifyInactive(chatId)
+  // SG3a: authorize by the RUN's subscription being one this chat controls (across
+  // ALL chat-bound subs) — not the single-sub getActiveSubId, which refuses (and so
+  // bricked approval) when two connections shared a chat. maybeSingle stays safe:
+  // the filter is on the run PK, so at most one row can match.
+  const subIds = await getChatAuthorizedSubIds(chatId)
+  if (subIds.length === 0) return notifyInactive(chatId)
 
   const { data: run } = await supabase
     .from('agent_runs')
     .select('*')
     .eq('id', runId)
-    .eq('subscription_id', subscriptionId)
+    .in('subscription_id', subIds)
     .maybeSingle()
 
   if (!run) return sendMessage(chatId, '❌ Run not found.')
@@ -444,14 +500,16 @@ async function handleApprove(runId, chatId) {
 
 // ─── REJECT ─────────────────────────────────────────────────────────────────
 async function handleReject(runId, chatId) {
-  const subscriptionId = await getActiveSubId(chatId)
-  if (!subscriptionId) return notifyInactive(chatId)
+  // SG3a: same chat-bound, run-scoped authorization as handleApprove (works when
+  // multiple connections share a chat).
+  const subIds = await getChatAuthorizedSubIds(chatId)
+  if (subIds.length === 0) return notifyInactive(chatId)
 
   const { data: run } = await supabase
     .from('agent_runs')
     .select('*')
     .eq('id', runId)
-    .eq('subscription_id', subscriptionId)
+    .in('subscription_id', subIds)
     .maybeSingle()
 
   if (!run) return sendMessage(chatId, '❌ Run not found.')
@@ -733,12 +791,12 @@ export default async function handler(req, res) {
       await handleStart(message, parts[1] || null)
 
     } else if ((cmd === 'yes' || cmd === 'y' || cmd === '✅') && parts.length === 1) {
-      const runId = await findPendingRunForChat(chatId)
+      const runId = await resolveApprovalRunId(message, chatId)
       if (!runId) await sendMessage(chatId, '⚠️ No pending approval found. The agent will message you when the next run is ready.')
       else        await handleApprove(runId, chatId)
 
     } else if ((cmd === 'no' || cmd === 'n' || cmd === '❌') && parts.length === 1) {
-      const runId = await findPendingRunForChat(chatId)
+      const runId = await resolveApprovalRunId(message, chatId)
       if (!runId) await sendMessage(chatId, '⚠️ No pending approval found.')
       else        await handleReject(runId, chatId)
 
