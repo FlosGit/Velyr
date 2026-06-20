@@ -3,7 +3,7 @@ import { App } from 'npm:@octokit/app@14'
 import { Octokit } from 'npm:@octokit/rest@20'
 import { throttling } from 'npm:@octokit/plugin-throttling@8'
 import { parse as babelParse } from 'npm:@babel/parser@7.27.0'
-import { discoverFrameworkAndStructure, detectLintInfo, type MapResult, type LintInfo, type TreeEntry } from './repo-mapper.ts'
+import { discoverFrameworkAndStructure, detectLintInfo, isShopifyThemeRepo, type MapResult, type LintInfo, type TreeEntry } from './repo-mapper.ts'
 import { buildImportGraph, type ImportGraph, type GraphNode } from './import-graph.ts'
 import { rankComponentsForConversion, type RankerResult } from './component-ranker.ts'
 import { readDeepContext, type DeepContext, type DeepComponent } from './deep-reader.ts'
@@ -173,6 +173,71 @@ function validateSyntax(filePath: string, content: string): { ok: true } | { ok:
   }
 }
 
+// ─── THEME (LIQUID / JSON) VALIDATION (SG2) ──────────────────────────────────
+// validateSyntax's analogue for the Shopify-via-GitHub path. DELIBERATELY
+// delimiter-level only for Liquid — we do NOT attempt full block-tag pairing
+// (if/endif, for/endfor, case, capture, form, paginate, schema, style, javascript,
+// comment, raw …): Liquid has many block tags and a naive checker would
+// FALSE-REJECT valid markup (e.g. a bare for-loop), which is worse than letting a
+// rare edge through (the merchant still reviews the PR). So for .liquid we only
+// confirm {{ }} / {% %} delimiters are properly paired — this catches the common
+// LLM error of dropping a closing brace WITHOUT flagging the bare `}}` / `}` that
+// legitimately appears in inline <script>/<style> blocks (see liquidDelimitersBalanced).
+// For .json (templates) we JSON.parse and reject on a parse error.
+//
+// Asymmetry by design: we flag an OPENING ({{ or {%) that never closes, but we do
+// NOT flag a stray CLOSING (`}}`/`%}`/`}`), because those occur constantly in JS/CSS
+// braces inside theme files. Catching dropped-close is the high-value common case;
+// flagging stray-close would false-reject valid themes wholesale.
+function liquidDelimitersBalanced(content: string): boolean {
+  const n = content.length
+  let i = 0
+  let state: 'outside' | 'output' | 'tag' = 'outside'
+  const nextOpen = (from: number): { pos: number; kind: 'output' | 'tag' } | null => {
+    const o1 = content.indexOf('{{', from)
+    const o2 = content.indexOf('{%', from)
+    if (o1 === -1 && o2 === -1) return null
+    if (o2 === -1 || (o1 !== -1 && o1 < o2)) return { pos: o1, kind: 'output' }
+    return { pos: o2, kind: 'tag' }
+  }
+  while (i < n) {
+    if (state === 'outside') {
+      const open = nextOpen(i)
+      if (!open) return true                       // no further Liquid openings → balanced
+      state = open.kind
+      i = open.pos + 2
+    } else {
+      const closeTok = state === 'output' ? '}}' : '%}'
+      const close = content.indexOf(closeTok, i)
+      if (close === -1) return false               // unterminated {{ or {%
+      const open = nextOpen(i)
+      if (open && open.pos < close) return false   // re-opened before closing → broken
+      state = 'outside'
+      i = close + 2
+    }
+  }
+  return state === 'outside'                        // ended mid-delimiter → broken
+}
+
+function validateThemeSyntax(filePath: string, content: string): { ok: true } | { ok: false; reason: string } {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  if (ext === 'json') {
+    try {
+      JSON.parse(content)
+      return { ok: true }
+    } catch (err: any) {
+      return { ok: false, reason: `invalid JSON: ${err?.message || String(err)}` }
+    }
+  }
+  if (ext === 'liquid') {
+    return liquidDelimitersBalanced(content)
+      ? { ok: true }
+      : { ok: false, reason: 'unbalanced Liquid delimiters ({{ }} / {% %}) in the modified file' }
+  }
+  // Any other extension: nothing theme-specific to check.
+  return { ok: true }
+}
+
 // ─── FIND/REPLACE SAFETY (Stage RA5 #4 — formal home of RA6's guard) ──────────
 // Locate the AI's `find` string in the file using WHITESPACE-NORMALIZED matching
 // (collapse runs of spaces/tabs/newlines to one space). This survives the common
@@ -319,6 +384,7 @@ const FORBIDDEN_EDIT_PATHS: RegExp[] = [
   /(^|\/)supabase\/migrations\//i,     // DB schema is not LLM territory
   /(^|\/)supabase\/functions\//i,      // Edge Functions (would self-modify)
   /(^|\/)\.husky\//i,
+  /(^|\/)config\/settings_.*\.json$/i, // SG2: Shopify theme settings surface (config/settings_schema.json, settings_data.json) — structural, too risky to auto-edit
 ]
 
 function isForbiddenEditPath(filePath: string): RegExp | null {
@@ -2701,10 +2767,19 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
   // (Next/Vite/CRA) keep conversion targets in JS/TS, so refuse out-of-family
   // paths rather than open an unchecked edit. Keep this set in sync with
   // validateSyntax. Throw → generic failed (honest no-PR).
+  // SG2: theme runs (Shopify-via-GitHub; mapResult.framework === 'shopify-liquid')
+  // edit Liquid/JSON, validated below by validateThemeSyntax. Non-theme runs stay
+  // JS/TS-only (Babel-checked). Detected from the threaded mapResult so createPR
+  // needs no new parameter.
+  const isThemeRun = receipt.mapResult.framework === 'shopify-liquid'
   const editExt = filePath.split('.').pop()?.toLowerCase() || ''
   const VERIFIABLE_EDIT_EXTENSIONS = ['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx']
-  if (!VERIFIABLE_EDIT_EXTENSIONS.includes(editExt)) {
-    throw new Error(`AI selected a non-verifiable file type ".${editExt}" (${filePath}); only ${VERIFIABLE_EDIT_EXTENSIONS.join('/')} edits are syntax-checked before commit. Refusing to open an unverified PR.`)
+  const THEME_EDIT_EXTENSIONS = ['liquid', 'json']
+  const allowedEditExtensions = isThemeRun
+    ? [...VERIFIABLE_EDIT_EXTENSIONS, ...THEME_EDIT_EXTENSIONS]
+    : VERIFIABLE_EDIT_EXTENSIONS
+  if (!allowedEditExtensions.includes(editExt)) {
+    throw new Error(`AI selected a non-verifiable file type ".${editExt}" (${filePath}); only ${allowedEditExtensions.join('/')} edits are syntax-checked before commit. Refusing to open an unverified PR.`)
   }
 
   const defaultBranch = await getDefaultBranch(octokit, owner, repo)
@@ -2724,8 +2799,14 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
   // Replace the ACTUAL file bytes at the anchor (never the AI's copy).
   const newContent = currentContent.slice(0, found.anchorPos) + change.replace + currentContent.slice(found.anchorPos + found.actualFind.length)
 
-  // Syntax-validate before committing (Stage 3). Throw → generic failed.
-  const validation = validateSyntax(filePath, newContent)
+  // Syntax-validate before committing (Stage 3 / SG2). Theme Liquid+JSON go
+  // through validateThemeSyntax (delimiter balance / JSON.parse); everything else
+  // through the JS/TS Babel check. The extension guard above already restricts
+  // .liquid/.json to theme runs, so dispatching by extension is safe. Throw →
+  // generic failed.
+  const validation = (editExt === 'liquid' || editExt === 'json')
+    ? validateThemeSyntax(filePath, newContent)
+    : validateSyntax(filePath, newContent)
   if (!validation.ok) {
     throw new Error(`Generated code has a syntax error in ${filePath}: ${validation.reason}`)
   }
@@ -3020,6 +3101,235 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   await sendShopifyTelegram(chatId, previewMsg)
 }
 
+// ─── SHOPIFY-VIA-GITHUB: READ THEME FILES FROM THE REPO TREE (SG1) ────────────
+// GitHub-blob analogue of readShopifyTheme (which reads the Admin GraphQL API).
+// Enumerates the conversion surface (templates/ sections/ snippets/) from the
+// ALREADY-FETCHED repoTree using the SAME SHOPIFY_KEEP_RE allowlist, then fetches
+// one getBlob per file (SHAs already in the tree). Concurrency-limited + capped so
+// a large theme can't blow the GitHub call budget or the run's wall-clock. Returns
+// the SAME ShopifyThemeFile[] shape shopifyGraph/shopifyDeepContext already consume,
+// so neither adapter changes.
+const SHOPIFY_GITHUB_MAX_FILES         = Number(Deno.env.get('SHOPIFY_GITHUB_MAX_FILES') || '300')
+const SHOPIFY_GITHUB_FETCH_CONCURRENCY = 8
+
+async function readThemeFilesFromGithub(
+  octokit: any, owner: string, repo: string, repoTree: TreeEntry[],
+): Promise<ShopifyThemeFile[]> {
+  const candidates = repoTree
+    .filter(e => e.type === 'blob' && SHOPIFY_KEEP_RE.test(e.path))
+    .slice(0, SHOPIFY_GITHUB_MAX_FILES)
+
+  const out: ShopifyThemeFile[] = []
+  let idx = 0
+  const worker = async () => {
+    while (idx < candidates.length) {
+      const e = candidates[idx++]
+      try {
+        const { data } = await octokit.rest.git.getBlob({ owner, repo, file_sha: e.sha })
+        const content = data.encoding === 'base64' ? base64Decode(data.content) : (data.content ?? '')
+        out.push({ filename: e.path, content, size: e.size ?? byteLength(content) })
+      } catch {
+        // Unreadable blob (rare) — skip; the file just doesn't enter the analysis.
+        slog('warn', 'shopify_github_blob_read_failed', { owner, repo, path: e.path })
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(SHOPIFY_GITHUB_FETCH_CONCURRENCY, candidates.length) }, () => worker()),
+  )
+  return out
+}
+
+// ─── SHOPIFY-VIA-GITHUB CONNECTION ORCHESTRATOR (SG1) ─────────────────────────
+// A Shopify theme synced to GitHub is, to Velyr, a normal GitHub connection
+// (github_repo_name set). RA1 classifies it 'unsupported' (no package.json / root
+// index.html), so processConnection forks here — AFTER repoPreflight + the RA1
+// getTree, BEFORE the unsupported skip. It reuses the EXISTING two-pass LLM pipeline
+// over Liquid (shopifyGraph + rankComponentsForConversion + callAIForFix, all
+// unchanged), sourcing theme files from GitHub blobs instead of the Admin API, and
+// STOPS at a labelled preview — NO branch, NO PR, NO write (SG1 scope; real PRs are
+// SG2). It is the GitHub twin of processShopifyConnection's analysis + preview tail.
+async function processGithubThemeConnection(
+  conn: any, run: any, subRow: any, octokit: any, repoTree: TreeEntry[],
+): Promise<void> {
+  const chatId: string | null = subRow?.telegram_chat_id || null
+
+  // 1. Read the conversion surface (templates/sections/snippets) from the tree.
+  await dbWrite(
+    supabase.from('agent_runs').update({ current_step: 'fetching_repo' }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_github_step_fetching_update',
+  )
+  const files = await readThemeFilesFromGithub(octokit, conn.github_repo_owner, conn.github_repo_name, repoTree)
+  if (files.length === 0) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'skipped_no_data', current_step: 'done', completed_at: new Date().toISOString(),
+        error_message: 'No conversion-relevant Liquid files (templates/sections/snippets) in the connected theme repo.',
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_github_no_files_update',
+    )
+    await notifyInsufficientData(chatId, 'no conversion-relevant theme files (templates / sections / snippets) were found in your connected theme repo')
+    return
+  }
+
+  // 2. Context — identical to processShopifyConnection (all subscription/analytics-
+  // derived; nothing GitHub-write-related).
+  const posthogApiKey = (await decryptSecret(conn.posthog_api_key)) || Deno.env.get('POSTHOG_API_KEY')!
+  const competitorUrls = await getCompetitorUrls(conn.subscription_id)
+  const [analytics, pageSpeed, previousFixes, legacyDna, competitorData, guardrails, businessDna] = await Promise.all([
+    getPostHogAnalytics(
+      posthogApiKey,
+      conn.posthog_project_id || Deno.env.get('POSTHOG_PROJECT_ID')!,
+      conn.posthog_host       || Deno.env.get('POSTHOG_HOST')!,
+      conn.posthog_host_filter,
+    ),
+    conn.website_url ? getPageSpeedScore(conn.website_url) : Promise.resolve(null),
+    getPreviousRuns(conn.subscription_id),
+    fetchBusinessDNA(conn.subscription_id),
+    competitorUrls.length > 0 ? fetchCompetitorData(competitorUrls) : Promise.resolve(null),
+    fetchBrandGuardrails(conn.subscription_id),
+    loadBusinessDNA(conn.subscription_id),
+  ])
+  const revenue = subRow?.stripe_revenue_connected
+    ? await getStripeRevenuePerVisitor(subRow.stripe_account_id || null, analytics)
+    : null
+  const dna = businessDna || legacyDna
+  // Liquid themes have no URL-page funnel map — honestly null (null-guarded downstream).
+  const funnelAnalysis = null
+
+  // Synthetic MapResult for the Liquid theme — same neutral defaults as the
+  // pure-Shopify path; 'shopify-liquid' is a real Framework union member.
+  const shopMap: MapResult = {
+    framework: 'shopify-liquid', isMonorepo: false, workspaces: [],
+    selectedWorkspacePath: '', siteRoot: '', entryPoints: [], tsConfigPaths: {},
+    cssApproach: 'unknown', tailwindConfigPath: null, globalStylesPath: null,
+    unsupportedReason: null, tsStrict: false, repoTree: [],
+  }
+
+  // Pass 1 — rank theme files (SAME ranker, SAME arg shape).
+  await dbWrite(
+    supabase.from('agent_runs').update({ current_step: 'ranking_components' }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_github_step_ranking_update',
+  )
+  const graph = shopifyGraph(files)
+  const rankerAnalyticsContext = (() => {
+    const a = analytics?.last7Days
+    if (!a) return 'No analytics data available.'
+    const top = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
+    return `Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate. Top pages: ${top || '—'}.`
+  })()
+  const rankerCallAI = (args: { system: string; user: string }) =>
+    callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
+  const rankerResult: RankerResult = await rankComponentsForConversion(
+    graph, rankerAnalyticsContext, rankerCallAI,
+    { framework: shopMap.framework, cssApproach: shopMap.cssApproach },
+  )
+  if (rankerResult.insufficient_graph) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'skipped_insufficient_graph', current_step: 'done', completed_at: new Date().toISOString(),
+        error_message: `Theme too sparse to rank (${rankerResult.node_count} file${rankerResult.node_count === 1 ? '' : 's'})`,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_github_insufficient_graph_update',
+    )
+    await notifyInsufficientData(chatId, `your theme had too few conversion-relevant files to analyze (${rankerResult.node_count})`)
+    return
+  }
+
+  // Pass 2 — single highest-impact fix (SAME callAIForFix, SAME arg order).
+  await dbWrite(
+    supabase.from('agent_runs').update({ current_step: 'finding_biggest_issue' }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_github_step_finding_update',
+  )
+  const deepContext = shopifyDeepContext(files, rankerResult)
+  const fixResult = await callAIForFix(
+    conn.subscription_id, shopMap, deepContext, rankerResult,
+    analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
+  )
+  if (fixResult.skip) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'skipped_low_confidence', current_step: 'done', completed_at: new Date().toISOString(),
+        error_message: `Pass 2 skipped: ${fixResult.reason || 'no confident #1 problem'}`,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_github_low_confidence_update',
+    )
+    await notifyInsufficientData(chatId, fixResult.reason || 'no confident high-impact fix this week')
+    return
+  }
+  // file_to_edit must be one of the ranked files — mirrors the GitHub/Shopify invariant.
+  const rankedPaths = rankerResult.ranked.map(r => r.path)
+  if (!fixResult.file_to_edit || !rankedPaths.includes(fixResult.file_to_edit)) {
+    throw new Error(`Shopify-GitHub: AI selected file outside ranked list: "${fixResult.file_to_edit}"`)
+  }
+
+  // 3. OPEN A REAL PR (SG2). The find/replace apply + theme validation + commit
+  // all happen INSIDE createPR — which is theme-aware here because shopMap.framework
+  // === 'shopify-liquid' (allows .liquid/.json and runs validateThemeSyntax). base =
+  // repo default branch; for the SG2 test repo connected==default==main, so that's
+  // correct (full connected-branch detection is SG3). createPR reuses
+  // validateFindReplaceSafe + isForbiddenEditPath unchanged.
+  await dbWrite(
+    supabase.from('agent_runs').update({ current_step: 'writing_fix' }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_github_step_writing_update',
+  )
+  // No ESLint/tsconfig in a theme repo — honest neutral lint info for the receipt.
+  const lintInfo: LintInfo = { eslint: false, eslintPath: null, tsStrict: false }
+  // Honest behavioral-signal note for the receipt (mirrors the GitHub path).
+  const engForReceipt = analytics?.last7Days?.engagement
+  const visitorsForReceipt = analytics?.last7Days?.uniqueVisitors
+  const behavioralNote = engForReceipt
+    ? `scroll depth on ${engForReceipt.scrollByPage?.length || 0} page(s) and ${engForReceipt.topClicks?.length || 0} clicked element(s) inspected (PostHog autocapture, last 7 days)`
+    : (typeof visitorsForReceipt === 'number' && visitorsForReceipt >= NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D
+        ? 'none returned for the last 7 days (autocapture may be disabled)'
+        : `not available — fewer than ${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions in the last 7 days`)
+  const prResult = await createPR(octokit, conn.github_repo_owner, conn.github_repo_name, fixResult, {
+    mapResult: shopMap, graph, rankerResult, deepContext, lintInfo, runId: run.id, behavioralNote,
+  })
+
+  // find_mismatch / find_ambiguous — same honest no-PR statuses as the GitHub path.
+  if (!prResult.ok) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: prResult.status, current_step: 'done',
+        completed_at: new Date().toISOString(), error_message: prResult.message,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_github_find_problem_update',
+    )
+    await notifyFindProblem(chatId, prResult.status, prResult)
+    return
+  }
+  const { pr, filesEdited } = prResult
+
+  // 4. APPROVAL — set the run to waiting_approval in the SAME shape the normal
+  // GitHub flow uses, then send the EXISTING YES/NO approval message. The existing
+  // Telegram webhook (handleApprove) then merges pr_number → Shopify syncs the
+  // connected branch into the connected theme. No parallel approval/merge flow.
+  await dbWrite(
+    supabase.from('agent_runs').update({ current_step: 'sending_notification' }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_github_step_notify_update',
+  )
+  if (!chatId) throw new Error(`No telegram_chat_id for subscription ${conn.subscription_id}`)
+  const messageId = await sendTelegramNotification(fixResult, pr, run.id, chatId)
+
+  const bounceBefore = analytics?.last7Days?.bounceRate ?? null
+  await dbWrite(
+    supabase.from('agent_runs').update({
+      status:              'waiting_approval',
+      current_step:        'done',
+      completed_at:        new Date().toISOString(),
+      analysis_result:     { ...fixResult, analytics_snapshot: analytics?.last7Days, revenue: revenue || null },
+      pr_number:           pr.number,
+      pr_url:              pr.html_url,
+      telegram_message_id: messageId || null,
+      bounce_rate_before:  bounceBefore,
+      pages_fixed:         filesEdited,
+      problem_description: fixResult.problem,
+    }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_github_waiting_approval_update',
+  )
+}
+
 async function processConnection(conn: any) {
   let run: any = null
 
@@ -3115,6 +3425,21 @@ async function processConnection(conn: any) {
     const mapResult: MapResult = await discoverFrameworkAndStructure(
       octokit, conn.github_repo_owner, conn.github_repo_name, preflight.defaultBranch,
     )
+
+    // ── Shopify-via-GitHub fork (SG1) ────────────────────────────────────────
+    // A GitHub-synced Shopify theme repo has no package.json / root index.html, so
+    // RA1 classifies it 'unsupported'. Detect the theme tree-shape (from the tree
+    // RA1 already fetched) and fork into the Liquid PREVIEW path BEFORE the
+    // unsupported skip fires — reusing the same two-pass LLM analysis as the
+    // pure-Shopify path, sourced from GitHub blobs. Preview only (no PR/write);
+    // any throw propagates to the shared catch below. Forking here (before
+    // maybeRunSnippetSetup) also keeps the React-oriented snippet flow away from
+    // theme repos.
+    if (isShopifyThemeRepo(mapResult.repoTree)) {
+      await processGithubThemeConnection(conn, run, subRow, octokit, mapResult.repoTree)
+      return
+    }
+
     if (mapResult.framework === 'unsupported') {
       const reason = mapResult.unsupportedReason || 'unsupported repository shape'
       console.warn(`[repo-mapper] run=${run.id} sub=${conn.subscription_id}: ${reason}`)

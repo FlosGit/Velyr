@@ -570,3 +570,26 @@ export function detectLintInfo(mapResult: MapResult): LintInfo {
     .find(p => treeHasFile(mapResult.repoTree, p)) || null
   return { eslint: eslintPath !== null, eslintPath, tsStrict: mapResult.tsStrict }
 }
+
+// ─── SHOPIFY-VIA-GITHUB THEME DETECTION (SG1) ────────────────────────────────
+// A Shopify theme synced to GitHub (via Shopify's official GitHub integration)
+// lives at the repo ROOT as Liquid/JSON — no package.json, no root index.html —
+// so classifyFramework returns 'unsupported' and processConnection would skip it.
+// This detects the theme tree-shape from the ALREADY-FETCHED repoTree (no extra
+// GitHub call) so processConnection can fork into the Liquid preview path BEFORE
+// the 'unsupported' skip fires.
+//
+// Signal = a strong Shopify-specific root marker (layout/theme.liquid — the
+// mandatory theme layout — or config/settings_schema.json — the theme settings
+// contract) AND the conversion-surface directory shape (templates/ + sections/ +
+// snippets/). Requiring BOTH a marker and all three dirs guards a JS app that
+// merely happens to have a `sections/` folder from being misread as a theme.
+export function isShopifyThemeRepo(repoTree: TreeEntry[]): boolean {
+  const hasStrongMarker =
+    treeHasFile(repoTree, 'layout/theme.liquid') ||
+    treeHasFile(repoTree, 'config/settings_schema.json')
+  if (!hasStrongMarker) return false
+  return treeHasDir(repoTree, 'templates') &&
+         treeHasDir(repoTree, 'sections') &&
+         treeHasDir(repoTree, 'snippets')
+}
