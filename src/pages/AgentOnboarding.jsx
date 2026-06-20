@@ -53,6 +53,24 @@ const CSS = `
   }
   .ob-btn-ghost:hover { border-color: rgba(28,25,23,0.3); background: rgba(28,25,23,0.03); }
   .req-item { transition: all .3s ease; }
+  .ob-shopify-note { margin: 0 0 24px; }
+  .ob-shopify-note summary {
+    list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+    font-family: 'Jost', sans-serif; font-weight: 400; font-size: 13px; color: #2a5c45;
+    padding: 12px 14px; border: 1px solid rgba(42,92,69,0.18); border-radius: 12px;
+    background: rgba(42,92,69,0.04); transition: background .2s, border-color .2s;
+  }
+  .ob-shopify-note summary::-webkit-details-marker { display: none; }
+  .ob-shopify-note summary:hover { background: rgba(42,92,69,0.07); border-color: rgba(42,92,69,0.3); }
+  .ob-shopify-note summary .ob-chev { font-size: 10px; opacity: .65; transition: transform .2s; }
+  .ob-shopify-note[open] summary .ob-chev { transform: rotate(90deg); }
+  .ob-shopify-note[open] summary { border-radius: 12px 12px 0 0; }
+  .ob-shopify-body {
+    border: 1px solid rgba(42,92,69,0.18); border-top: none; border-radius: 0 0 12px 12px;
+    padding: 14px 16px; background: #fff;
+    font-family: 'Jost', sans-serif; font-weight: 300; font-size: 13px; color: #6b6460; line-height: 1.7;
+  }
+  .ob-shopify-body ol { margin: 0 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
   .code-display {
     font-family: 'DM Mono', monospace;
     font-size: 22px;
@@ -145,9 +163,9 @@ function Step0({ onNext }) {
       fixText: 'Set up auto-deploy (free tiers available)', fixUrl: 'https://vercel.com/new',
     },
     {
-      key: 'react', icon: '⚛️', title: 'React, Next.js, or Vite project',
-      desc: 'The agent writes React/JSX code. Shopify, Wix, Squarespace and similar builders are not supported.',
-      fixText: null, notSupportedText: 'Shopify, Wix, Squarespace, Webflow are not supported',
+      key: 'react', icon: '🧩', title: 'A supported project type',
+      desc: 'React, Next.js, or Vite — or a Shopify theme connected to GitHub. The agent proposes fixes as pull requests against that repo.',
+      fixText: null, notSupportedText: 'No-code stores without GitHub sync (plain Shopify, Wix, Squarespace, Webflow) aren’t supported — on Shopify? See the note below.',
     },
     {
       key: 'admin', icon: '🔑', title: 'Admin access to the repo',
@@ -219,6 +237,28 @@ function Step0({ onNext }) {
           )
         })}
       </div>
+
+      <details className="ob-shopify-note">
+        <summary>
+          <span style={{ fontSize: 15 }}>🛍️</span>
+          <span style={{ flex: 1 }}>On Shopify? You can still use Velyr if your theme is connected to GitHub.</span>
+          <span className="ob-chev">▶</span>
+        </summary>
+        <div className="ob-shopify-body">
+          Velyr ships its conversion fixes as GitHub pull requests. If your Shopify theme is synced to a GitHub repo, those fixes flow straight back into your live theme once you approve them — no plugins, no editing theme code by hand.
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+            <p style={{ fontWeight: 400, color: C.text, marginBottom: 8 }}>Connect your theme to GitHub (one time):</p>
+            <ol>
+              <li>Shopify admin → <strong style={{ color: C.text, fontWeight: 400 }}>Online Store → Themes</strong></li>
+              <li><strong style={{ color: C.text, fontWeight: 400 }}>Add theme → Connect from GitHub</strong></li>
+              <li>Authorize GitHub and choose the repo &amp; branch Shopify should sync</li>
+            </ol>
+            <p style={{ marginTop: 10 }}>
+              Once it’s synced, check “Yes” above and continue — you’ll pick that repo in the GitHub step.
+            </p>
+          </div>
+        </div>
+      </details>
 
       {allChecked && (
         <div style={{ background: 'rgba(42,92,69,0.07)', border: '1px solid rgba(42,92,69,0.25)', borderRadius: 10, padding: '13px 16px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
