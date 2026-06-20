@@ -726,6 +726,64 @@ async function handleRemoveCompetitor(url, chatId) {
   await sendMessage(chatId, `🗑️ <b>Competitor removed.</b> The agent will no longer scan that URL.`)
 }
 
+// ─── SET CONNECTED BRANCH (SG3b) ─────────────────────────────────────────────
+// Shopify-via-GitHub: tell Velyr which branch Shopify syncs to the live theme, so
+// theme PRs target it (a merged PR on the wrong branch silently never syncs). NULL
+// (the default) = the repo's default branch. `branchName === null` clears the
+// override. We validate the branch EXISTS in the repo before saving so a typo can't
+// silently re-break sync. Chat-scoped via getChatAuthorizedSubIds (SG3a) — safe on
+// shared-chat test setups: we only write a connection whose repo actually contains
+// the branch (so a non-theme connection sharing the chat is left untouched unless it
+// genuinely has that branch, where the column is harmlessly ignored for non-theme runs).
+async function handleSetBranch(branchName, chatId) {
+  const subIds = await getChatAuthorizedSubIds(chatId)
+  if (subIds.length === 0) return notifyInactive(chatId)
+
+  const { data: conns } = await supabase
+    .from('agent_connections')
+    .select('subscription_id, github_installation_id, github_repo_owner, github_repo_name')
+    .in('subscription_id', subIds)
+
+  if (!conns || conns.length === 0) {
+    return sendMessage(chatId, '❌ No connected repo found for your account.')
+  }
+
+  // Clear → back to the repo default branch.
+  if (!branchName) {
+    await supabase.from('agent_connections')
+      .update({ shopify_connected_branch: null })
+      .in('subscription_id', subIds)
+    return sendMessage(chatId, `✅ <b>Cleared.</b> Fixes will target your repo's default branch.`)
+  }
+
+  const branch = branchName.trim()
+  const written = []
+  const skipped = []
+  for (const c of conns) {
+    if (!c.github_installation_id || !c.github_repo_owner || !c.github_repo_name) continue
+    const repoLabel = `${c.github_repo_owner}/${c.github_repo_name}`
+    try {
+      const octokit = await getOctokit(c.github_installation_id)
+      // Typo guard: getBranch 404s if the branch doesn't exist → we do NOT save.
+      await octokit.rest.repos.getBranch({ owner: c.github_repo_owner, repo: c.github_repo_name, branch })
+      await supabase.from('agent_connections')
+        .update({ shopify_connected_branch: branch })
+        .eq('subscription_id', c.subscription_id)
+      written.push(repoLabel)
+    } catch (err) {
+      if (err?.status === 404) skipped.push(`${repoLabel} (no branch "${branch}")`)
+      else skipped.push(`${repoLabel} (${err?.message || 'error'})`)
+    }
+  }
+
+  if (written.length === 0) {
+    return sendMessage(chatId, `❌ Branch <code>${escapeHtml(branch)}</code> not found in your connected repo${conns.length > 1 ? 's' : ''}. Nothing was changed — check the name and try again.`)
+  }
+  let msg = `✅ Fixes will now target branch <code>${escapeHtml(branch)}</code> (${written.map(escapeHtml).join(', ')}).`
+  if (skipped.length) msg += `\n\n⚠️ Skipped: ${skipped.map(escapeHtml).join('; ')}`
+  return sendMessage(chatId, msg)
+}
+
 // ─── MAIN HANDLER ─────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   // ── Webhook authentication ──────────────────────────────────────────────
@@ -840,6 +898,14 @@ export default async function handler(req, res) {
         await sendMessage(chatId, `❓ Unknown competitor command.\n\n<b>competitor add &lt;url&gt;</b> — track a competitor\n<b>competitor remove &lt;url&gt;</b> — stop tracking`)
       }
 
+    } else if (cmd === 'set' && parts[1]?.toLowerCase() === 'branch') {
+      // SG3b: `set branch <name>` → theme fixes target that branch; `set branch`
+      // with no name clears the override back to the repo default branch.
+      await handleSetBranch(parts[2] || null, chatId)
+
+    } else if (cmd === 'unset' && parts[1]?.toLowerCase() === 'branch') {
+      await handleSetBranch(null, chatId)
+
     } else {
       await sendMessage(
         chatId,
@@ -853,7 +919,9 @@ export default async function handler(req, res) {
         `<b>dna</b> — view your Business DNA\n` +
         `<b>status</b> — last runs &amp; tracked competitors\n` +
         `<b>competitor add &lt;url&gt;</b> — track a competitor site\n` +
-        `<b>competitor remove &lt;url&gt;</b> — stop tracking`
+        `<b>competitor remove &lt;url&gt;</b> — stop tracking\n` +
+        `<b>set branch &lt;name&gt;</b> — Shopify theme: branch fixes target (else default)\n` +
+        `<b>unset branch</b> — clear it back to the default branch`
       )
     }
 

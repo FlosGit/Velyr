@@ -935,15 +935,25 @@ async function handleRollbackCheck(res) {
           }
 
           if (agentCommit) {
+            // SG3b: target the branch Shopify syncs to the live theme. Only a THEME
+            // run honors the connected-branch override (mirrors createPR's isThemeRun
+            // guard) so non-theme runs keep targeting the default branch exactly as
+            // today. Theme-ness is detected from the edited file living in the Shopify
+            // conversion surface (templates/sections/snippets *.liquid|*.json) — robust
+            // and independent of the best-effort discovered_framework column; non-theme
+            // runs never edit these paths. The branch-cut, current-file read, AND PR
+            // base all use the resolved branch, or a merged rollback won't sync.
             const defaultBranch = await getDefaultBranch(octokit, owner, repo)
-            const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` })
+            const isThemeRun    = /^(templates|sections|snippets)\/.+\.(liquid|json)$/i.test(run.analysis_result?.file_to_edit || '')
+            const baseBranch    = (isThemeRun && conn?.shopify_connected_branch) ? conn.shopify_connected_branch : defaultBranch
+            const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${baseBranch}` })
             const branchName    = `agent/rollback-${run.id.slice(0, 8)}`
             await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: ref.object.sha })
 
             const parentSha = agentCommit.parents[0]?.sha
             if (parentSha && run.analysis_result?.file_to_edit) {
               const { data: originalFile } = await octokit.rest.repos.getContent({ owner, repo, path: run.analysis_result.file_to_edit, ref: parentSha })
-              const { data: currentFile  } = await octokit.rest.repos.getContent({ owner, repo, path: run.analysis_result.file_to_edit })
+              const { data: currentFile  } = await octokit.rest.repos.getContent({ owner, repo, path: run.analysis_result.file_to_edit, ref: baseBranch })
 
               await octokit.rest.repos.createOrUpdateFileContents({
                 owner, repo, path: run.analysis_result.file_to_edit,
@@ -955,7 +965,7 @@ async function handleRollbackCheck(res) {
                 owner, repo,
                 title: `🔄 Auto-Rollback: ${run.analysis_result?.problem}`,
                 body: `## Automatic Rollback (awaiting approval)\n\n_**Site-wide** bounce rate rose by **+${bounceDelta}pp** in the 48h after this PR merged (correlation, not proven causation — the metric covers every page, not just \`${run.analysis_result?.file_to_edit || 'the edited file'}\`)._\n\n- Site-wide bounce before merge: ${bounceBefore}%\n- Site-wide bounce after merge:  ${bounceAfter}%\n- Sessions sampled per side: ≥ ${Number(process.env.MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION || '100')}\n\n_Reply *YES* in Telegram to merge this rollback, *NO* to keep the change live and accept the bounce trend._`,
-                head: branchName, base: defaultBranch,
+                head: branchName, base: baseBranch,
               })
               // Stage 4.8: do NOT auto-merge. Mark the run waiting_approval and
               // let the user decide. The standard YES/NO flow in

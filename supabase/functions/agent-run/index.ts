@@ -2747,6 +2747,9 @@ interface ReceiptCtx {
   lintInfo: LintInfo
   runId: string
   behavioralNote: string   // honest one-liner: which behavioral signals (scroll/clicks) were inspected, or why not
+  // SG3b: for a theme run, the branch Shopify syncs to the live theme. null/undefined
+  // (all non-theme runs, and theme runs with no override) → use the repo default branch.
+  connectedBranch?: string | null
 }
 
 async function createPR(octokit: any, owner: string, repo: string, fixResult: FixResult, receipt: ReceiptCtx): Promise<CreatePRResult> {
@@ -2782,9 +2785,17 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
     throw new Error(`AI selected a non-verifiable file type ".${editExt}" (${filePath}); only ${allowedEditExtensions.join('/')} edits are syntax-checked before commit. Refusing to open an unverified PR.`)
   }
 
-  const defaultBranch = await getDefaultBranch(octokit, owner, repo)
+  // SG3b: a theme run must target the branch Shopify actually syncs to its live
+  // theme (receipt.connectedBranch), not blindly the GitHub default. When unset (the
+  // common case, and EVERY non-theme run) fall back to the repo default branch. This
+  // one resolved branch governs all three GitHub touch-points below — the file
+  // re-fetch + find-guard (the live theme content lives on this branch), the branch
+  // cut, AND the PR base — which must all agree or a merged PR won't sync.
+  const baseBranch = (isThemeRun && receipt.connectedBranch)
+    ? receipt.connectedBranch
+    : await getDefaultBranch(octokit, owner, repo)
   // Re-fetch the file right before write (the find guard runs against THIS).
-  const { data: fileData } = await octokit.rest.repos.getContent({ owner, repo, path: filePath, ref: defaultBranch })
+  const { data: fileData } = await octokit.rest.repos.getContent({ owner, repo, path: filePath, ref: baseBranch })
   const currentContent = base64Decode(fileData.content)
 
   // Whitespace-normalized find guard (Stage RA5 #4 / RA6).
@@ -2812,7 +2823,7 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
   }
 
   // Only now create the branch + commit (validation passed → no orphan branch).
-  const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` })
+  const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${baseBranch}` })
   const branchName = `agent/fix-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
   await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: ref.object.sha })
   await octokit.rest.repos.createOrUpdateFileContents({
@@ -2838,7 +2849,7 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
   })
 
   const { data: pr } = await octokit.rest.pulls.create({
-    owner, repo, title: `🤖 Agent: ${fixResult.problem}`, body: prBody, head: branchName, base: defaultBranch,
+    owner, repo, title: `🤖 Agent: ${fixResult.problem}`, body: prBody, head: branchName, base: baseBranch,
   })
   return { ok: true, pr, filesEdited: [filePath] }
 }
@@ -3285,6 +3296,8 @@ async function processGithubThemeConnection(
         : `not available — fewer than ${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions in the last 7 days`)
   const prResult = await createPR(octokit, conn.github_repo_owner, conn.github_repo_name, fixResult, {
     mapResult: shopMap, graph, rankerResult, deepContext, lintInfo, runId: run.id, behavioralNote,
+    // SG3b: target the Shopify-connected branch (null → repo default).
+    connectedBranch: conn.shopify_connected_branch ?? null,
   })
 
   // find_mismatch / find_ambiguous — same honest no-PR statuses as the GitHub path.
