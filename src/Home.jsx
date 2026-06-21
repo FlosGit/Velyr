@@ -64,6 +64,24 @@ const CSS = `
      delay and stays snappy on hover. */
   .lift { transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s cubic-bezier(.4,0,.2,1), border-color .25s ease; }
   .lift:hover { transform: translateY(-3px); box-shadow: 0 16px 40px rgba(28,25,23,0.09); border-color: rgba(28,25,23,0.16); }
+  .sl-shopify { margin-top: 14px; }
+  .sl-shopify summary {
+    list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+    font-family: 'Jost', sans-serif; font-weight: 400; font-size: 13.5px; color: #2a5c45;
+    padding: 13px 16px; border: 1px solid rgba(42,92,69,0.2); border-radius: 12px;
+    background: rgba(42,92,69,0.04); transition: background .2s, border-color .2s;
+  }
+  .sl-shopify summary::-webkit-details-marker { display: none; }
+  .sl-shopify summary:hover { background: rgba(42,92,69,0.07); border-color: rgba(42,92,69,0.32); }
+  .sl-shopify summary .sl-chev { font-size: 10px; opacity: .6; transition: transform .2s; margin-left: auto; }
+  .sl-shopify[open] summary .sl-chev { transform: rotate(90deg); }
+  .sl-shopify[open] summary { border-radius: 12px 12px 0 0; }
+  .sl-shopify-body {
+    border: 1px solid rgba(42,92,69,0.2); border-top: none; border-radius: 0 0 12px 12px;
+    padding: 16px 18px; background: #fff;
+    font-family: 'Jost', sans-serif; font-weight: 300; font-size: 13px; color: #6b6460; line-height: 1.72;
+  }
+  .sl-shopify-body ol { margin: 10px 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 
   /* Dashboard mock: fade/rise the tab content on switch (keyed remount). */
   @keyframes tabIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
@@ -615,7 +633,7 @@ function GrowthAgentSection({ navigate }) {
             A semi-autonomous AI agent that analyses your analytics, writes conversion fixes, and deploys them — with your approval. Every week, automatically — or on demand, the moment you want it.
           </p>
           <p style={{ fontSize:12, color:C.textLight, fontWeight:300, marginTop:12, letterSpacing:'.01em' }}>
-            Requires a React, Next.js, or Vite site on GitHub that auto-deploys — Vercel, Netlify, Render, Railway or Cloudflare Pages.
+            Requires a React, Next.js, or Vite site on GitHub that auto-deploys — Vercel, Netlify, Render, Railway or Cloudflare Pages. (On Shopify? Works via GitHub theme sync — see below.)
           </p>
         </div>
 
@@ -1368,7 +1386,7 @@ function AgentRequirements() {
   const requirements = [
     { icon:'git',      title:'GitHub repo',             desc:'Your website code lives in a GitHub repository the agent can read and open PRs against.' },
     { icon:'deploy',   title:'Auto-deploy from Git',    desc:'Your repo auto-deploys on merge — Vercel, Netlify, Render, Railway or Cloudflare Pages — so approved fixes go live after you reply YES.' },
-    { icon:'code',     title:'React, Next.js or Vite',  desc:'The agent writes React/JSX code. Plain HTML or other frameworks are not supported.' },
+    { icon:'code',     title:'React, Next.js or Vite',  desc:'The agent writes React/JSX code — or Liquid, for a Shopify theme synced to GitHub. Plain HTML and no-code builders aren’t supported.' },
     { icon:'key',      title:'Admin access',             desc:'You can install GitHub Apps on the repo and merge Pull Requests.' },
     { icon:'send',     title:'Telegram account',         desc:'Weekly approvals arrive on Telegram — reply YES or NO to deploy or skip each fix.' },
   ]
@@ -1421,9 +1439,31 @@ function AgentRequirements() {
         }}>
           <span style={{ fontSize:11, letterSpacing:'.1em', textTransform:'uppercase', color:C.red, fontWeight:500, flexShrink:0 }}>✕ Not supported</span>
           <span style={{ fontSize:13, color:C.textMuted, fontWeight:300, lineHeight:1.55, flex:1, minWidth:240 }}>
-            <strong style={{ color:C.text, fontWeight:500 }}>Shopify · Wix · Squarespace · Webflow</strong> — these site builders don't expose source code the agent can edit. If your site uses one of these, the Growth Agent isn't a fit yet.
+            <strong style={{ color:C.text, fontWeight:500 }}>Wix · Squarespace · Webflow</strong> — these site builders don't expose source code the agent can edit. If your site uses one of these, the Growth Agent isn't a fit yet.
           </span>
         </div>
+
+        {/* Shopify is supported via GitHub theme sync — a discreet, opt-in detail (the
+            agent opens PRs against the synced theme repo, Shopify syncs them live). Kept
+            collapsed so non-Shopify visitors see one extra line they can ignore. */}
+        <details className="sl-shopify">
+          <summary>
+            <span style={{ fontSize:15 }}>🛍️</span>
+            <span style={{ flex:1 }}>On Shopify? Velyr works if your theme is synced to GitHub.</span>
+            <span className="sl-chev">▶</span>
+          </summary>
+          <div className="sl-shopify-body">
+            If your Shopify theme is synced to a GitHub repo (via Shopify’s official GitHub integration), Velyr treats it like any other repo: each conversion fix arrives as a <strong style={{ color:C.text, fontWeight:500 }}>pull request</strong> against your theme, and once you approve it, Shopify syncs the change to your live theme. No plugins, no editing theme code by hand.
+            <div style={{ marginTop:12, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
+              <p style={{ fontWeight:400, color:C.text, margin:0 }}>Requires Shopify’s GitHub theme sync — a one-time setup:</p>
+              <ol>
+                <li>Shopify admin → <strong style={{ color:C.text, fontWeight:400 }}>Online Store → Themes</strong></li>
+                <li><strong style={{ color:C.text, fontWeight:400 }}>Add theme → Connect from GitHub</strong></li>
+                <li>Authorize GitHub and pick the repo &amp; branch Shopify should sync</li>
+              </ol>
+            </div>
+          </div>
+        </details>
       </div>
     </section>
   )
