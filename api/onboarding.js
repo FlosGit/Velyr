@@ -21,6 +21,8 @@
 
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
+import { createAppAuth } from '@octokit/auth-app'
+import { Octokit } from '@octokit/rest'
 import { encryptSecret } from './_lib/secret-crypto.js'
 import { verifySessionCookie } from './github/_oauth-state.js'
 
@@ -273,9 +275,20 @@ async function handleFinalize(req, res) {
 
   const {
     subscriptionId, websiteUrl, posthogApiKey, posthogProjectId,
-    posthogHost, telegramChatId, verificationCodeId, hostingProvider,
+    posthogHost, telegramChatId, verificationCodeId, hostingProvider, connectedBranch,
   } = req.body || {}
   if (!subscriptionId) return res.status(400).json({ error: 'Missing subscriptionId.' })
+
+  // SO2: optional Shopify-connected-branch override (theme repos only). Absent/empty
+  // → NULL (= "use the repo default branch"), exactly as today for EVERY non-theme
+  // connection (they never send it). Bound, not blindly trusted: must be a non-empty
+  // string (the client picks from the server-fetched list_branches set, and the
+  // Telegram `set branch` command remains the getBranch-validated post-onboarding
+  // override). Capped to a sane length.
+  const connectedBranchClean =
+    (typeof connectedBranch === 'string' && connectedBranch.trim())
+      ? connectedBranch.trim().slice(0, 255)
+      : null
 
   // Defensive validation: an absent/invalid value falls back to 'vercel' (the DB
   // default + historical assumption) so a stale client or crafted body can never
@@ -388,6 +401,7 @@ async function handleFinalize(req, res) {
       verification_code_id:  verificationCodeId ?? null,
       verified_at:           new Date().toISOString(),
       hosting_provider:      provider,
+      shopify_connected_branch: connectedBranchClean,
     })
     .eq('subscription_id', subscriptionId)
   if (updErr) {
@@ -635,6 +649,91 @@ async function handleVerifyTelegramCode(req, res) {
   return res.status(200).json({ codeId: row.id, chatId: row.chat_id, telegramUsername: row.telegram_username })
 }
 
+// ─── action=list_branches (POST) ─────────────────────────────────────────────
+// SO2: list the connected repo's branches so onboarding's theme step can let a
+// Shopify-via-GitHub merchant confirm/pick the branch Shopify syncs to the live
+// theme (→ agent_connections.shopify_connected_branch, added in SG3b). Bound to the
+// caller's OWN connection by subscriptionId (ownership re-checked exactly like
+// finalize) — the client never supplies a repo identity, so this can't enumerate
+// arbitrary repos, and it doesn't depend on the handoff cookie (already consumed at
+// ?action=complete). Uses the SAME installation app-auth as api/github/validate-repo.js.
+// Best-effort: every failure path returns a soft 200 with an empty list so the UI
+// silently falls back to "use the repo default branch" and onboarding never stalls.
+async function handleListBranches(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+  if (!SERVICE_ROLE_KEY) {
+    console.error('onboarding/list_branches: SUPABASE_SERVICE_ROLE_KEY not configured')
+    return res.status(500).json({ error: 'Onboarding is not configured. Contact support.' })
+  }
+
+  const auth = await getUser(req)
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' })
+
+  const { subscriptionId } = req.body || {}
+  if (!subscriptionId) return res.status(400).json({ error: 'Missing subscriptionId.' })
+
+  // Ownership: the subscription must belong to the caller before we read its
+  // connection or mint a GitHub token for it.
+  const { data: sub, error: subErr } = await serviceClient
+    .from('agent_subscriptions')
+    .select('auth_user_id')
+    .eq('id', subscriptionId)
+    .maybeSingle()
+  if (subErr) {
+    console.error('onboarding/list_branches: subscription lookup failed:', subErr.message)
+    return res.status(500).json({ error: 'Could not list branches.' })
+  }
+  if (!sub || sub.auth_user_id !== auth.user.id) {
+    return res.status(403).json({ error: 'subscription does not belong to authenticated user' })
+  }
+
+  const { data: conn, error: connErr } = await serviceClient
+    .from('agent_connections')
+    .select('github_installation_id, github_repo_owner, github_repo_name')
+    .eq('subscription_id', subscriptionId)
+    .maybeSingle()
+  if (connErr) {
+    console.error('onboarding/list_branches: connection lookup failed:', connErr.message)
+    return res.status(500).json({ error: 'Could not list branches.' })
+  }
+  // GitHub step not completed yet (or not a GitHub connection) — soft empty.
+  if (!conn?.github_installation_id || !conn?.github_repo_owner || !conn?.github_repo_name) {
+    return res.status(200).json({ branches: [], defaultBranch: null })
+  }
+
+  try {
+    const appAuth = createAppAuth({
+      appId:          process.env.GITHUB_APP_ID,
+      privateKey:     Buffer.from(process.env.GITHUB_APP_PRIVATE_KEY_BASE64, 'base64').toString('utf8'),
+      installationId: parseInt(conn.github_installation_id),
+    })
+    const { token } = await appAuth({ type: 'installation' })
+    const octokit = new Octokit({ auth: token })
+
+    const owner = conn.github_repo_owner
+    const repo  = conn.github_repo_name
+    const { data: repoData }   = await octokit.repos.get({ owner, repo })
+    const defaultBranch        = repoData.default_branch || null
+    // One page of up to 100 — themes have a handful of branches; no pagination needed.
+    const { data: branchData } = await octokit.repos.listBranches({ owner, repo, per_page: 100 })
+    const names = (branchData || []).map(b => b.name).filter(Boolean)
+
+    // Default first, then the rest — so the UI can default the selection to it.
+    const ordered = defaultBranch
+      ? [defaultBranch, ...names.filter(b => b !== defaultBranch)]
+      : names
+
+    return res.status(200).json({ branches: ordered, defaultBranch })
+  } catch (err) {
+    // Soft failure: never block onboarding on this — the UI falls back to default (NULL).
+    console.error('onboarding/list_branches: GitHub call failed:', err?.message)
+    return res.status(200).json({ branches: [], defaultBranch: null })
+  }
+}
+
 // ─── dispatcher ──────────────────────────────────────────────────────────────
 // No top-level method guard — snapshot is GET, the rest are POST; each guards
 // its own method internally.
@@ -652,5 +751,6 @@ export default async function handler(req, res) {
   if (action === 'telegram_start_token') return handleTelegramStartToken(req, res)
   if (action === 'discover_structure')   return handleDiscoverStructure(req, res)
   if (action === 'verify_telegram_code') return handleVerifyTelegramCode(req, res)
+  if (action === 'list_branches')        return handleListBranches(req, res)
   return res.status(400).json({ error: 'Unknown action' })
 }

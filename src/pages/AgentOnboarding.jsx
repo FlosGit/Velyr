@@ -622,6 +622,37 @@ function StepPlatform({ onNext, onBack, subscriptionId }) {
     return () => { cancelled = true }
   }, [subscriptionId])
 
+  // SO2: once it's a theme repo, fetch the repo's branches so the merchant can
+  // confirm/override which branch Shopify syncs to the live theme (→ shopify_connected_
+  // branch). Bound to their own connection server-side (subscriptionId). Non-blocking +
+  // soft: on any failure the selector just doesn't show and finalize writes NULL
+  // (= repo default branch). Runs only for theme repos → zero effect on non-theme flow.
+  const [branches, setBranches]           = useState([])
+  const [defaultBranch, setDefaultBranch] = useState(null)
+  const [branch, setBranch]               = useState('')
+  useEffect(() => {
+    if (!themeDetected || !subscriptionId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
+        const res = await fetch('/api/onboarding?action=list_branches', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ subscriptionId }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (cancelled || !res.ok) return
+        const list = Array.isArray(json.branches) ? json.branches : []
+        setBranches(list)
+        setDefaultBranch(json.defaultBranch || null)
+        setBranch(json.defaultBranch || list[0] || '')
+      } catch { /* non-fatal — selector won't show; finalize writes NULL (repo default) */ }
+    })()
+    return () => { cancelled = true }
+  }, [themeDetected, subscriptionId])
+
   if (themeDetected) {
     return (
       <div>
@@ -639,9 +670,29 @@ function StepPlatform({ onNext, onBack, subscriptionId }) {
             <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>
           </span>
         </div>
+
+        {/* SO2: confirm/override the branch Shopify syncs. Only when the repo has >1
+            branch — a single-branch repo has nothing to choose, so we silently use the
+            default (finalize writes NULL). */}
+        {branches.length > 1 && (
+          <div style={{ marginBottom: 24 }}>
+            <label htmlFor="ob-branch" style={{ display: 'block', fontSize: 13, fontWeight: 400, color: C.text, marginBottom: 8 }}>
+              Which branch does Shopify sync to your live theme?
+            </label>
+            <select id="ob-branch" className="ob-inp" value={branch} onChange={e => setBranch(e.target.value)} style={{ cursor: 'pointer' }}>
+              {branches.map(b => (
+                <option key={b} value={b}>{b}{b === defaultBranch ? ' (repo default)' : ''}</option>
+              ))}
+            </select>
+            <p style={{ fontSize: 12, color: C.textLight, fontWeight: 300, lineHeight: 1.6, marginTop: 8 }}>
+              Defaults to your repo’s default branch — change it only if Shopify syncs a different one. You can update this anytime in Telegram with <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: C.accent }}>set branch</span>.
+            </p>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
-          <button className="ob-btn" onClick={() => onNext({})}>Continue →</button>
+          <button className="ob-btn" onClick={() => onNext({ connectedBranch: (branch && branch !== defaultBranch) ? branch : null })}>Continue →</button>
         </div>
       </div>
     )
@@ -1136,6 +1187,10 @@ export default function AgentOnboarding({ navigate }) {
           // Stage 4.13 binding: finalize validates this code matches the chat,
           // marks it used, and writes the FK — all atomically (OA6).
           verificationCodeId: allData.codeId,
+          // SO2: only present for a theme repo whose merchant picked a non-default
+          // branch. Absent for every non-theme connection (and theme-on-default) →
+          // finalize writes shopify_connected_branch NULL, exactly as before.
+          ...(allData.connectedBranch ? { connectedBranch: allData.connectedBranch } : {}),
         }),
       })
       const finalizeJson = await finalizeRes.json().catch(() => ({}))
