@@ -2041,6 +2041,63 @@ async function writeStructurePreview(subscriptionId: string, fields: Record<stri
   if (error) slog('warn', 'structure_preview_write_failed', { subscriptionId, error: error.message })
 }
 
+// SO1b: theme-repo node/edge set for the onboarding finale. A GitHub-synced
+// Shopify theme classifies as RA1 'unsupported' (no package.json / root index.html),
+// so the normal preview node-build (PREVIEW_SOURCE_RE = JS/Vue/Svelte/Astro only)
+// would yield ZERO nodes and the finale would skip. We instead enumerate the theme
+// conversion surface (SHOPIFY_KEEP_RE = templates/sections/snippets — the SAME filter
+// readThemeFilesFromGithub uses) and emit the SAME node/edge shape the normal success
+// path writes (id/componentName/depth/size/rank/rankReason + {source,target,kind:
+// 'structural'}), so site_structure_preview is a SUCCESS row the existing animation
+// renders. One representative file per directory is an entry point (depth 0 → the hub
+// spokes buildNetworkData draws); the rest hang off their directory rep.
+function buildThemePreviewGraph(repoTree: TreeEntry[]): {
+  nodes: Array<Record<string, unknown>>; edges: Array<{ source: string; target: string; kind: string }>; truncated: boolean
+} {
+  const all = repoTree
+    .filter(e => e.type === 'blob' && SHOPIFY_KEEP_RE.test(e.path))
+    .map(e => e.path)
+
+  let truncated = false
+  let chosen = all
+  if (all.length > PREVIEW_NODE_CAP) {
+    truncated = true
+    // shallowest first (most meaningful), matching the normal preview's cap policy.
+    chosen = [...all].sort((a, b) => a.split('/').length - b.split('/').length).slice(0, PREVIEW_NODE_CAP)
+  }
+  const chosenSet = new Set(chosen)
+
+  // One representative per directory (prefer a "lead"-looking theme file).
+  const isLead = (p: string) => /\/(theme|index|main|base|header|layout)\b/i.test('/' + p.toLowerCase())
+  const repOf = new Map<string, string>()
+  for (const p of chosen) {
+    const d = previewDir(p)
+    const cur = repOf.get(d)
+    if (!cur || (isLead(p) && !isLead(cur))) repOf.set(d, p)
+  }
+  const reps = new Set(repOf.values())
+
+  const nodes = chosen.map(path => ({
+    id:            path,
+    componentName: null,                    // RA1-equivalent: frontend falls back to filename
+    depth:         reps.has(path) ? 0 : 1,  // dir reps are entry points → hub spokes
+    size:          0,
+    rank:          null,
+    rankReason:    null,
+  }))
+
+  const edges: Array<{ source: string; target: string; kind: string }> = []
+  const seen = new Set<string>()
+  for (const p of chosen) {
+    const rep = repOf.get(previewDir(p))
+    if (rep && rep !== p && chosenSet.has(rep)) {
+      const k = `${p}>${rep}`
+      if (!seen.has(k)) { seen.add(k); edges.push({ source: p, target: rep, kind: 'structural' }) }
+    }
+  }
+  return { nodes, edges, truncated }
+}
+
 async function discoverStructurePreview(subscriptionId: string): Promise<any> {
   try {
     if (!subscriptionId) throw new Error('subscriptionId required')
@@ -2058,6 +2115,38 @@ async function discoverStructurePreview(subscriptionId: string): Promise<any> {
     const mapResult: MapResult = await discoverFrameworkAndStructure(
       octokit, conn.github_repo_owner, conn.github_repo_name, preflight.defaultBranch,
     )
+
+    // SO1b: a GitHub-synced Shopify theme repo classifies as RA1 'unsupported' (no
+    // package.json / root index.html), but the run path fully supports it via
+    // isShopifyThemeRepo + processGithubThemeConnection. Detect it HERE — on the tree
+    // RA1 already fetched (zero extra GitHub calls) — and write a SUCCESS preview from
+    // the theme files so the onboarding finale animates instead of skipping. Reuses
+    // the existing 'ready'/'partial' status (site_structure_preview.status has no CHECK
+    // constraint). MUST run BEFORE the 'unsupported' early-return below. Non-theme
+    // repos never enter this branch → their behavior is byte-identical to before.
+    if (isShopifyThemeRepo(mapResult.repoTree)) {
+      const { nodes, edges, truncated } = buildThemePreviewGraph(mapResult.repoTree)
+      if (nodes.length === 0) {
+        // Theme dir-shape detected but no templates/sections/snippets blobs in the
+        // tree (shouldn't happen given isShopifyThemeRepo's dir gate) — honest error.
+        await writeStructurePreview(subscriptionId, {
+          status: 'error', framework: 'shopify-liquid',
+          error_message: 'theme repo detected but no templates/sections/snippets files found',
+          nodes: [], edges: [], truncated: false,
+        })
+        return { ok: true, status: 'error' }
+      }
+      await writeStructurePreview(subscriptionId, {
+        status:        truncated ? 'partial' : 'ready',
+        framework:     'shopify-liquid',
+        truncated,
+        error_message: null,
+        nodes,
+        edges,
+      })
+      return { ok: true, status: truncated ? 'partial' : 'ready' }
+    }
+
     if (mapResult.framework === 'unsupported') {
       // Nothing honest to preview → 'error' so the finale skips straight to Overview.
       await writeStructurePreview(subscriptionId, {
