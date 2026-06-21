@@ -589,8 +589,63 @@ const HOSTING_OPTIONS = [
   { value: 'cloudflare_pages', icon: '☁',  label: 'Cloudflare Pages' },
 ]
 
-function StepPlatform({ onNext, onBack }) {
+function StepPlatform({ onNext, onBack, subscriptionId }) {
   const [selected, setSelected] = useState('vercel')
+  // SO1c: a Shopify theme repo has no web host — Shopify syncs it — so asking the
+  // merchant to pick Vercel/Netlify is wrong. Theme-ness is confirmed asynchronously
+  // by the structure preview (discover_structure, fired at the repo-pick step), which
+  // is usually still 'mapping' when this step renders — so we poll it here and, once
+  // framework === 'shopify-liquid', REPLACE this step's content with a "no hosting
+  // needed" confirmation (keeps the "Step 4 of 6" counter intact; a hard skip would be
+  // racy and break the counter). Silent + no-op for every non-theme repo: framework is
+  // their real value → the selector below renders byte-identically to before, and
+  // finalize defaults hosting_provider to 'vercel' when we don't set one.
+  const [themeDetected, setThemeDetected] = useState(false)
+  useEffect(() => {
+    if (!subscriptionId) return
+    let cancelled = false
+    let polls = 0
+    const MAX = 12
+    const tick = async () => {
+      if (cancelled) return
+      polls++
+      const { data: row } = await supabase
+        .from('site_structure_preview').select('framework, status')
+        .eq('subscription_id', subscriptionId).maybeSingle()
+      if (cancelled) return
+      if (row?.framework === 'shopify-liquid') { setThemeDetected(true); return }
+      const terminal = row?.status === 'ready' || row?.status === 'partial' || row?.status === 'error'
+      if (terminal || polls >= MAX) return   // resolved non-theme (or gave up) → keep the selector
+      setTimeout(tick, 1500)
+    }
+    tick()
+    return () => { cancelled = true }
+  }, [subscriptionId])
+
+  if (themeDetected) {
+    return (
+      <div>
+        <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 4 of 6</p>
+        <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+          Shopify theme detected
+        </h2>
+        <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
+          No hosting setup needed — Shopify hosts your store. When you approve a fix, Velyr merges it to your connected branch and Shopify syncs it straight to your live theme.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid rgba(42,92,69,0.25)', background: 'rgba(42,92,69,0.05)', borderRadius: 12, padding: '14px 16px', marginBottom: 24 }}>
+          <span style={{ fontSize: 18, flexShrink: 0 }}>🛍️</span>
+          <span style={{ flex: 1, fontSize: 13, color: C.text, fontWeight: 400 }}>Connected via GitHub → Shopify theme sync</span>
+          <span style={{ width: 18, height: 18, flexShrink: 0, borderRadius: '50%', background: C.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
+          <button className="ob-btn" onClick={() => onNext({})}>Continue →</button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -830,6 +885,7 @@ function Step4({ onNext, onBack, loading }) {
 function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
   const [phase, setPhase] = useState('polling')   // polling | building | skip
   const [data, setData]   = useState(null)
+  const [framework, setFramework] = useState(null)   // SO1c: theme-aware outro copy
   const [showOutro, setShowOutro] = useState(false)
   const domain = hubDomainFromUrl(websiteUrl) || 'your site'
 
@@ -850,7 +906,7 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
       const st = row?.status
       if (st === 'ready' || st === 'partial') {
         const nd = buildNetworkData(row, { domain })
-        if (nd && nd.nodes.length > 1) { setData(nd); setPhase('building'); return }
+        if (nd && nd.nodes.length > 1) { setFramework(row.framework || null); setData(nd); setPhase('building'); return }
         setPhase('skip'); return                 // ready but nothing to show
       }
       if (st === 'error')        { setPhase('skip'); return }
@@ -876,6 +932,8 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
     const t = setTimeout(() => navigate('/agent/dashboard'), 5200)
     return () => clearTimeout(t)
   }, [showOutro, navigate])
+
+  const isTheme = framework === 'shopify-liquid'
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', flexDirection: 'column' }}>
@@ -911,8 +969,10 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
           opacity: showOutro ? 1 : 0, transition: 'opacity .6s ease',
         }}>
           <p style={{ fontSize: 14, color: C.text, fontWeight: 400, lineHeight: 1.6, marginBottom: 6 }}>
-            This is your site’s structure. On your first run Monday, the agent maps how your
-            pages actually connect — and ships its first conversion fix.
+            {isTheme
+              ? 'This is your Shopify theme’s structure. Each conversion fix arrives as a pull request against your connected theme repo — approve it and Shopify syncs it to your live theme. Your first fix lands on Monday’s run.'
+              : <>This is your site’s structure. On your first run Monday, the agent maps how your
+            pages actually connect — and ships its first conversion fix.</>}
           </p>
           <button className="ob-btn" onClick={() => navigate('/agent/dashboard')} style={{ width: 'auto', padding: '12px 24px', marginTop: 12 }}>
             Enter your dashboard →
@@ -1159,7 +1219,7 @@ export default function AgentOnboarding({ navigate }) {
             {step === 0 && <Step0 onNext={handleStep0} />}
             {step === 1 && <Step1 onNext={handleStep1} onBack={() => setStep(0)} navigate={navigate} />}
             {step === 2 && <Step2 onNext={handleStep2} onBack={() => setStep(1)} user={user} subscriptionId={subscriptionId} formData={formData} />}
-            {step === 3 && <StepPlatform onNext={handlePlatform} onBack={() => setStep(2)} />}
+            {step === 3 && <StepPlatform onNext={handlePlatform} onBack={() => setStep(2)} subscriptionId={subscriptionId} />}
             {step === 4 && <Step3 onNext={handleStep3} onBack={() => setStep(3)} />}
             {step === 5 && <Step4 onNext={handleStep4} onBack={() => setStep(4)} loading={loading} />}
             {error && (
