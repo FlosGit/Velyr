@@ -245,7 +245,7 @@ function Step0({ onNext }) {
           <span className="ob-chev">▶</span>
         </summary>
         <div className="ob-shopify-body">
-          Velyr ships its conversion fixes as GitHub pull requests. If your Shopify theme is synced to a GitHub repo, those fixes flow straight back into your live theme once you approve them — no plugins, no editing theme code by hand.
+          Velyr ships its conversion fixes as GitHub pull requests. If your Shopify theme is synced to a GitHub repo, those fixes flow straight back into your connected theme once you approve them — live as soon as you approve if that’s your published theme, or you publish when you’re ready if you connected a staging theme. No plugins, no editing theme code by hand.
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
             <p style={{ fontWeight: 400, color: C.text, marginBottom: 8 }}>Connect your theme to GitHub (one time):</p>
             <ol>
@@ -661,7 +661,7 @@ function StepPlatform({ onNext, onBack, subscriptionId }) {
           Shopify theme detected
         </h2>
         <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
-          No hosting setup needed — Shopify hosts your store. When you approve a fix, Velyr merges it to your connected branch and Shopify syncs it straight to your live theme.
+          No hosting setup needed — Shopify hosts your store. When you approve a fix, Velyr merges it to your connected branch and Shopify syncs it to your connected theme — live as soon as you approve if that’s your published theme, or you publish when you’re ready if it’s a staging theme.
         </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid rgba(42,92,69,0.25)', background: 'rgba(42,92,69,0.05)', borderRadius: 12, padding: '14px 16px', marginBottom: 24 }}>
           <span style={{ fontSize: 18, flexShrink: 0 }}>🛍️</span>
@@ -677,7 +677,7 @@ function StepPlatform({ onNext, onBack, subscriptionId }) {
         {branches.length > 1 && (
           <div style={{ marginBottom: 24 }}>
             <label htmlFor="ob-branch" style={{ display: 'block', fontSize: 13, fontWeight: 400, color: C.text, marginBottom: 8 }}>
-              Which branch does Shopify sync to your live theme?
+              Which branch does Shopify sync to your theme?
             </label>
             <select id="ob-branch" className="ob-inp" value={branch} onChange={e => setBranch(e.target.value)} style={{ cursor: 'pointer' }}>
               {branches.map(b => (
@@ -685,7 +685,7 @@ function StepPlatform({ onNext, onBack, subscriptionId }) {
               ))}
             </select>
             <p style={{ fontSize: 12, color: C.textLight, fontWeight: 300, lineHeight: 1.6, marginTop: 8 }}>
-              Defaults to your repo’s default branch — change it only if Shopify syncs a different one. You can update this anytime in Telegram with <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: C.accent }}>set branch</span>.
+              Connect the branch on your published theme for fixes to go live on approval — or a staging theme if you’d rather publish manually. Defaults to your repo’s default branch — change it only if Shopify syncs a different one. You can update this anytime in Telegram with <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: C.accent }}>set branch</span>.
             </p>
           </div>
         )}
@@ -1021,7 +1021,7 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
         }}>
           <p style={{ fontSize: 14, color: C.text, fontWeight: 400, lineHeight: 1.6, marginBottom: 6 }}>
             {isTheme
-              ? 'This is your Shopify theme’s structure. Each conversion fix arrives as a pull request against your connected theme repo — approve it and Shopify syncs it to your live theme. Your first fix lands on Monday’s run.'
+              ? 'This is your Shopify theme’s structure. Each conversion fix arrives as a pull request against your connected theme repo — approve it and Shopify syncs it to your connected theme: live right away if that’s your published theme, or you publish it when you’re ready if it’s a staging theme. Your first fix lands on Monday’s run.'
               : <>This is your site’s structure. On your first run Monday, the agent maps how your
             pages actually connect — and ships its first conversion fix.</>}
           </p>

@@ -1453,7 +1453,7 @@ function AgentRequirements() {
             <span className="sl-chev">▶</span>
           </summary>
           <div className="sl-shopify-body">
-            If your Shopify theme is synced to a GitHub repo (via Shopify’s official GitHub integration), Velyr treats it like any other repo: each conversion fix arrives as a <strong style={{ color:C.text, fontWeight:500 }}>pull request</strong> against your theme, and once you approve it, Shopify syncs the change to your live theme. No plugins, no editing theme code by hand.
+            If your Shopify theme is synced to a GitHub repo (via Shopify’s official GitHub integration), Velyr treats it like any other repo: each conversion fix arrives as a <strong style={{ color:C.text, fontWeight:500 }}>pull request</strong> against your theme, and once you approve it, Shopify syncs the change to your connected theme — live right away if that’s your published theme, or you publish it when you’re ready if it’s a staging theme. No plugins, no editing theme code by hand.
             <div style={{ marginTop:12, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
               <p style={{ fontWeight:400, color:C.text, margin:0 }}>Requires Shopify’s GitHub theme sync — a one-time setup:</p>
               <ol>
