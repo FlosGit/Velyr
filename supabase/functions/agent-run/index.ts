@@ -2574,7 +2574,7 @@ Write 4-5 paragraphs:
 Make it sound like a smart friend being honest. Direct second person. No headers, no bullet points, just paragraphs.`
 
     const requestBody = JSON.stringify({
-      model: 'anthropic/claude-sonnet-4-5',
+      model: 'anthropic/claude-sonnet-4.6',
       max_tokens: LLM_CAPS.MAX_TOKENS_ROAST,
       messages: [{ role: 'user', content: prompt }],
     })
@@ -2626,7 +2626,7 @@ Make it sound like a smart friend being honest. Direct second person. No headers
 // pre-flight (before this is ever reached).
 async function callLLMCapped(subscriptionId: string, system: string, user: string, maxTokens: number, callerLabel: string): Promise<string> {
   const requestBody = JSON.stringify({
-    model: 'anthropic/claude-sonnet-4-5',
+    model: 'anthropic/claude-sonnet-4.6',
     max_tokens: maxTokens,
     messages: [
       { role: 'system', content: system },

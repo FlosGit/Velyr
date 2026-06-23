@@ -44,7 +44,7 @@ const TOPICS = join(ROOT, 'content', 'blog-topics.json')
 const BLOG_DIR = join(ROOT, 'content', 'blog')
 const PROMPT_FILE = join(__dirname, 'generation-prompt.txt')
 
-const MODEL = process.env.GEN_MODEL || 'anthropic/claude-sonnet-4-5' // strong; not haiku-class
+const MODEL = process.env.GEN_MODEL || 'anthropic/claude-sonnet-4.6' // strong; not haiku-class
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 
 function parseArgs(argv) {

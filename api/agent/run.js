@@ -1613,7 +1613,7 @@ Max 600 words. Clear, direct language. Use short headers for each section.`
 
   try {
     const requestBody = JSON.stringify({
-      model: 'anthropic/claude-sonnet-4-5',
+      model: 'anthropic/claude-sonnet-4.6',
       max_tokens: LLM_MAX_TOKENS_PLAYBOOK,
       messages: [{ role: 'user', content: prompt }],
     })
