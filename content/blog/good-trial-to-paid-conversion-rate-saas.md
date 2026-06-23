@@ -12,6 +12,9 @@ related:
   - "good-conversion-rate-saas-landing-page"
   - "average-bounce-rate-developer-tools"
   - "build-signup-funnel-posthog"
+  - "good-demo-request-conversion-rate-b2b-saas"
+  - "pricing-page-layouts-that-convert-developer-tools"
+  - "good-signup-conversion-rate-developer-tool"
 faqs:
   - q: "What is a good free-trial-to-paid conversion rate?"
     a: "It depends on the trial model. Public benchmarks indicate opt-in trials (no credit card) commonly convert around 15–25%, while opt-out trials (credit card required up front) convert roughly 40–60% because they pre-qualify intent. Compare yourself to your model, not the global average."

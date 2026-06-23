@@ -12,6 +12,7 @@ related:
   - "many-visitors-you-need-ab-test"
   - "ab-test-landing-page-without-testing-platform"
   - "automate-conversion-fixes-github-pull-requests"
+  - "cro-agency-vs-ai-growth-agent-solo-founder"
 faqs:
   - q: "Should I A/B test or just ship the change?"
     a: "A/B test when you have enough traffic to reach significance, the change is risky or its direction is genuinely uncertain, and you can afford the weeks it takes. Ship and measure when traffic is low, the change is an obvious improvement, or the effect is large enough to see in your own baseline. Traffic and effect size decide it."

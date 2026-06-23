@@ -12,6 +12,8 @@ related:
   - "good-conversion-rate-saas-landing-page"
   - "good-trial-to-paid-conversion-rate-saas"
   - "reduce-form-abandonment-react-multi-step-signup"
+  - "good-demo-request-conversion-rate-b2b-saas"
+  - "get-first-100-saas-signups-as-solo-founder"
 faqs:
   - q: "What is a good signup conversion rate for a developer tool?"
     a: "As a rough, unattributed guide, 2–5% of visitors converting to signup is a reasonable range, with social or GitHub auth often higher. That's a general estimate rather than a published standard — developer audiences evaluate deliberately, so your own measured rate against your own traffic is what matters."

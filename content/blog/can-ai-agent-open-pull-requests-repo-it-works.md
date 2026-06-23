@@ -12,6 +12,7 @@ related:
   - "automate-conversion-fixes-github-pull-requests"
   - "approval-gate-pattern-ai-code-changes"
   - "what-is-conversion-rate-optimization"
+  - "safely-auto-roll-back-bad-deploy-using-bounce-rate"
 faqs:
   - q: "Can an AI agent open a pull request on my repository?"
     a: "Yes. It installs as a GitHub App with scoped permissions, then creates a branch, commits a change, and opens a Pull Request through the GitHub API. A PR is a proposal — it doesn't change your code until you review and merge it, so the agent can suggest without being able to ship on its own."

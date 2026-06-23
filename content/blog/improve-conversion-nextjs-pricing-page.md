@@ -12,6 +12,7 @@ related:
   - "improve-conversion-nextjs-landing-page"
   - "good-conversion-rate-saas-landing-page"
   - "track-cta-clicks-posthog"
+  - "pricing-page-layouts-that-convert-developer-tools"
 faqs:
   - q: "Should a Next.js pricing page be a server or client component?"
     a: "Render the plan cards and copy in a server component so they're in the initial HTML and paint fast. Only the interactive part — the monthly/annual toggle — needs to be a Client Component marked 'use client'. Making the whole page a client component delays the most important content and hurts LCP."

@@ -12,6 +12,8 @@ related:
   - "measure-scroll-depth-posthog"
   - "build-signup-funnel-posthog"
   - "fix-low-converting-react-hero-section"
+  - "create-conversion-goal-posthog"
+  - "track-outbound-link-clicks-posthog"
 faqs:
   - q: "Does PostHog track button clicks automatically?"
     a: "Yes. With autocapture enabled, PostHog records clicks as $autocapture events and stores the clicked element's visible text in the $el_text property, so you can analyze CTA clicks without adding any code."

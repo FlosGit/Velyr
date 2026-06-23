@@ -12,6 +12,7 @@ related:
   - "fix-cumulative-layout-shift-react"
   - "optimise-astro-image-component-fast-hero-lcp"
   - "lcp-affect-conversion-rate-evidence-shows"
+  - "inp-affect-conversion-landing-page"
 faqs:
   - q: "Does layout shift hurt conversion?"
     a: "Yes. When content moves as the page loads, visitors mis-click — sometimes tapping the wrong button or an ad instead of your CTA — and a jumpy page reads as broken or untrustworthy. Both reduce the chance someone completes the action you want."

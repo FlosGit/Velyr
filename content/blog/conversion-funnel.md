@@ -12,6 +12,7 @@ related:
   - "what-is-conversion-rate-optimization"
   - "what-is-a-micro-conversion"
   - "build-signup-funnel-posthog"
+  - "bounce-rate-vs-exit-rate"
 faqs:
   - q: "What is a conversion funnel in simple terms?"
     a: "It's the path a visitor takes toward a goal, broken into ordered steps, where fewer people remain at each step. Picture a funnel shape: wide at the top where everyone enters, narrow at the bottom where only converters come out. The narrowing between two steps is where you're losing people."

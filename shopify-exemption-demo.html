@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Velyr — Shopify Growth Agent</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --ink: #1a1d21;
+    --ink-soft: #5b6571;
+    --ink-faint: #8a929c;
+    --line: #e6e8ec;
+    --accent: #5b50e6;
+    --accent-soft: #efedfd;
+    --green: #0a8754;
+    --green-bg: #e6f6ee;
+    --green-line: #b7e3cd;
+    --red: #c0392b;
+    --red-bg: #fdecea;
+    --red-line: #f4c4be;
+    --amber: #9a6b00;
+    --amber-bg: #fdf3da;
+    --amber-line: #f0dca6;
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+
+  .shell {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 40px 28px 56px;
+  }
+
+  /* ---------- Header ---------- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 32px;
+  }
+  .brand { display: flex; align-items: center; gap: 13px; }
+  .brand-mark {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #6b5cf0, #4a3fd1);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 20px;
+    box-shadow: 0 4px 12px rgba(91,80,230,0.28);
+  }
+  .brand-text h1 {
+    font-size: 18px; font-weight: 650; letter-spacing: -0.2px;
+  }
+  .brand-text .sub {
+    font-size: 13px; color: var(--ink-soft); margin-top: 1px;
+  }
+  .store-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 13px; color: var(--ink-soft);
+    box-shadow: 0 1px 2px rgba(20,30,40,0.03);
+  }
+  .dot-live {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 3px var(--green-bg);
+  }
+  .store-pill code { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; color: var(--ink); font-size: 12.5px; }
+
+  /* ---------- Cards ---------- */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(20,30,40,0.04);
+    margin-bottom: 22px;
+  }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 22px;
+    gap: 14px;
+  }
+  .card-title {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; font-weight: 650; letter-spacing: 0.6px;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .card-title .ic {
+    width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+  }
+  .card-body { padding: 4px 22px 22px; }
+
+  /* ---------- Issue card ---------- */
+  .ic-issue { background: var(--amber-bg); color: var(--amber); }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600;
+    padding: 5px 11px; border-radius: 999px;
+  }
+  .badge.conf-medium {
+    background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-line);
+  }
+  .badge .bdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .defect-headline {
+    font-size: 17px; font-weight: 650; color: var(--ink);
+    letter-spacing: -0.1px; line-height: 1.4;
+    margin-bottom: 10px;
+  }
+  .defect-headline code {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 14px; color: var(--accent);
+    background: var(--accent-soft); padding: 1px 6px; border-radius: 5px;
+  }
+  .problem-text {
+    font-size: 14.5px; line-height: 1.6; color: var(--ink-soft);
+    font-weight: 440;
+    margin-bottom: 18px;
+  }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .path-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: #f6f7f9;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 12px;
+    color: var(--ink);
+  }
+  .path-chip .file-ic { color: var(--accent); font-size: 14px; }
+  .metric-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 13px; color: var(--ink-soft);
+    background: var(--green-bg); border: 1px solid var(--green-line);
+    border-radius: 8px; padding: 7px 12px;
+  }
+  .metric-chip strong { color: var(--green); font-weight: 650; }
+
+  /* ---------- Reasoning ---------- */
+  .reason {
+    margin-top: 18px;
+    border-top: 1px dashed var(--line);
+    padding-top: 16px;
+  }
+  .reason-label {
+    font-size: 11px; font-weight: 650; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--ink-faint);
+    margin-bottom: 7px;
+  }
+  .reason-text { font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
+
+  /* ---------- Diff ---------- */
+  .ic-fix { background: var(--accent-soft); color: var(--accent); }
+  .diff-frame {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fbfbfc;
+  }
+  .diff-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px;
+    background: #f6f7f9;
+    border-bottom: 1px solid var(--line);
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-soft);
+  }
+  .diff-bar .legend { display: flex; gap: 14px; font-family: -apple-system, sans-serif; font-size: 11.5px; }
+  .legend .lg { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-faint); }
+  .legend .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .sw.add { background: var(--green-bg); border: 1px solid var(--green-line); }
+  .sw.del { background: var(--red-bg); border: 1px solid var(--red-line); }
+
+  .diff {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+  .dl { display: flex; white-space: pre; }
+  .dl .gutter {
+    width: 34px; flex: none; text-align: center;
+    color: var(--ink-faint); user-select: none;
+    border-right: 1px solid var(--line);
+    background: #f8f9fa;
+  }
+  .dl .code { padding: 0 14px; flex: 1; }
+  .dl.ctx .code { color: #3d4651; }
+  .dl.add { background: var(--green-bg); }
+  .dl.add .gutter { background: var(--green-line); color: #0a6b43; }
+  .dl.add .code { color: #075c39; font-weight: 600; }
+  .dl.del { background: var(--red-bg); }
+  .dl.del .gutter { background: var(--red-line); color: #9e2c20; }
+  .dl.del .code { color: #9e2c20; text-decoration: none; }
+  .tok-tag { color: #1f6feb; }
+  .tok-attr { color: #6f42c1; }
+  .tok-str { color: #0a7d53; }
+  .tok-liquid { color: #b45309; }
+
+  /* ---------- Apply ---------- */
+  .apply-card { border-color: #d9d6f6; background: linear-gradient(180deg, #ffffff, #fafaff); }
+  .apply-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .btn-apply {
+    display: inline-flex; align-items: center; gap: 9px;
+    background: #c8c4e8;
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    padding: 13px 24px;
+    font-size: 15px; font-weight: 600;
+    cursor: not-allowed;
+    opacity: 1;
+    position: relative;
+  }
+  .btn-apply .lock { font-size: 14px; }
+  .apply-note {
+    flex: 1; min-width: 260px;
+    font-size: 13px; color: var(--ink-soft);
+    line-height: 1.5;
+  }
+  .apply-note .scope {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    background: #f1f0fb; color: var(--accent);
+    padding: 2px 7px; border-radius: 5px; font-size: 12px;
+    border: 1px solid #e0ddf6;
+  }
+  .apply-note .pending {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 8px;
+    font-size: 12.5px; color: var(--amber);
+    background: var(--amber-bg); border: 1px solid var(--amber-line);
+    padding: 5px 10px; border-radius: 7px;
+  }
+  .pending .pdot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--amber);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  /* ---------- Footer ---------- */
+  .footer-note {
+    display: flex; align-items: center; gap: 9px;
+    justify-content: center;
+    margin-top: 8px;
+    font-size: 13px; color: var(--ink-faint);
+    text-align: center;
+  }
+  .footer-note .shield { color: var(--green); font-size: 14px; }
+</style>
+</head>
+<body>
+  <div class="shell">
+
+    <!-- 1. Header -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark">V</div>
+        <div class="brand-text">
+          <h1>Velyr — Shopify Growth Agent</h1>
+          <div class="sub">Weekly conversion analysis · 1 fix proposed</div>
+        </div>
+      </div>
+      <div class="store-pill">
+        <span class="dot-live"></span>
+        Connected store: <code>velyr-test.myshopify.com</code>
+      </div>
+    </div>
+
+    <!-- 2. Issue detected -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">
+          <span class="ic ic-issue">!</span>
+          Conversion issue detected
+        </div>
+        <span class="badge conf-medium"><span class="bdot"></span>Confidence: Medium</span>
+      </div>
+      <div class="card-body">
+        <div class="defect-headline">Email field missing <code>required</code> validation &mdash; plus a duplicate <code>class</code> attribute</div>
+        <p class="problem-text">
+          The contact form lacks inline validation and only shows errors after submission,
+          forcing users to submit blind and then hunt for what went wrong.
+        </p>
+        <div class="meta-row">
+          <span class="path-chip"><span class="file-ic">&#9679;</span>sections/contact-form.liquid</span>
+          <span class="metric-chip">Expected: <strong>form_completion &#8593; ~8pp</strong></span>
+        </div>
+
+        <div class="reason">
+          <div class="reason-label">Agent reasoning</div>
+          <p class="reason-text">
+            The contact-form.liquid file shows error handling only after form submission
+            (form.errors block) with no client-side validation or real-time feedback. The email
+            field has aria-invalid and aria-describedby attributes that only activate
+            post-submission. Users must click &lsquo;Send&rsquo;, wait for server response, then read error
+            messages and scroll to find the problem field. This creates unnecessary friction in a
+            conversion-critical form.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Proposed fix -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">
+          <span class="ic ic-fix">&#10003;</span>
+          Proposed fix
+        </div>
+        <span class="path-chip" style="font-size:12px;padding:5px 10px;">sections/contact-form.liquid</span>
+      </div>
+      <div class="card-body">
+        <div class="diff-frame">
+          <div class="diff-bar">
+            <span>Email input &mdash; <span style="color:var(--ink)">add <code style="color:var(--green)">required</code>, remove duplicate <code>class</code></span></span>
+            <span class="legend">
+              <span class="lg"><span class="sw add"></span>added</span>
+              <span class="lg"><span class="sw del"></span>removed</span>
+            </span>
+          </div>
+          <div class="diff">
+<div class="dl ctx"><span class="gutter"> </span><span class="code">          &lt;<span class="tok-tag">input</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">class</span>=<span class="tok-str">"field__input"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">autocomplete</span>=<span class="tok-str">"email"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">type</span>=<span class="tok-str">"email"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">id</span>=<span class="tok-str">"ContactForm-email"</span></span></div>
+<div class="dl del"><span class="gutter">&minus;</span><span class="code">            class="field__input"</span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">name</span>=<span class="tok-str">"contact[email]"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">spellcheck</span>=<span class="tok-str">"false"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">autocapitalize</span>=<span class="tok-str">"off"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">value</span>=<span class="tok-str">"</span><span class="tok-liquid">{% if form.email %}{{ form.email }}{% elsif customer %}{{ customer.email }}{% endif %}</span><span class="tok-str">"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">aria-required</span>=<span class="tok-str">"true"</span></span></div>
+<div class="dl add"><span class="gutter">+</span><span class="code">            required</span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-liquid">{% if form.errors contains 'email' %}</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">              <span class="tok-attr">aria-invalid</span>=<span class="tok-str">"true"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">              <span class="tok-attr">aria-describedby</span>=<span class="tok-str">"ContactForm-email-error"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-liquid">{% endif %}</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">            <span class="tok-attr">placeholder</span>=<span class="tok-str">"</span><span class="tok-liquid">{{ 'templates.contact.form.email' | t }}</span><span class="tok-str">"</span></span></div>
+<div class="dl ctx"><span class="gutter"> </span><span class="code">          &gt;</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Apply action -->
+    <div class="card apply-card">
+      <div class="card-body" style="padding-top:22px;">
+        <div class="apply-row">
+          <button class="btn-apply" disabled>
+            <span class="lock">&#128274;</span> Apply to theme
+          </button>
+          <div class="apply-note">
+            Requires <span class="scope">write_themes</span> (<span class="scope">themeFilesUpsert</span>) to write the
+            single edited file back to the live theme.
+            <div class="pending"><span class="pdot"></span>Pending Shopify exemption approval</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Footer -->
+    <div class="footer-note">
+      <span class="shield">&#128737;</span>
+      Every change is previewed and requires explicit merchant approval before any write. Single file, fully reversible.
+    </div>
+
+  </div>
+</body>
+</html>

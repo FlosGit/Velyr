@@ -12,6 +12,8 @@ related:
   - "call-action-cta"
   - "above-fold-web-design"
   - "fix-low-converting-react-hero-section"
+  - "landing-page"
+  - "pricing-page-layouts-that-convert-developer-tools"
 faqs:
   - q: "What should a SaaS hero section include?"
     a: "Six things, in order: a short eyebrow for context, an outcome-focused headline, a one-line subhead with specifics, a single primary CTA, a low-weight secondary link, and a trust signal — all above the fold. Together they answer what it is, who it's for, and what to do next."

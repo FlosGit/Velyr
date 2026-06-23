@@ -12,6 +12,9 @@ related:
   - "lcp-affect-conversion-rate-evidence-shows"
   - "optimise-astro-image-component-fast-hero-lcp"
   - "improve-conversion-nextjs-landing-page"
+  - "fix-cumulative-layout-shift-react"
+  - "fix-hydration-delayed-cta-nextjs"
+  - "use-useasyncdata-nuxt-3-prefetch-and-speed-cta"
 faqs:
   - q: "Why is my Next.js LCP slow?"
     a: "Most often because the hero image — usually the LCP element — is lazy-loaded by default, so the browser fetches it late. Render-blocking fonts and client-side rendering of the hero also delay it. Loading the hero with next/image priority is the single highest-impact fix."

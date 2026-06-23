@@ -12,6 +12,7 @@ related:
   - "what-is-conversion-rate-optimization"
   - "track-cta-clicks-posthog"
   - "build-signup-funnel-posthog"
+  - "conversion-funnel"
 faqs:
   - q: "What is the difference between a micro-conversion and a macro-conversion?"
     a: "A macro-conversion is your primary goal — a purchase, a paid signup, a booked demo. A micro-conversion is a smaller step toward it, like viewing pricing or starting the signup form. Macro-conversions prove value; micro-conversions show you where in the journey people advance or stall."

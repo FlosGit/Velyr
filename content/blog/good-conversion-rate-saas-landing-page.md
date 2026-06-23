@@ -12,6 +12,9 @@ related:
   - "what-is-conversion-rate-optimization"
   - "average-bounce-rate-developer-tools"
   - "improve-conversion-nextjs-landing-page"
+  - "landing-page"
+  - "good-demo-request-conversion-rate-b2b-saas"
+  - "good-signup-conversion-rate-developer-tool"
 faqs:
   - q: "What counts as a conversion on a SaaS landing page?"
     a: "Whatever you defined as the page's primary goal — usually a signup, a free-trial start, a demo request, or a waitlist join. Pick one primary conversion per page and measure it consistently, or your rate is meaningless."

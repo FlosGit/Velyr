@@ -12,6 +12,7 @@ related:
   - "track-cta-clicks-posthog"
   - "fix-low-converting-react-hero-section"
   - "good-conversion-rate-saas-landing-page"
+  - "call-action-cta"
 faqs:
   - q: "What is a good click-through rate on a hero CTA?"
     a: "As a rough, unattributed guide, 5–15% of visitors clicking the hero CTA is a reasonable range, with warm high-intent traffic higher. That's a general estimate, not a published benchmark. Measure your own seen-to-clicked rate, because the visibility of the button changes the number more than the wording does."

@@ -12,6 +12,7 @@ related:
   - "improve-conversion-nextjs-landing-page"
   - "improve-conversion-nextjs-pricing-page"
   - "lcp-affect-conversion-rate-evidence-shows"
+  - "inp-affect-conversion-landing-page"
 faqs:
   - q: "Why doesn't my Next.js button work right after the page loads?"
     a: "A button with an onClick handler only does something once React has hydrated that component on the client. On a JavaScript-heavy page, hydration can take a second or more, during which early clicks are dropped. A plain anchor link works immediately because the browser handles it natively, no JS required."

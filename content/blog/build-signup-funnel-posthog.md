@@ -12,6 +12,9 @@ related:
   - "measure-scroll-depth-posthog"
   - "track-cta-clicks-posthog"
   - "good-trial-to-paid-conversion-rate-saas"
+  - "create-conversion-goal-posthog"
+  - "use-posthog-paths-see-where-users-go-after-homepage"
+  - "build-retention-chart-posthog-saas"
 faqs:
   - q: "What events do I need for a signup funnel?"
     a: "One event per meaningful step. A minimal SaaS funnel is: a landing $pageview, signup_started (form opened), signup_completed (account created), and activated (first key action). Capture each with a stable event name so the funnel stays consistent over time."

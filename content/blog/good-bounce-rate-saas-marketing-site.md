@@ -12,6 +12,8 @@ related:
   - "average-bounce-rate-developer-tools"
   - "good-conversion-rate-saas-landing-page"
   - "measure-scroll-depth-posthog"
+  - "bounce-rate-vs-exit-rate"
+  - "average-time-page-saas-landing-page"
 faqs:
   - q: "What is a good bounce rate for a SaaS marketing site?"
     a: "There's no single authoritative number, but as a rough guide many SaaS marketing sites land somewhere around 40–60%. That's a general estimate, not a published standard — your own consistently-measured rate matters far more, because bounce swings with traffic source and how each tool defines it."

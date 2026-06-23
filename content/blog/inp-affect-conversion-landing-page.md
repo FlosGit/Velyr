@@ -12,6 +12,7 @@ related:
   - "fix-hydration-delayed-cta-nextjs"
   - "lcp-affect-conversion-rate-evidence-shows"
   - "good-click-through-rate-hero-cta"
+  - "cumulative-layout-shift-hurt-conversion"
 faqs:
   - q: "Does INP affect conversion?"
     a: "Yes. INP measures the delay between a user interaction — a tap or click — and the page visibly responding. A CTA that lags after a click feels broken, and visitors either tap again (double-submitting) or give up. Fast response keeps the action feeling reliable."

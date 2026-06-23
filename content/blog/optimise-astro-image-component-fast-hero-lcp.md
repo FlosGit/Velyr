@@ -12,6 +12,8 @@ related:
   - "improve-conversion-astro-landing-page-islands"
   - "fix-slow-lcp-nextjs-landing-page"
   - "lcp-affect-conversion-rate-evidence-shows"
+  - "fix-cumulative-layout-shift-react"
+  - "use-useasyncdata-nuxt-3-prefetch-and-speed-cta"
 faqs:
   - q: "Does the Astro Image component lazy-load by default?"
     a: "Yes — like the browser default, Astro's <Image> uses loading='lazy' unless you override it. That's correct for below-the-fold images but wrong for the hero, which is usually your Largest Contentful Paint element. Set loading='eager' on the hero so it isn't deferred."

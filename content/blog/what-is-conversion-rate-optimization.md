@@ -12,6 +12,7 @@ related:
   - "good-conversion-rate-saas-landing-page"
   - "what-is-a-micro-conversion"
   - "measure-scroll-depth-posthog"
+  - "conversion-funnel"
 faqs:
   - q: "What does CRO stand for?"
     a: "CRO stands for Conversion Rate Optimization — the systematic practice of increasing the percentage of visitors who complete a desired action on your site."

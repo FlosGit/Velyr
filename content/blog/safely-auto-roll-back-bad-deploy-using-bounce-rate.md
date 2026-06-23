@@ -12,6 +12,7 @@ related:
   - "approval-gate-pattern-ai-code-changes"
   - "automate-conversion-fixes-github-pull-requests"
   - "good-bounce-rate-saas-marketing-site"
+  - "can-ai-agent-open-pull-requests-repo-it-works"
 faqs:
   - q: "How does an automatic rollback decide a change was bad?"
     a: "It compares a clear metric — site-wide bounce rate is a good choice — for a fixed window before the deploy against the same length of time after it. If the metric worsened by more than a pre-set threshold, the change is flagged as likely harmful and a revert is proposed. The threshold and window are fixed in advance so the trigger isn't subjective."

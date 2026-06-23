@@ -12,6 +12,9 @@ related:
   - "track-cta-clicks-posthog"
   - "build-signup-funnel-posthog"
   - "good-conversion-rate-saas-landing-page"
+  - "calculate-sample-size-ab-test"
+  - "my-ab-test-result-statistically-significant"
+  - "ab-testing-tools-vs-shipping-fix"
 faqs:
   - q: "Can I A/B test without a tool like Optimizely or VWO?"
     a: "Yes. Assign each visitor a stable variant with a cookie, tag it onto your analytics events, and compare conversion per variant. The only thing a paid platform adds is a UI and automatic stats — both of which you can replace with a cookie, a PostHog property, and a one-line significance check."

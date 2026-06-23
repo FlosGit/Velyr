@@ -12,6 +12,9 @@ related:
   - "fix-slow-lcp-nextjs-landing-page"
   - "optimise-astro-image-component-fast-hero-lcp"
   - "good-bounce-rate-saas-marketing-site"
+  - "inp-affect-conversion-landing-page"
+  - "cumulative-layout-shift-hurt-conversion"
+  - "fix-hydration-delayed-cta-nextjs"
 faqs:
   - q: "Does LCP affect conversion rate?"
     a: "Yes, indirectly but reliably. LCP marks roughly when your main content paints, and visitors can't read your value proposition or click a CTA that hasn't rendered. Slower LCP also raises the chance someone leaves before the page is usable. The cleanest proof for your own site is to measure LCP per session and compare conversion across the speed bands."

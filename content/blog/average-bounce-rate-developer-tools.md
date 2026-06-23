@@ -12,6 +12,7 @@ related:
   - "good-conversion-rate-saas-landing-page"
   - "measure-scroll-depth-posthog"
   - "good-trial-to-paid-conversion-rate-saas"
+  - "bounce-rate-vs-exit-rate"
 faqs:
   - q: "What is a good bounce rate for a SaaS website?"
     a: "Roughly 40–60% is typical for B2B/SaaS sites according to public benchmarks, with marketing landing pages often higher. Lower isn't automatically better — a high bounce rate on a single-answer page (like a glossary post) can be perfectly healthy if the visitor got what they came for."

@@ -12,6 +12,7 @@ related:
   - "improve-conversion-nextjs-landing-page"
   - "use-useasyncdata-nuxt-3-prefetch-and-speed-cta"
   - "good-conversion-rate-saas-landing-page"
+  - "improve-conversion-astro-landing-page-islands"
 faqs:
   - q: "How do I lazy-load a component in Vue 3?"
     a: "Use defineAsyncComponent, which returns a component that only loads its code when it's first rendered. Pair it with Vue's built-in Suspense or a v-if tied to a visibility check so heavy below-the-fold sections don't download until they're needed."

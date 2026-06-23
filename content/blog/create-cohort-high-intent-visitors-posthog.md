@@ -12,6 +12,7 @@ related:
   - "build-retention-chart-posthog-saas"
   - "track-button-click-as-custom-event-posthog"
   - "what-is-a-micro-conversion"
+  - "posthog-vs-mixpanel-product-analytics"
 faqs:
   - q: "What is a behavioural cohort in PostHog?"
     a: "A cohort is a saved group of users defined by what they did — fired a particular event, did it a certain number of times, or within a time window. A high-intent cohort might be everyone who viewed pricing and visited more than twice in the last 30 days. PostHog updates it automatically as behaviour changes."

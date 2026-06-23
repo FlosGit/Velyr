@@ -12,6 +12,8 @@ related:
   - "track-cta-clicks-posthog"
   - "build-signup-funnel-posthog"
   - "measure-scroll-depth-posthog"
+  - "create-conversion-goal-posthog"
+  - "track-outbound-link-clicks-posthog"
 faqs:
   - q: "What's the difference between a custom event and autocapture in PostHog?"
     a: "Autocapture records clicks automatically and keys them on the element's text, so the history splits when you rename a button. A custom event is one you fire deliberately with posthog.capture under a stable name, so it survives copy and DOM changes. Use autocapture for discovery and custom events for metrics you rely on."

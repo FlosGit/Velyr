@@ -12,6 +12,9 @@ related:
   - "fix-low-converting-react-hero-section"
   - "measure-scroll-depth-posthog"
   - "good-conversion-rate-saas-landing-page"
+  - "improve-conversion-vue-3-landing-page"
+  - "improve-conversion-astro-landing-page-islands"
+  - "improve-conversion-nextjs-pricing-page"
 faqs:
   - q: "Does page speed affect conversion on Next.js?"
     a: "Yes. A slow Largest Contentful Paint (LCP) delays when visitors can read your value proposition and CTA, and bounce rises with load time. On Next.js the hero image is often the LCP element, so loading it with next/image priority is one of the highest-leverage speed-and-conversion fixes."

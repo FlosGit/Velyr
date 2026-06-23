@@ -12,6 +12,7 @@ related:
   - "create-cohort-high-intent-visitors-posthog"
   - "build-signup-funnel-posthog"
   - "good-trial-to-paid-conversion-rate-saas"
+  - "posthog-vs-mixpanel-product-analytics"
 faqs:
   - q: "How do I build a retention chart in PostHog?"
     a: "Use the native Retention insight. Choose the event that defines the cohort (for example signup_completed) and the event that counts as returning (for example any pageview or a core action), and PostHog produces the weekly cohort grid showing what share of each cohort came back, no query required."

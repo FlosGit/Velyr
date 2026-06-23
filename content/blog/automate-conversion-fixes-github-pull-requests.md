@@ -12,6 +12,9 @@ related:
   - "can-ai-agent-open-pull-requests-repo-it-works"
   - "approval-gate-pattern-ai-code-changes"
   - "build-signup-funnel-posthog"
+  - "ab-testing-tools-vs-shipping-fix"
+  - "cro-agency-vs-ai-growth-agent-solo-founder"
+  - "safely-auto-roll-back-bad-deploy-using-bounce-rate"
 faqs:
   - q: "How do you automate conversion optimisation?"
     a: "Build a pipeline that reads your analytics to find the biggest drop-off, generates one scoped code change to address it, and opens a Pull Request explaining the change and the data behind it. The key is ending in a PR a human merges, not an automatic deploy, so automation does the work while you keep control."

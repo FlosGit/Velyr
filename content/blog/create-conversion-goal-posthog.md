@@ -12,6 +12,8 @@ related:
   - "track-button-click-as-custom-event-posthog"
   - "build-signup-funnel-posthog"
   - "good-conversion-rate-saas-landing-page"
+  - "posthog-vs-google-analytics-4-conversion-tracking"
+  - "track-outbound-link-clicks-posthog"
 faqs:
   - q: "What is a conversion goal in PostHog?"
     a: "It's the event that represents the outcome you care about — a signup, purchase, or booking — that you track over time. PostHog doesn't have a separate 'goal' object; you define the goal by capturing the event and putting it in a Trends insight or funnel."

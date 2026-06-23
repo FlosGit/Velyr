@@ -12,6 +12,7 @@ related:
   - "optimise-astro-image-component-fast-hero-lcp"
   - "improve-conversion-nextjs-landing-page"
   - "lcp-affect-conversion-rate-evidence-shows"
+  - "improve-conversion-vue-3-landing-page"
 faqs:
   - q: "What is an Astro island?"
     a: "An island is an interactive component embedded in an otherwise static HTML page. Astro renders everything to HTML by default and ships no JavaScript; you opt specific components into client-side hydration with a client:* directive, so only those islands load JS while the rest of the page stays static and fast."

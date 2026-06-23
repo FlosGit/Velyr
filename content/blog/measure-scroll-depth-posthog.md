@@ -12,6 +12,9 @@ related:
   - "build-signup-funnel-posthog"
   - "track-cta-clicks-posthog"
   - "fix-low-converting-react-hero-section"
+  - "good-scroll-depth-landing-page"
+  - "measure-time-page-posthog"
+  - "use-posthog-paths-see-where-users-go-after-homepage"
 faqs:
   - q: "Does PostHog track scroll depth automatically?"
     a: "Yes, when autocapture is enabled. PostHog records the maximum scroll percentage of a pageview and attaches it to the next $pageleave event as $prev_pageview_max_scroll_percentage. You don't need a custom event."

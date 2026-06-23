@@ -12,6 +12,9 @@ related:
   - "use-posthog-paths-see-where-users-go-after-homepage"
   - "measure-scroll-depth-posthog"
   - "good-conversion-rate-saas-landing-page"
+  - "posthog-vs-google-analytics-4-conversion-tracking"
+  - "create-cohort-high-intent-visitors-posthog"
+  - "measure-time-page-posthog"
 faqs:
   - q: "How do I find my most popular pages in PostHog?"
     a: "Run a HogQL query that groups $pageview events by the $pathname property, counts views and unique visitors, and orders by views descending. The top rows are your highest-traffic pages — the ones where a conversion change reaches the most people."
