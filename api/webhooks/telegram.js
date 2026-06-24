@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
 import { getOctokit } from '../_lib/github-app.js'
 import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
+import { decryptSecret } from '../_lib/secret-crypto.js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -364,7 +365,10 @@ async function handleApprove(runId, chatId) {
     .maybeSingle()
 
   if (!run) return sendMessage(chatId, '❌ Run not found.')
-  if (run.status !== 'waiting_approval')
+  // SG: a pure-Shopify Admin-API run lands in 'shopify_awaiting_approval' (no PR to
+  // merge); let it past this gate so the Shopify-write branch below can handle it.
+  // GitHub runs ('waiting_approval') are unaffected and flow on unchanged.
+  if (run.status !== 'waiting_approval' && run.status !== 'shopify_awaiting_approval')
     return sendMessage(chatId, '⚠️ This run is no longer waiting for approval.')
 
   // ── Setup-PR: foreign-choice YES → fire Edge Function to build the PR ─────
@@ -412,6 +416,73 @@ async function handleApprove(runId, chatId) {
     .select('*')
     .eq('subscription_id', run.subscription_id)
     .single()
+
+  // ── SG: Shopify-via-Admin-API theme write (pure-Shopify path, NOT the GitHub
+  // theme path) ─────────────────────────────────────────────────────────────
+  // A pure-Shopify run has no PR — the whole new file content was staged in
+  // analysis_result.pending_write at run time. YES applies it directly to the live
+  // theme via the Admin GraphQL themeFilesUpsert mutation (needs write_themes), then
+  // returns BEFORE any octokit/PR logic. Never throws unguarded; on any failure the
+  // status stays off 'shopify_deployed' and the user gets an honest message.
+  // MIGRATION NOTE (handled separately, NOT here): the run statuses 'shopify_deployed'
+  // and 'shopify_rejected' must be in the agent_runs_status_check CHECK constraint, or
+  // these updates are rejected. ('failed' is already allowed.)
+  if (run.status === 'shopify_awaiting_approval') {
+    const pending = run.analysis_result?.pending_write
+    if (!pending || !pending.filename || !pending.themeId || !pending.newContent) {
+      return sendMessage(chatId, `❌ I couldn't find the prepared change for this run (missing pending write). Nothing was applied — the agent will retry on the next run.`)
+    }
+    try {
+      const token = decryptSecret(conn.shopify_access_token)
+      if (!token) {
+        return sendMessage(chatId, `🔌 Your Shopify connection has expired — please reconnect your store, then I can apply changes again.`)
+      }
+      const shop = conn.shopify_shop_domain
+      const mutation = `mutation($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
+  themeFilesUpsert(themeId: $themeId, files: $files) {
+    upsertedThemeFiles { filename }
+    userErrors { field message }
+  }
+}`
+      const res = await fetch(`https://${shop}/admin/api/2026-04/graphql.json`, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': token,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          query: mutation,
+          variables: {
+            themeId: `gid://shopify/OnlineStoreTheme/${pending.themeId}`,
+            files: [{ filename: pending.filename, body: { type: 'TEXT', value: pending.newContent } }],
+          },
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      const userErrors = json?.data?.themeFilesUpsert?.userErrors
+      if (!res.ok || json?.errors || (Array.isArray(userErrors) && userErrors.length)) {
+        const detail = (Array.isArray(userErrors) && userErrors.length)
+          ? userErrors.map(e => e?.message).filter(Boolean).join('; ')
+          : json?.errors ? JSON.stringify(json.errors).slice(0, 300) : `HTTP ${res.status}`
+        await supabase.from('agent_runs').update({
+          status: 'failed', error_message: `Shopify theme write failed: ${detail}`.slice(0, 500),
+        }).eq('id', run.id)
+        return sendMessage(chatId, `❌ I couldn't apply the change to your live theme.\n\n<i>${escapeHtml(detail)}</i>\n\nNothing was changed — the agent will retry on the next run.`)
+      }
+      // Success — applied straight to the live theme. No PR, so merge_commit_sha
+      // stays null (left untouched).
+      await supabase.from('agent_runs').update({
+        status: 'shopify_deployed', completed_at: new Date().toISOString(),
+      }).eq('id', run.id)
+      return sendMessage(chatId, `✅ Applied <code>${escapeHtml(pending.filename)}</code> to your live theme.`)
+    } catch (err) {
+      await supabase.from('agent_runs').update({
+        status: 'failed', error_message: `Shopify theme write threw: ${err?.message || String(err)}`.slice(0, 500),
+      }).eq('id', run.id)
+      return sendMessage(chatId, `❌ Something went wrong applying the change to your theme: ${escapeHtml(err?.message || 'unknown error')}.\n\nNothing was changed — the agent will retry on the next run.`)
+    }
+  }
 
   const octokit = await getOctokit(conn.github_installation_id)
 
@@ -522,8 +593,19 @@ async function handleReject(runId, chatId) {
     .maybeSingle()
 
   if (!run) return sendMessage(chatId, '❌ Run not found.')
-  if (run.status !== 'waiting_approval')
+  // SG: let a pure-Shopify 'shopify_awaiting_approval' run past this gate (handled
+  // by the no-PR reject branch below). GitHub 'waiting_approval' runs are unchanged.
+  if (run.status !== 'waiting_approval' && run.status !== 'shopify_awaiting_approval')
     return sendMessage(chatId, '⚠️ This run is no longer waiting for approval.')
+
+  // SG: a pure-Shopify Admin-API run has no PR to close — reject is just a status
+  // flip + a short confirmation, returning before any GitHub close/reconcile logic.
+  if (run.status === 'shopify_awaiting_approval') {
+    await supabase.from('agent_runs').update({
+      status: 'shopify_rejected', completed_at: new Date().toISOString(),
+    }).eq('id', run.id)
+    return sendMessage(chatId, `❌ <b>Skipped.</b> Nothing was changed in your theme — the agent will analyze again on the next run.`)
+  }
 
   // Close the PR + delete the agent/* branch on GitHub, then reconcile the DB
   // to 'rejected'. Both the GitHub cleanup (Stage 4.7: don't leave a dangling

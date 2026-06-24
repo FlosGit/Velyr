@@ -331,6 +331,34 @@ function validateFindReplaceSafe(content: string, find: string, _replace: string
   return { ok: true, actualFind, anchorPos: start, normalizedSnippet: normalizeWs(actualFind) }
 }
 
+// Apply a code_change (.find/.replace) to the FULL original file content and
+// return the complete new file text. The Shopify theme path needs this because
+// themeFilesUpsert OVERWRITES the whole file (no patch/partial mode) — so we must
+// reconstruct the entire new content, not just hand over the replace fragment.
+// Reuses the SAME whitespace-normalized guard (validateFindReplaceSafe) and the
+// SAME anchor-splice as createPR (lines 2965–2974), so a fix that localizes for a
+// GitHub PR localizes byte-identically here. Never throws; on a missing/ambiguous
+// find it returns the SAME structured find_mismatch / find_ambiguous statuses
+// createPR returns, so callers map to the same honest run statuses (never generic
+// failed — the PostHog frequency split depends on it).
+type ApplyCodeChangeResult =
+  | { ok: true; newContent: string }
+  | { ok: false; status: 'find_mismatch'; message: string; aiFind: string; closestCandidates: string[] }
+  | { ok: false; status: 'find_ambiguous'; message: string; aiFind: string; snippets: string[] }
+
+function applyCodeChangeToContent(content: string, change: { find: string; replace: string }): ApplyCodeChangeResult {
+  const found = validateFindReplaceSafe(content, change.find, change.replace)
+  if (!found.ok) {
+    if (found.reason === 'find_mismatch') {
+      return { ok: false, status: 'find_mismatch', message: 'code_change.find not found (whitespace-normalized match)', aiFind: change.find, closestCandidates: found.closestCandidates }
+    }
+    return { ok: false, status: 'find_ambiguous', message: `code_change.find matched ${found.matchPositions.length} places`, aiFind: change.find, snippets: found.snippets }
+  }
+  // Splice the AI's replace into the ACTUAL anchored bytes (never the model's copy).
+  const newContent = content.slice(0, found.anchorPos) + change.replace + content.slice(found.anchorPos + found.actualFind.length)
+  return { ok: true, newContent }
+}
+
 // Thresholds for the no-data gate. Conservative — abort only if EVERY signal
 // is empty (the agent would otherwise hallucinate a fix from {}).
 const NO_DATA_THRESHOLDS = {
@@ -746,6 +774,80 @@ async function readShopifyTheme(
   // Reached the page cap with more pages outstanding — return what we have, flagged.
   slog('warn', 'shopify_theme_read_page_cap', { shop, themeGid, pagesRead, cap: SHOPIFY_THEME_MAX_PAGES })
   return { ok: true, files, pagesRead, truncatedAtPageCap: true }
+}
+
+// Write counterpart to readShopifyTheme: upserts a SINGLE theme file via the
+// Admin GraphQL `themeFilesUpsert` mutation. The body is sent as a full-file
+// TEXT replacement (`{ type: "TEXT", value }`) — upsert overwrites the whole
+// file, there is no partial/patch mode. Same endpoint, headers, and 20s timeout
+// as the read path; same never-throw, return-a-result-object discipline.
+
+type ShopifyThemeWriteResult =
+  | { ok: true; filename: string }
+  | { ok: false; reason: 'unauthorized' | 'graphql_error' | 'user_error' | 'request_failed'; message: string }
+
+const SHOPIFY_THEME_FILES_UPSERT_MUTATION = `mutation VelyrThemeFilesUpsert($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
+  themeFilesUpsert(themeId: $themeId, files: $files) {
+    upsertedThemeFiles { filename }
+    userErrors { code filename message }
+  }
+}`
+
+async function writeShopifyThemeFile(
+  shop: string,
+  themeIdNumeric: number | string,
+  accessToken: string,
+  filename: string,
+  content: string,
+): Promise<ShopifyThemeWriteResult> {
+  const themeGid = `gid://shopify/OnlineStoreTheme/${themeIdNumeric}`
+  const endpoint = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`
+
+  let res: Response
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        query: SHOPIFY_THEME_FILES_UPSERT_MUTATION,
+        variables: {
+          themeId: themeGid,
+          files: [{ filename, body: { type: 'TEXT', value: content } }],
+        },
+      }),
+      signal: AbortSignal.timeout(20000),
+    })
+  } catch (e: any) {
+    return { ok: false, reason: 'request_failed', message: `Shopify theme write failed: ${e?.message ?? 'fetch failed'}` }
+  }
+
+  // 401/403 → access token dead/expired or missing write_themes scope. Surface
+  // distinctly so the caller's retry-on-401 can refresh via refreshShopifyToken.
+  if (res.status === 401 || res.status === 403) {
+    return { ok: false, reason: 'unauthorized', message: `Shopify returned ${res.status} writing theme file` }
+  }
+
+  const json: any = await res.json().catch(() => ({}))
+  if (!res.ok || json?.errors) {
+    slog('warn', 'shopify_theme_write_graphql_error', { shop, filename, status: res.status, errors: JSON.stringify(json?.errors ?? '').slice(0, 300) })
+    return { ok: false, reason: 'graphql_error', message: `Shopify theme file write failed (HTTP ${res.status})` }
+  }
+
+  // themeFilesUpsert can succeed at the HTTP/GraphQL layer but reject the file
+  // (bad path, validation, etc.) via userErrors — check before claiming success.
+  const payload = json?.data?.themeFilesUpsert
+  const userErrors = payload?.userErrors
+  if (Array.isArray(userErrors) && userErrors.length) {
+    slog('warn', 'shopify_theme_write_user_errors', { shop, filename, userErrors: JSON.stringify(userErrors).slice(0, 300) })
+    return { ok: false, reason: 'user_error', message: `themeFilesUpsert returned userErrors: ${JSON.stringify(userErrors).slice(0, 300)}` }
+  }
+
+  slog('info', 'shopify_theme_file_written', { shop, filename })
+  return { ok: true, filename }
 }
 
 // ─── SHOPIFY → EXISTING-PIPELINE ADAPTERS (Step 2) ───────────────────────────
@@ -3175,30 +3277,94 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     throw new Error(`Shopify: AI selected file outside ranked list: "${fixResult.file_to_edit}"`)
   }
 
-  // 5. INTERIM OUTPUT — labelled preview, NO write. Persist the analysis the same
-  // way the GitHub path does (analysis_result + problem_description) but under the
-  // distinct terminal status 'shopify_preview' so it's never mistaken for a deploy.
-  await dbWrite(
-    supabase.from('agent_runs').update({
-      status:              'shopify_preview',
-      current_step:        'done',
-      completed_at:        new Date().toISOString(),
-      analysis_result:     { ...fixResult, analytics_snapshot: analytics?.last7Days, revenue: revenue || null },
-      problem_description: fixResult.problem,
-      pages_fixed:         [fixResult.file_to_edit],
-    }).eq('id', run.id),
-    DB_TIMEOUT_MS, 'shopify_preview_update',
-  )
+  // ── MIGRATION NOTE (handled separately, NOT in this change): the new run status
+  // 'shopify_awaiting_approval' set below must be added to the agent_runs_status_check
+  // CHECK constraint, or the final dbWrite will be rejected. This code does not touch
+  // any migration. ──
 
-  const change = fixResult.code_change
-  const previewMsg =
-    `🔍 <b>Shopify Preview — would fix once write access is live</b>\n\n` +
+  // 5. LOCATE + APPLY — find the exact file the AI chose in the bytes we ALREADY read
+  // (read.files), then reconstruct the FULL new file content via the shared
+  // whitespace-normalized guard. themeFilesUpsert overwrites the whole file (no patch
+  // mode), so we must persist complete newContent — the live-theme write happens later
+  // on the YES reply (writeShopifyThemeFile), never here.
+  const change = fixResult.code_change!
+  const target = files.find(f => f.filename === fixResult.file_to_edit)
+  if (!target) {
+    // file_to_edit was in the ranked list but isn't in the read bytes (same source —
+    // shouldn't happen). Never approve/write a phantom file; honest terminal instead.
+    const msg = `Selected theme file not found in the read theme: ${fixResult.file_to_edit}`
+    slog('warn', 'shopify_target_file_missing', { subscriptionId: conn.subscription_id, file: fixResult.file_to_edit })
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'shopify_theme_read_failed', current_step: 'done',
+        completed_at: new Date().toISOString(), error_message: msg,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_target_missing_update',
+    )
+    await sendShopifyTelegram(chatId, `⚠️ <b>Velyr — couldn't prepare your Shopify theme fix</b>\n\n<i>${escapeHtml(msg)}</i>\n\nThe agent will retry on the next run.`)
+    return
+  }
+
+  // Reconstruct the full new file content (SAME guard the GitHub createPR uses).
+  const applied = applyCodeChangeToContent(target.content, change)
+  if (!applied.ok) {
+    // find_mismatch / find_ambiguous — same honest no-write statuses as the GitHub
+    // path. NO write, NO approval.
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: applied.status, current_step: 'done',
+        completed_at: new Date().toISOString(), error_message: applied.message,
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_find_problem_update',
+    )
+    await notifyFindProblem(chatId, applied.status, applied)
+    return
+  }
+
+  // 6. APPROVAL — send a YES/NO message FIRST (so we capture its message_id), then
+  // persist the pending write under 'shopify_awaiting_approval'. On YES the Telegram
+  // webhook reads analysis_result.pending_write and applies it to the live theme via
+  // writeShopifyThemeFile; on NO the run is skipped. No live-theme change happens now.
+  if (!chatId) throw new Error(`No telegram_chat_id for subscription ${conn.subscription_id}`)
+
+  // Inline the sendMessage fetch here (mirrors sendTelegramNotification) INSTEAD of
+  // extending sendShopifyTelegram to return a message_id. sendShopifyTelegram is a
+  // shared fire-and-forget helper used by every other branch of THIS function (and the
+  // read-failure paths); the task is to replace only this tail without touching other
+  // functions, so changing that helper's signature is out of scope. We need the
+  // message_id so the YES reply can resolve THIS run — hence the inline fetch.
+  const approvalMsg =
+    `🤖 <b>Velyr — Shopify theme fix ready for approval</b>\n\n` +
     `<b>Problem:</b> ${escapeHtml(fixResult.problem || '—')}\n` +
     `<b>File:</b> <code>${escapeHtml(fixResult.file_to_edit || '—')}</code>` +
     (fixResult.confidence ? `\n<b>Confidence:</b> ${escapeHtml(fixResult.confidence)}` : '') +
-    (change ? `\n\n<b>Find:</b>\n<pre>${escapeHtml(change.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(change.replace.slice(0, 600))}</pre>` : '') +
-    `\n\n<i>Preview only — no PR was opened and nothing was changed in your store. Theme write access is pending Shopify approval.</i>`
-  await sendShopifyTelegram(chatId, previewMsg)
+    `\n\n<b>Find:</b>\n<pre>${escapeHtml(change.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(change.replace.slice(0, 600))}</pre>` +
+    `\n\nReply <b>YES</b> to apply this change to your live theme / <b>NO</b> to skip.`
+  const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: approvalMsg, parse_mode: 'HTML' }),
+  })
+  const tgData = await tgRes.json()
+  if (!tgData.ok) console.error('[shopify] approval telegram error:', tgData.description)
+  const messageId = tgData.result?.message_id || null
+
+  await dbWrite(
+    supabase.from('agent_runs').update({
+      status:              'shopify_awaiting_approval',
+      current_step:        'done',
+      completed_at:        new Date().toISOString(),
+      analysis_result:     {
+        ...fixResult,
+        analytics_snapshot: analytics?.last7Days,
+        revenue:            revenue || null,
+        pending_write:      { filename: fixResult.file_to_edit, themeId: conn.shopify_main_theme_id, newContent: applied.newContent },
+      },
+      problem_description: fixResult.problem,
+      pages_fixed:         [fixResult.file_to_edit],
+      telegram_message_id: messageId,
+    }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_awaiting_approval_update',
+  )
 }
 
 // ─── SHOPIFY-VIA-GITHUB: READ THEME FILES FROM THE REPO TREE (SG1) ────────────
