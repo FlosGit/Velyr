@@ -275,7 +275,7 @@ async function findPendingRunForChat(chatId) {
     .from('agent_runs')
     .select('id')
     .in('subscription_id', subIds)
-    .eq('status', 'waiting_approval')
+    .in('status', ['waiting_approval', 'shopify_awaiting_approval'])
     .order('created_at', { ascending: false })
     .limit(1)
 
@@ -297,7 +297,7 @@ async function resolveApprovalRunId(message, chatId) {
         .from('agent_runs')
         .select('id')
         .eq('telegram_message_id', repliedId)
-        .eq('status', 'waiting_approval')
+        .in('status', ['waiting_approval', 'shopify_awaiting_approval'])
         .in('subscription_id', subIds)
         .maybeSingle()
       if (run?.id) return run.id
