@@ -2,12 +2,12 @@
 //
 // Reuses the exact d3-force layout from SiteNetwork (`settle`), run ONCE to
 // convergence and then frozen — no live ticking, no drag, no zoom, no hover,
-// no tooltip, no click. Renders a static SVG scaled to COVER its fixed-size
-// box (preserveAspectRatio="…slice"): the settled bbox is landscape (~1.7:1),
-// so a compact full-width band would otherwise pillarbox; slice fills the card
-// edge-to-edge with a mild centre crop (the hub sits at the centroid, so the
-// focal point always survives). Pointer events are off — the parent card owns
-// the click-through to the full Network page.
+// no tooltip, no click. Renders a static SVG scaled to CONTAIN its fixed-size
+// box (preserveAspectRatio="…meet"): the settled bbox is landscape (~1.6:1), so
+// on a wide card meet leaves modest parchment side-margins — accepted on purpose
+// so the WHOLE graph stays visible (slice cropped peripheral nodes, making the
+// site look like it had fewer pages than it does). Pointer events are off — the
+// parent card owns the click-through to the full Network page.
 //
 // Props:
 //   data:   SiteNetworkData (from buildNetworkData) — same shape SiteNetwork takes
@@ -41,7 +41,7 @@ export default function MiniNetwork({ data, style }) {
       viewBox={viewBox}
       width="100%"
       height="100%"
-      preserveAspectRatio="xMidYMid slice"
+      preserveAspectRatio="xMidYMid meet"
       aria-hidden="true"
       style={{ display: 'block', background: '#f7f4ef', pointerEvents: 'none', ...style }}
     >

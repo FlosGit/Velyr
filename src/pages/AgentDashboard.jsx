@@ -921,12 +921,12 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
                 <div>
                   <SectionLabel style={{marginBottom:2}}>Site Network</SectionLabel>
-                  <p style={{fontSize:11,color:C.textLight}}>How your pages connect · click to explore</p>
+                  <p style={{fontSize:11,color:C.textLight}}>How your pages connect</p>
                 </div>
                 <span style={{fontSize:11,color:C.accent,whiteSpace:'nowrap'}}>View full map →</span>
               </div>
               <div style={{borderRadius:8,overflow:'hidden',border:`1px solid ${C.border}`}}>
-                <MiniNetwork data={networkData} style={{height:300}}/>
+                <MiniNetwork data={networkData} style={{height:260}}/>
               </div>
             </Card>
           </div>
