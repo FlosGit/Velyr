@@ -880,12 +880,11 @@ function AgentDashboardPreview({ navigate, booted = true }) {
 
   const [tab, setTab] = useState('overview')
 
-  // Only Overview, Insights, Funnel and Network are wired in this landing mock;
+  // Only Overview, Funnel and Network are wired in this landing mock;
   // the rest are visible-but-inert, matching the real dashboard's look.
   const NAV_ITEMS = [
     { id:'overview',   label:'Overview',   icon:'⊙', wired:true },
     { id:'runs',       label:'Runs',       icon:'↻' },
-    { id:'insights',   label:'Insights',   icon:'◈', wired:true },
     { id:'funnel',     label:'Funnel',     icon:'⬦', wired:true },
     { id:'network',    label:'Network',    icon:'⬡', wired:true },
     { id:'dna',        label:'DNA',        icon:'◉' },
@@ -895,7 +894,6 @@ function AgentDashboardPreview({ navigate, booted = true }) {
 
   const HEADER = {
     overview: { kicker:'Growth Agent Dashboard', title:<>Autonomous growth <em style={{ fontStyle:'italic', color:DC.accent }}>optimization.</em></>, sub:'Your agent analyzes, fixes and improves your website — continuously. · Auto-refreshes every 30s' },
-    insights: { kicker:'Insights',               title:<>What the agent <em style={{ fontStyle:'italic', color:DC.accent }}>learned.</em></>, sub:'Patterns and recommendations distilled from your runs and outcomes.' },
     funnel:   { kicker:'Funnel',                 title:<>Where visitors <em style={{ fontStyle:'italic', color:DC.accent }}>drop off.</em></>, sub:'Every page cross-referenced with analytics to find the biggest leak.' },
     network:  { kicker:'Site Network',           title:<>The map the agent <em style={{ fontStyle:'italic', color:DC.accent }}>works from.</em></>, sub:'Every page in your repo and how visitors move between them.' },
   }
@@ -1313,25 +1311,6 @@ function AgentDashboardPreview({ navigate, booted = true }) {
           </div>
           </div>
         </div>
-        )}
-
-        {/* ── INSIGHTS TAB ─────────────────────────────────────────────── */}
-        {tab === 'insights' && (
-          <div className="dp-insights-grid" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-            {insights.map((ins,i) => (
-              <div key={i} style={{ background:ins.bg, border:`1px solid ${ins.border}`, borderRadius:12, padding:'18px 20px', minWidth:0 }}>
-                <div style={{ display:'flex', gap:11, alignItems:'flex-start' }}>
-                  <span style={{ fontSize:17, flexShrink:0 }}>{ins.icon}</span>
-                  <div style={{ minWidth:0 }}>
-                    <p style={{ fontSize:9.5, letterSpacing:'.08em', textTransform:'uppercase', fontWeight:600, color:ins.color, marginBottom:5 }}>{ins.label}</p>
-                    <p style={{ fontFamily:'Instrument Serif, serif', fontSize:22, fontWeight:400, color:DC.text, marginBottom:5, lineHeight:1.15, wordBreak:'break-word' }}>{ins.value}</p>
-                    <p style={{ fontSize:12, color:DC.textMuted, lineHeight:1.5, marginBottom:5 }}>{ins.sub}</p>
-                    <p style={{ fontSize:10, color:DC.textLight }}>{ins.detail}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
         )}
 
         {/* ── FUNNEL TAB ───────────────────────────────────────────────── */}
