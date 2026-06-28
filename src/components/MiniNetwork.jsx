@@ -9,13 +9,18 @@
 // site look like it had fewer pages than it does). Pointer events are off — the
 // parent card owns the click-through to the full Network page.
 //
+// A capped, counter-scaled set of labels (hub + the most prominent few; see
+// MINI_MAX_LABELS) is drawn so the thumbnail reads as a real map, not bare dots.
+//
 // Props:
 //   data:   SiteNetworkData (from buildNetworkData) — same shape SiteNetwork takes
 //   style?: CSSProperties applied to the outer SVG (set height here)
+//   fonts?: { sans? } — label font; defaults to DM Sans (dashboard context)
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   settle,
+  hubLabelLines,
   FILL,
   RING,
   CLUSTER_TINT,
@@ -26,18 +31,86 @@ import {
   edgeFade,
 } from './SiteNetwork.jsx'
 
-export default function MiniNetwork({ data, style }) {
+// Max labels in the compact preview (the mini has no hover/zoom/collision pass, so
+// labels can't reflow out of each other's way). The hub is ALWAYS labeled; among
+// entry/status-loud candidates we keep at most this many, ranked by prominence
+// (status-loud → rank → edge-degree → radius). A Shopify theme preview makes one
+// entry per directory (~5–15 isEntry nodes) — our primary market — so an uncapped
+// mini would pile labels on top of each other. When candidates exceed the cap we
+// render hub + the top-N, never all of them. Tuned to stay legible at ~320×172px.
+const MINI_MAX_LABELS = 5
+
+export default function MiniNetwork({ data, style, fonts = {} }) {
+  const fSans = fonts.sans ?? "'DM Sans', sans-serif"
+
+  // Measure the rendered box so label geometry can be counter-scaled to a constant
+  // SCREEN size: meet scales the settled viewBox to fit, and that scale varies with
+  // each customer's graph size, so a fixed unit font would render big on small
+  // graphs and tiny on large ones. Measuring keeps text px-stable at any graph size.
+  const svgRef = useRef(null)
+  const [box, setBox] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = svgRef.current
+    if (!el) return
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   // settle() is deterministic (golden-angle seeding, no Math.random) and cheap
   // for the ~20–50 nodes a site graph has, so run it synchronously here and
   // memoize on data — same arrangement as the full graph, computed once.
   const layout = useMemo(() => (data ? settle(data.nodes, data.edges) : null), [data])
+
+  // Per-node edge degree — the prominence signal for the label cap. Preview nodes
+  // have no rank/size, but a directory representative's degree = how many files
+  // hang off it, so high-degree reps are the meaningful surfaces to name.
+  const degree = useMemo(() => {
+    const d = {}
+    for (const e of (data?.edges || [])) { d[e.source] = (d[e.source] || 0) + 1; d[e.target] = (d[e.target] || 0) + 1 }
+    return d
+  }, [data])
+
+  // Capped label set: hub is rendered separately (always); here we pick the most
+  // prominent entry/status-loud nodes, up to MINI_MAX_LABELS.
+  const labeledIds = useMemo(() => {
+    if (!layout) return new Set()
+    const cands = layout.nodes.filter(n => !n.isHub && (n.isEntry || STATUS_LOUD.has(n.status)))
+    cands.sort((a, b) => {
+      const al = STATUS_LOUD.has(a.status) ? 0 : 1, bl = STATUS_LOUD.has(b.status) ? 0 : 1
+      if (al !== bl) return al - bl                       // status-loud first
+      const ar = a.rank ?? Infinity, br = b.rank ?? Infinity
+      if (ar !== br) return ar - br                       // then best rank (real runs)
+      const ad = degree[a.id] || 0, bd = degree[b.id] || 0
+      if (ad !== bd) return bd - ad                       // then busiest (preview signal)
+      if (b.r !== a.r) return b.r - a.r                   // then biggest radius
+      return String(a.id).localeCompare(String(b.id))     // deterministic tiebreak
+    })
+    return new Set(cands.slice(0, MINI_MAX_LABELS).map(n => n.id))
+  }, [layout, degree])
+
   if (!layout) return null
 
   const { x0, y0, x1, y1 } = layout.bbox
-  const viewBox = `${x0.toFixed(1)} ${y0.toFixed(1)} ${(x1 - x0).toFixed(1)} ${(y1 - y0).toFixed(1)}`
+  const vbW = x1 - x0, vbH = y1 - y0
+  const viewBox = `${x0.toFixed(1)} ${y0.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}`
+
+  // meet scale = px per viewBox unit (min of the two axes). Convert a target SCREEN
+  // px to viewBox units via px / scale. Pre-measure (scale 0) we fall back to the
+  // raw px as units for one frame, then the ResizeObserver corrects it.
+  const scale    = (box.w > 0 && box.h > 0) ? Math.min(box.w / vbW, box.h / vbH) : 0
+  const u        = (px) => (scale > 0 ? px / scale : px)
+  const nodeFont = u(11)     // ~11px node labels
+  const hubFont  = u(10.5)   // ~10.5px hub label
+  const halo     = u(2.5)    // parchment outline
+  const gap      = u(5)      // node edge → label gap
+  const lineH    = u(11)     // hub second-line spacing
 
   return (
     <svg
+      ref={svgRef}
       viewBox={viewBox}
       width="100%"
       height="100%"
@@ -75,7 +148,7 @@ export default function MiniNetwork({ data, style }) {
         })}
       </g>
 
-      {/* Nodes — status colour dominates, else cluster tint. No labels. */}
+      {/* Nodes — status colour dominates, else cluster tint. (Labels below.) */}
       <g>
         {layout.nodes.map(node => {
           const statusLoud = STATUS_LOUD.has(node.status)
@@ -93,6 +166,49 @@ export default function MiniNetwork({ data, style }) {
               fill={fill} fillOpacity={fillOpacity}
               stroke={stroke} strokeWidth={sw}
             />
+          )
+        })}
+      </g>
+
+      {/* Labels — sparse on purpose (no hover/zoom/collision pass in the mini):
+          hub domain + the MINI_MAX_LABELS most prominent entry/status-loud nodes.
+          Counter-scaled to ~constant screen px (text would otherwise shrink with
+          the graph). Hub label sits BELOW its circle — at this size, text inside a
+          ~7px-radius hub disc would be illegible. Parchment halo keeps it readable
+          over edges + blobs. */}
+      <g>
+        {layout.nodes.map(node => {
+          if (node.isHub) {
+            const [dl1, dl2] = hubLabelLines(data.meta.domain)
+            const y = node.y + node.r + gap + hubFont * 0.85
+            return (
+              <text key={node.id}
+                x={node.x} y={y} textAnchor="middle"
+                style={{
+                  fontSize: hubFont, fill: '#1c1917',
+                  stroke: 'rgba(247,244,239,0.9)', strokeWidth: halo, paintOrder: 'stroke fill',
+                  fontFamily: fSans, fontWeight: 600,
+                  pointerEvents: 'none', userSelect: 'none',
+                }}
+              >
+                <tspan x={node.x}>{dl1}</tspan>
+                {dl2 ? <tspan x={node.x} dy={lineH}>{dl2}</tspan> : null}
+              </text>
+            )
+          }
+          if (!labeledIds.has(node.id)) return null
+          return (
+            <text key={node.id}
+              x={node.x} y={node.y + node.r + gap + nodeFont * 0.85} textAnchor="middle"
+              style={{
+                fontSize: nodeFont, fill: '#1c1917',
+                stroke: 'rgba(247,244,239,0.9)', strokeWidth: halo, paintOrder: 'stroke fill',
+                fontFamily: fSans, fontWeight: STATUS_LOUD.has(node.status) ? 600 : 400,
+                pointerEvents: 'none', userSelect: 'none',
+              }}
+            >
+              {node.label}
+            </text>
           )
         })}
       </g>

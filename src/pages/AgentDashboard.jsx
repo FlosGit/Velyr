@@ -854,7 +854,7 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
 }
 
 // ─── OVERVIEW PAGE ────────────────────────────────────────────────────────────
-function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, siteNetwork, websiteUrl, onOpenNetwork}) {
+function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, siteNetwork, structurePreview, websiteUrl, onOpenNetwork}) {
   const activeRun = runs.find(r=>r.status==='running')
   const pendingRun = runs.find(r=>r.status==='waiting_approval')
   // Hide the Top Insights column entirely when there's nothing to show (day-1),
@@ -862,10 +862,13 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
   const hasInsights = buildTopInsights({runs, funnelPages, learnings, impactMetrics}).length > 0
 
   // Site Network mini-map data — reuses the already-fetched siteNetwork +
-  // websiteUrl (no extra fetch); same transform the Network tab uses. Null until
-  // the first run populates agent_site_network → the mini-map card hides (day-1).
+  // websiteUrl (no extra fetch); same transform the Network tab uses. Falls back to
+  // site_structure_preview (onboarding's discover_structure) so the map appears
+  // before the first run populates agent_site_network. Null only when neither exists.
   const networkInflight = runs.find(r=>r.status==='running') || runs.find(r=>r.status==='waiting_approval') || null
-  const networkData = buildNetworkData(siteNetwork, { domain: hubDomainFromUrl(websiteUrl), inflightRun: networkInflight })
+  const networkRow  = siteNetwork || structurePreview
+  const isPreview   = !siteNetwork && !!structurePreview
+  const networkData = buildNetworkData(networkRow, { domain: hubDomainFromUrl(websiteUrl), inflightRun: networkInflight })
 
   return (
     <div className="dash-overview-row" style={{display:'flex',gap:16,alignItems:'flex-start'}}>
@@ -918,15 +921,29 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
             style={{cursor:'pointer'}}
           >
             <Card style={{padding:'16px 18px'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-                <div>
-                  <SectionLabel style={{marginBottom:2}}>Site Network</SectionLabel>
-                  <p style={{fontSize:11,color:C.textLight}}>How your pages connect</p>
+              {/* Two-column widget: header/copy left, compact graph right. Wraps to
+                  stacked on narrow cards. Noticeably shorter than the old full-width
+                  260px version. */}
+              <div style={{display:'flex',flexWrap:'wrap',alignItems:'stretch',gap:18}}>
+                <div style={{flex:'1 1 200px',minWidth:0,display:'flex',flexDirection:'column'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                    <SectionLabel style={{marginBottom:0}}>Site Network</SectionLabel>
+                    {isPreview && (
+                      <span style={{
+                        fontSize:9,letterSpacing:'.08em',textTransform:'uppercase',
+                        color:C.textLight,border:`1px solid ${C.border}`,borderRadius:4,
+                        padding:'1px 5px',fontWeight:500,
+                      }}>Preview</span>
+                    )}
+                  </div>
+                  <p style={{fontSize:11,color:C.textLight,lineHeight:1.5}}>
+                    {isPreview ? 'Folder structure — refines after first run' : 'How your pages connect'}
+                  </p>
+                  <span style={{marginTop:'auto',paddingTop:14,fontSize:11,color:C.accent,whiteSpace:'nowrap'}}>View full map →</span>
                 </div>
-                <span style={{fontSize:11,color:C.accent,whiteSpace:'nowrap'}}>View full map →</span>
-              </div>
-              <div style={{borderRadius:8,overflow:'hidden',border:`1px solid ${C.border}`}}>
-                <MiniNetwork data={networkData} style={{height:260}}/>
+                <div style={{flex:'0 0 320px',height:172,maxWidth:'100%',borderRadius:8,overflow:'hidden',border:`1px solid ${C.border}`}}>
+                  <MiniNetwork data={networkData} fonts={{sans:"'DM Sans', sans-serif"}} style={{height:'100%'}}/>
+                </div>
               </div>
             </Card>
           </div>
@@ -1284,7 +1301,7 @@ const NODE_STATUS_DOT = {
 }
 
 // ─── NETWORK PAGE ─────────────────────────────────────────────────────────────
-function NetworkPage({ runs, siteNetwork, websiteUrl }) {
+function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
   const [selectedNode, setSelectedNode] = useState(null)
   const activeRun = runs.find(r => r.status === 'running') || null
   const isRunning = !!activeRun
@@ -1295,6 +1312,11 @@ function NetworkPage({ runs, siteNetwork, websiteUrl }) {
   const inflightRun = runs.find(r => r.status === 'running')
                    || runs.find(r => r.status === 'waiting_approval')
                    || null
+
+  // Fall back to the onboarding structure preview before the first run writes
+  // agent_site_network. isPreview drives the honest "preview" status copy below.
+  const networkRow = siteNetwork || structurePreview
+  const isPreview  = !siteNetwork && !!structurePreview
 
   // Status line
   let statusText, statusColor
@@ -1310,6 +1332,9 @@ function NetworkPage({ runs, siteNetwork, websiteUrl }) {
     const nextLabel = next.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
     statusText  = `Last run ${fmt(lastRun.created_at)} · next Mon ${nextLabel}`
     statusColor = C.textLight
+  } else if (isPreview) {
+    statusText  = 'Structure preview · live conversion map after your first run'
+    statusColor = C.textLight
   } else {
     statusText  = 'No runs yet'
     statusColor = C.textLight
@@ -1317,7 +1342,7 @@ function NetworkPage({ runs, siteNetwork, websiteUrl }) {
 
   // Hub label (deploy-subdomain aware) + shared transform → SiteNetworkData.
   const domain = hubDomainFromUrl(websiteUrl)
-  const networkData = buildNetworkData(siteNetwork, { domain, inflightRun })
+  const networkData = buildNetworkData(networkRow, { domain, inflightRun })
 
   return (
     <div>
@@ -2178,6 +2203,7 @@ export default function AgentDashboard({ navigate }) {
   const [impactMetrics,  setImpactMetrics]  = useState([])
   const [snippetDeclined, setSnippetDeclined] = useState(false)
   const [siteNetwork,     setSiteNetwork]     = useState(null)   // agent_site_network latest row
+  const [structurePreview,setStructurePreview]= useState(null)   // site_structure_preview row (pre-first-run fallback)
   const [websiteUrl,      setWebsiteUrl]      = useState(null)   // agent_connections.website_url
 
   // Demo mode: /agent?demo=true loads hardcoded data, bypasses Supabase.
@@ -2328,7 +2354,7 @@ export default function AgentDashboard({ navigate }) {
     setSubscription(subs)
     if(!subs) return
 
-    const [runsRes, funnelRes, learningsRes, impactRes, connRes, snRes] = await Promise.all([
+    const [runsRes, funnelRes, learningsRes, impactRes, connRes, snRes, previewRes] = await Promise.all([
       supabase.from('agent_runs').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
       supabase.from('agent_funnel_pages').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(30),
       supabase.from('agent_learnings').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
@@ -2337,6 +2363,10 @@ export default function AgentDashboard({ navigate }) {
       supabase.from('agent_connections').select('posthog_snippet_declined,website_url').eq('subscription_id',subs.id).maybeSingle(),
       // agent_site_network may not exist yet (Stage 4.5 migration); error is silently ignored
       supabase.from('agent_site_network').select('*').eq('subscription_id',subs.id).order('captured_at',{ascending:false}).limit(1).maybeSingle(),
+      // site_structure_preview: onboarding's discover_structure writes one row per
+      // subscription. Network surfaces fall back to it before the first run populates
+      // agent_site_network. Table may be absent on older deploys (42P01) — same silent handling.
+      supabase.from('site_structure_preview').select('*').eq('subscription_id',subs.id).maybeSingle(),
     ])
 
     if(runsRes.data) setRuns(runsRes.data)
@@ -2354,6 +2384,11 @@ export default function AgentDashboard({ navigate }) {
       console.warn('[fetchData] agent_site_network:', snRes.error.message)
     }
     setSiteNetwork(snRes.data || null)
+    // 42P01 (table absent on older deploys) stays silent, mirroring agent_site_network above.
+    if (previewRes.error && previewRes.error.code !== '42P01') {
+      console.warn('[fetchData] site_structure_preview:', previewRes.error.message)
+    }
+    setStructurePreview(previewRes.data || null)
    } catch (err) {
     // A network/transient failure must not strand the user on the spinner — the
     // 30s poll (and the fast post-checkout poll) will retry. Log for debugging.
@@ -2724,6 +2759,7 @@ export default function AgentDashboard({ navigate }) {
                     triggerLoading={triggerLoading}
                     triggerMessage={triggerMessage}
                     siteNetwork={siteNetwork}
+                    structurePreview={structurePreview}
                     websiteUrl={websiteUrl}
                     onOpenNetwork={()=>setActivePage('network')}
                   />
@@ -2740,6 +2776,7 @@ export default function AgentDashboard({ navigate }) {
                     <NetworkPage
                       runs={runs}
                       siteNetwork={siteNetwork}
+                      structurePreview={structurePreview}
                       websiteUrl={websiteUrl}
                     />
                   </div>

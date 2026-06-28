@@ -149,7 +149,7 @@ function computeLabeledIds(nodes) {
 // Two-line hub label. Dotted domains split body / .tld; dotless deploy slugs
 // (test-iota-drab-18) wrap at the hyphen nearest the middle. Lines too long to
 // fit the hub circle ellipsize cleanly — never a hard mid-word cut.
-function hubLabelLines(domain) {
+export function hubLabelLines(domain) {
   const cap = s => (s.length > 12 ? s.slice(0, 11) + '…' : s)
   if (domain.includes('.')) {
     const dot = domain.lastIndexOf('.')
