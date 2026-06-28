@@ -4,6 +4,7 @@ import { demoData } from '../data/demoData'
 import { startCheckout } from '../utils/startCheckout.js'
 import CheckoutConfirmModal from '../components/CheckoutConfirmModal.jsx'
 import { SiteNetwork } from '../components/SiteNetwork.jsx'
+import MiniNetwork from '../components/MiniNetwork.jsx'
 import { buildNetworkData, hubDomainFromUrl } from '../lib/siteNetworkData.js'
 import { MOTION_CSS, CountUp } from '../lib/motion.jsx'
 
@@ -853,12 +854,18 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
 }
 
 // ─── OVERVIEW PAGE ────────────────────────────────────────────────────────────
-function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage}) {
+function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, siteNetwork, websiteUrl, onOpenNetwork}) {
   const activeRun = runs.find(r=>r.status==='running')
   const pendingRun = runs.find(r=>r.status==='waiting_approval')
   // Hide the Top Insights column entirely when there's nothing to show (day-1),
   // letting the activity stream span full width — no onboarding-copy placeholder.
   const hasInsights = buildTopInsights({runs, funnelPages, learnings, impactMetrics}).length > 0
+
+  // Site Network mini-map data — reuses the already-fetched siteNetwork +
+  // websiteUrl (no extra fetch); same transform the Network tab uses. Null until
+  // the first run populates agent_site_network → the mini-map card hides (day-1).
+  const networkInflight = runs.find(r=>r.status==='running') || runs.find(r=>r.status==='waiting_approval') || null
+  const networkData = buildNetworkData(siteNetwork, { domain: hubDomainFromUrl(websiteUrl), inflightRun: networkInflight })
 
   return (
     <div className="dash-overview-row" style={{display:'flex',gap:16,alignItems:'flex-start'}}>
@@ -896,6 +903,34 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
             </div>
           )}
         </div>
+
+        {/* Site Network mini-map — non-interactive preview; the whole card links
+            to the full Network tab. Hidden until the first run populates the
+            graph (mirrors the Top Insights day-1 behaviour above). */}
+        {networkData && (
+          <div
+            className="fade-up"
+            role="button"
+            tabIndex={0}
+            onClick={onOpenNetwork}
+            onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onOpenNetwork?.() } }}
+            aria-label="Open the full Network map"
+            style={{cursor:'pointer'}}
+          >
+            <Card style={{padding:'16px 18px'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                <div>
+                  <SectionLabel style={{marginBottom:2}}>Site Network</SectionLabel>
+                  <p style={{fontSize:11,color:C.textLight}}>How your pages connect · click to explore</p>
+                </div>
+                <span style={{fontSize:11,color:C.accent,whiteSpace:'nowrap'}}>View full map →</span>
+              </div>
+              <div style={{borderRadius:8,overflow:'hidden',border:`1px solid ${C.border}`}}>
+                <MiniNetwork data={networkData} style={{height:300}}/>
+              </div>
+            </Card>
+          </div>
+        )}
 
         {/* Condensed learnings strip; the full per-outcome list lives on Runs. */}
         <AgentLearningStrip learnings={learnings}/>
@@ -2688,6 +2723,9 @@ export default function AgentDashboard({ navigate }) {
                     onTriggerRun={handleTriggerRun}
                     triggerLoading={triggerLoading}
                     triggerMessage={triggerMessage}
+                    siteNetwork={siteNetwork}
+                    websiteUrl={websiteUrl}
+                    onOpenNetwork={()=>setActivePage('network')}
                   />
                 )}
 
