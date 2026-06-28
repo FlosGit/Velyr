@@ -48,7 +48,7 @@ const CLUSTER_NAME = {
 
 // ─── visual tokens ────────────────────────────────────────────────────────────
 
-const FILL = {
+export const FILL = {
   neutral:         '#a8a39a',
   tracked:         '#ccc8c3',
   'fix-in-flight': '#c2a45f',
@@ -56,7 +56,7 @@ const FILL = {
   problem:         '#c2573d',
 }
 
-const RING = {
+export const RING = {
   neutral:         '#8a857e',
   tracked:         '#b0aaa4',
   'fix-in-flight': '#a8862e',
@@ -79,7 +79,7 @@ const STATUS_COPY = {
 // Low-saturation (near-grey, hint of hue) so a solid tinted node never reads as
 // a saturated status colour. Deliberately kept clear of gold #c2a45f, green
 // #2f6b4f, terracotta #c2573d so status always stays the loudest thing.
-const CLUSTER_TINT = {
+export const CLUSTER_TINT = {
   core:      '#838c86',
   marketing: '#979084',
   auth:      '#878d94',
@@ -89,7 +89,7 @@ const CLUSTER_TINT = {
   legal:     '#8b8983',
   other:     '#8d8983',
 }
-const CLUSTER_RING = {
+export const CLUSTER_RING = {
   core:      '#646c67',
   marketing: '#737065',
   auth:      '#686e74',
@@ -99,17 +99,17 @@ const CLUSTER_RING = {
   legal:     '#6b6963',
   other:     '#6c6963',
 }
-const STATUS_LOUD = new Set(['fix-in-flight', 'optimized', 'problem'])
+export const STATUS_LOUD = new Set(['fix-in-flight', 'optimized', 'problem'])
 
-const EDGE_RGB = '42,92,69'
+export const EDGE_RGB = '42,92,69'
 // Base stroke opacity per edge kind, before the degree-fade multiplier. Kept
 // low so edges whisper; high-degree fans fade further (see edgeFade()).
-const EDGE_BASE_OPACITY = { import: 0.16, structural: 0.09 }
+export const EDGE_BASE_OPACITY = { import: 0.16, structural: 0.09 }
 
 // Continuous degree fade — NOT a fitted threshold. Edges touching a busy node
 // (App, a shared util, etc.) recede smoothly; low-degree links stay legible.
 // exp decay on the busier endpoint's degree, floored so nothing fully vanishes.
-function edgeFade(maxDeg) {
+export function edgeFade(maxDeg) {
   return Math.max(0.22, Math.exp(-(maxDeg - 1) / 6))
 }
 
@@ -168,7 +168,8 @@ function hubLabelLines(domain) {
 }
 
 // Run D3 force simulation to convergence; returns flat renderable snapshot.
-function settle(rawNodes, rawEdges) {
+// Exported so MiniNetwork can reuse the exact same layout (settle once, no ticking).
+export function settle(rawNodes, rawEdges) {
   const clusterCount = {}
   rawNodes.forEach(n => { clusterCount[n.cluster] = (clusterCount[n.cluster] || 0) + 1 })
 
