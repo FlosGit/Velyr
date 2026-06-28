@@ -245,7 +245,7 @@ export const demoLearnings = [
   { id: 'l-8', subscription_id: 'demo-subscription', outcome: 'positive', summary: 'Above-the-fold pricing CTA reduces trial-start friction.',          change_type: 'cta_placement', delta: 3,    metric_type: 'bounce', confidence: 'high',   created_at: isoWeeksAgo(9) },
 ]
 
-// ── Impact metrics (Before / After in InsightsPage + KPI bar) ────────────────
+// ── Impact metrics (Before / After deltas; feeds the Top Insights panel on Overview) ──
 // One row per deployed run that has bounce_before / bounce_after defined.
 export const demoImpactMetrics = demoRuns
   .filter(r => r.status === 'deployed' && r.bounce_rate_before != null)

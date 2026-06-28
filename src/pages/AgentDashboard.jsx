@@ -69,7 +69,6 @@ const AGENT_STEPS = [
 const NAV_ITEMS = [
   { id:'overview',    label:'Overview',    icon:'⊙' },
   { id:'runs',        label:'Runs',        icon:'↻' },
-  { id:'insights',    label:'Insights',    icon:'◈' },
   { id:'network',     label:'Network',     icon:'◎' },
   { id:'funnel',      label:'Funnel',      icon:'⬦' },
   { id:'dna',         label:'DNA',         icon:'◉' },
@@ -671,84 +670,6 @@ function TopInsights(props) {
   )
 }
 
-// ─── REVENUE IMPACT ESTIMATOR ─────────────────────────────────────────────────
-function RevenueEstimator({runs, impactMetrics}) {
-  const [monthlyVisitors, setMonthlyVisitors] = useState(5000)
-  const [convRate, setConvRate] = useState(3)
-  const [avgOrderValue, setAvgOrderValue] = useState(50)
-
-  const deployed = runs.filter(r=>r.status==='deployed'||r.status==='approved')
-  const avgImprovementStr = deployed.map(r=>r.analysis_result?.expected_improvement).filter(Boolean)
-  const avgImprovementNum = avgImprovementStr.length>0
-    ? avgImprovementStr.reduce((s,v)=>{const n=parseFloat(v.replace(/[^0-9.]/g,''));return s+(isNaN(n)?0:n)},0)/avgImprovementStr.length
-    : 12
-
-  // FIX #7: clamp to 0 so negative inputs can't produce nonsense revenue numbers
-  const safeVisitors = Math.max(0, monthlyVisitors)
-  const safeConvRate = Math.max(0, convRate)
-  const safeAOV      = Math.max(0, avgOrderValue)
-
-  const baseRevenue     = safeVisitors * (safeConvRate / 100) * safeAOV
-  const improvedConvRate = safeConvRate * (1 + avgImprovementNum / 100)
-  const improvedRevenue = safeVisitors * (improvedConvRate / 100) * safeAOV
-  const delta           = improvedRevenue - baseRevenue
-
-  const inp = {
-    background:'rgba(26,25,22,0.04)', border:`1px solid ${C.border}`,
-    borderRadius:6, padding:'7px 10px', fontSize:13, color:C.text,
-    width:'100%', fontFamily:'DM Sans,sans-serif',
-  }
-
-  return (
-    <Card style={{padding:'22px',boxShadow:'0 6px 26px rgba(26,25,22,0.07)',borderColor:C.borderMed}}>
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
-        <SectionLabel style={{marginBottom:0}}>Revenue Impact Estimator</SectionLabel>
-        <span style={{fontSize:10,color:C.textLight,background:'rgba(26,25,22,0.06)',padding:'2px 6px',borderRadius:4}}>
-          based on {deployed.length} deployed fixes · avg +{Math.round(avgImprovementNum)}%
-        </span>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:16}}>
-        <div>
-          <label style={{fontSize:10,color:C.textLight,display:'block',marginBottom:5}}>Monthly visitors</label>
-          {/* FIX #7: min="0" prevents negative values at the browser level */}
-          <input type="number" min="0" value={monthlyVisitors} onChange={e=>setMonthlyVisitors(+e.target.value)} style={inp}/>
-        </div>
-        <div>
-          <label style={{fontSize:10,color:C.textLight,display:'block',marginBottom:5}}>Current conv. rate %</label>
-          <input type="number" min="0" step="0.1" value={convRate} onChange={e=>setConvRate(+e.target.value)} style={inp}/>
-        </div>
-        <div>
-          <label style={{fontSize:10,color:C.textLight,display:'block',marginBottom:5}}>Avg. order value (€)</label>
-          <input type="number" min="0" value={avgOrderValue} onChange={e=>setAvgOrderValue(+e.target.value)} style={inp}/>
-        </div>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
-        <div style={{background:'rgba(26,25,22,0.04)',borderRadius:8,padding:'12px 14px'}}>
-          <p style={{fontSize:10,color:C.textLight,marginBottom:4}}>Current revenue</p>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:26,color:C.text,lineHeight:1}}>
-            €{Math.round(baseRevenue).toLocaleString()}
-          </p>
-          <p style={{fontSize:10,color:C.textLight,marginTop:2}}>/month</p>
-        </div>
-        <div style={{background:C.accentSoft,border:`1px solid ${C.accentMid}`,borderRadius:8,padding:'12px 14px'}}>
-          <p style={{fontSize:10,color:C.accent,marginBottom:4}}>After Velyr fixes</p>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:26,color:C.accent,lineHeight:1}}>
-            €{Math.round(improvedRevenue).toLocaleString()}
-          </p>
-          <p style={{fontSize:10,color:C.accent,marginTop:2}}>/month</p>
-        </div>
-        <div style={{background:C.greenSoft,border:`1px solid rgba(30,122,60,0.2)`,borderRadius:8,padding:'12px 14px'}}>
-          <p style={{fontSize:10,color:C.green,marginBottom:4}}>Estimated uplift</p>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:26,color:C.green,lineHeight:1}}>
-            +€{Math.round(delta).toLocaleString()}
-          </p>
-          <p style={{fontSize:10,color:C.green,marginTop:2}}>/month</p>
-        </div>
-      </div>
-    </Card>
-  )
-}
-
 // ─── AGENT STATUS SIDEBAR ─────────────────────────────────────────────────────
 function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelectRun, onTriggerRun, triggerLoading, triggerMessage}) {
   const isPaused  = subscription?.status==='paused'
@@ -976,8 +897,7 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
           )}
         </div>
 
-        {/* RevenueEstimator removed from Overview — it now lives only on the
-            Insights tab (interactive calculator belongs in the analysis view). */}
+        {/* Condensed learnings strip; the full per-outcome list lives on Runs. */}
         <AgentLearningStrip learnings={learnings}/>
       </div>
 
@@ -1047,7 +967,7 @@ function AgentLearningStrip({learnings}) {
 }
 
 // ─── RUNS PAGE ────────────────────────────────────────────────────────────────
-function RunsPage({runs, loading, onSelect}) {
+function RunsPage({runs, loading, onSelect, learnings=[]}) {
   const [filter, setFilter] = useState('all')
   // Outcomes lead; error/rejection states trail (don't headline failure).
   const filters = ['all','deployed','waiting_approval','rejected','rolled_back','failed']
@@ -1067,6 +987,7 @@ function RunsPage({runs, loading, onSelect}) {
   })
 
   return (
+    <div style={{display:'flex',flexDirection:'column',gap:14}}>
     <Card style={{overflow:'hidden'}}>
       <div style={{padding:'14px 18px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
         <div>
@@ -1180,93 +1101,36 @@ function RunsPage({runs, loading, onSelect}) {
         </div>
       ))}
     </Card>
-  )
-}
 
-// ─── INSIGHTS PAGE ────────────────────────────────────────────────────────────
-function InsightsPage({runs, impactMetrics, learnings, funnelPages}) {
-  const deployed = runs.filter(r=>r.status==='deployed'||r.status==='approved')
-
-  const impactData = impactMetrics.map(m=>{
-    const run = runs.find(r=>r.id===m.run_id)
-    return {...m, run}
-  }).filter(m=>m.run&&m.value_before&&m.value_after)
-
-  return (
-    <div className="v-stagger" style={{display:'flex',flexDirection:'column',gap:14}}>
-
-      <RevenueEstimator runs={runs} impactMetrics={impactMetrics}/>
-
-      {impactData.length>0&&(
-        <Card style={{padding:'16px 18px'}}>
-          <SectionLabel style={{marginBottom:14}}>Before / After Impact</SectionLabel>
-          <div style={{display:'flex',flexDirection:'column',gap:0}}>
-            {impactData.map((m,i)=>{
-              const improvement = m.value_before - m.value_after
-              const isGood = improvement > 0
-              return (
-                <div key={m.id} style={{
-                  display:'grid',gridTemplateColumns:'1fr auto auto',gap:16,alignItems:'center',
-                  padding:'12px 0',borderBottom:i<impactData.length-1?`1px solid ${C.border}`:'none',
-                }}>
-                  <div>
-                    <p style={{fontSize:12,fontWeight:500,color:C.text,marginBottom:2}}>
-                      {m.run?.analysis_result?.problem||'Change'}
-                    </p>
-                    <p style={{fontSize:10,color:C.textMuted}}>
-                      {m.metric_type==='bounce_rate'?'Bounce rate':m.metric_type} · {timeAgo(m.measured_at)}
-                    </p>
-                  </div>
-                  <div style={{display:'flex',alignItems:'center',gap:10,fontSize:12}}>
-                    <span style={{color:C.textMuted}}>{m.value_before}%</span>
-                    <span style={{color:C.textLight}}>→</span>
-                    <span style={{color:isGood?C.green:C.red,fontWeight:500}}>{m.value_after}%</span>
-                  </div>
-                  <span style={{
-                    fontSize:12,fontWeight:500,
-                    color:isGood?C.green:C.red,
-                    background:isGood?C.greenSoft:C.redSoft,
-                    border:`1px solid ${isGood?'rgba(30,122,60,0.2)':C.redMid}`,
-                    borderRadius:5,padding:'3px 8px',whiteSpace:'nowrap',
-                  }}>
-                    {isGood?'−':'+'}<CountUp value={Math.abs(Math.round(improvement))} format={n=>Math.round(n)}/>%
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* AgentLearningStrip removed here — it duplicated the detailed list below
-          and the Overview strip. The full learnings list stays. */}
-      {learnings.length>0&&(
-        <Card style={{overflow:'hidden'}}>
-          <div style={{padding:'14px 18px',borderBottom:`1px solid ${C.border}`}}>
-            <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:1}}>Agent Learnings</p>
-            <p style={{fontSize:11,color:C.textLight}}>Every outcome improves future decisions</p>
-          </div>
-          {learnings.map((l,i)=>(
-            <div key={l.id||i} style={{
-              display:'flex',alignItems:'flex-start',gap:12,padding:'12px 18px',
-              borderBottom:i<learnings.length-1?`1px solid ${C.border}`:'none',
-              background:l.outcome==='positive'?C.greenSoft:C.redSoft,
-            }}>
-              <span style={{fontSize:14,color:l.outcome==='positive'?C.green:C.red,flexShrink:0,paddingTop:1}}>
-                {l.outcome==='positive'?'✓':'✕'}
-              </span>
-              <div style={{flex:1,minWidth:0}}>
-                <p style={{fontSize:12,color:C.text,marginBottom:2}}>{l.summary}</p>
-                <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-                  <span style={{fontSize:10,color:C.textMuted}}>{l.change_type}</span>
-                  {l.delta&&<span style={{fontSize:10,color:l.outcome==='positive'?C.green:C.red,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}% {l.metric_type}</span>}
-                  <span style={{fontSize:10,color:C.textLight}}>{l.confidence} confidence</span>
-                </div>
+    {/* Agent Learnings — full per-outcome history (moved here from the removed
+        Insights tab; the condensed AgentLearningStrip stays on Overview). */}
+    {learnings.length>0&&(
+      <Card style={{overflow:'hidden'}}>
+        <div style={{padding:'14px 18px',borderBottom:`1px solid ${C.border}`}}>
+          <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:1}}>Agent Learnings</p>
+          <p style={{fontSize:11,color:C.textLight}}>Every outcome improves future decisions</p>
+        </div>
+        {learnings.map((l,i)=>(
+          <div key={l.id||i} style={{
+            display:'flex',alignItems:'flex-start',gap:12,padding:'12px 18px',
+            borderBottom:i<learnings.length-1?`1px solid ${C.border}`:'none',
+            background:l.outcome==='positive'?C.greenSoft:C.redSoft,
+          }}>
+            <span style={{fontSize:14,color:l.outcome==='positive'?C.green:C.red,flexShrink:0,paddingTop:1}}>
+              {l.outcome==='positive'?'✓':'✕'}
+            </span>
+            <div style={{flex:1,minWidth:0}}>
+              <p style={{fontSize:12,color:C.text,marginBottom:2}}>{l.summary}</p>
+              <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                <span style={{fontSize:10,color:C.textMuted}}>{l.change_type}</span>
+                {l.delta&&<span style={{fontSize:10,color:l.outcome==='positive'?C.green:C.red,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}% {l.metric_type}</span>}
+                <span style={{fontSize:10,color:C.textLight}}>{l.confidence} confidence</span>
               </div>
             </div>
-          ))}
-        </Card>
-      )}
+          </div>
+        ))}
+      </Card>
+    )}
     </div>
   )
 }
@@ -2830,13 +2694,7 @@ export default function AgentDashboard({ navigate }) {
 
                 {activePage==='runs'&&(
                   <div className="fade-up">
-                    <RunsPage runs={runs} loading={loading} onSelect={setSelected}/>
-                  </div>
-                )}
-
-                {activePage==='insights'&&(
-                  <div className="fade-up">
-                    <InsightsPage runs={runs} impactMetrics={impactMetrics} learnings={learnings} funnelPages={funnelPages}/>
+                    <RunsPage runs={runs} loading={loading} onSelect={setSelected} learnings={learnings}/>
                   </div>
                 )}
 
