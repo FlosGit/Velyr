@@ -1926,7 +1926,7 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
 
         <div style={{marginBottom:8}}>
           <label style={{fontSize:11,color:C.textMuted,fontWeight:300,marginBottom:4,display:'block'}}>Your public URL slug</label>
-          <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,''))} placeholder="florian"
+          <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,''))} placeholder="demo-store"
             style={{width:'100%',maxWidth:280,padding:'8px 12px',fontSize:13,fontFamily:'DM Mono,monospace',
               border:`1px solid ${slugValid?C.border:C.red}`,borderRadius:6,background:'#fff',outline:'none'}} />
           <p style={{fontSize:11,color:C.textMuted,marginTop:6,fontFamily:'DM Mono,monospace'}}>{previewUrl}</p>
@@ -1970,7 +1970,6 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
       <div style={{padding:'18px 20px',borderBottom:`1px solid ${C.border}`}}>
         <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:8}}>Account</p>
         <p style={{fontSize:12,color:C.textMuted,marginBottom:2}}>Email: {user?.email}</p>
-        <p style={{fontSize:12,color:C.textMuted}}>Plan: {subscription?.plan||'Growth'}</p>
       </div>
       <div style={{padding:'18px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap'}}>
         <div>
