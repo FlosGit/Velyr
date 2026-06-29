@@ -12,6 +12,11 @@
 // A capped, counter-scaled set of labels (hub + the most prominent few; see
 // MINI_MAX_LABELS) is drawn so the thumbnail reads as a real map, not bare dots.
 //
+// Visuals come from the shared networkGlass primitives (glass-sphere nodes, hero
+// glow on the root, soft cluster halos, cluster-tinted curved edges). Because the
+// card is small and on a PURE WHITE bg, halos are damped/tightened locally (see
+// MINI_HALO_*) and label outlines are white (not parchment) so they stay legible.
+//
 // Props:
 //   data:   SiteNetworkData (from buildNetworkData) — same shape SiteNetwork takes
 //   style?: CSSProperties applied to the outer SVG (set height here)
@@ -21,15 +26,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   settle,
   hubLabelLines,
-  FILL,
-  RING,
-  CLUSTER_TINT,
-  CLUSTER_RING,
   STATUS_LOUD,
-  EDGE_RGB,
-  EDGE_BASE_OPACITY,
-  edgeFade,
 } from './SiteNetwork.jsx'
+import {
+  GraphDefs,
+  GlassNode,
+  ClusterHalo,
+  CurvedEdge,
+  edgeTintRgb,
+} from './networkGlass.jsx'
 
 // Max labels in the compact preview (the mini has no hover/zoom/collision pass, so
 // labels can't reflow out of each other's way). The hub is ALWAYS labeled; among
@@ -39,6 +44,14 @@ import {
 // mini would pile labels on top of each other. When candidates exceed the cap we
 // render hub + the top-N, never all of them. Tuned to stay legible at ~320×172px.
 const MINI_MAX_LABELS = 5
+
+// Halo tuning for the compact Overview card. The card is ~150px tall on a PURE
+// WHITE bgCard (not the parchment the big canvas uses), so the shared halo
+// gradient would flood this small box. Dampen locally: a group-opacity multiplier
+// + a radius shrink keep halos as discrete soft pools so the thumbnail stays airy.
+// Deliberately NOT the values the interactive graph will use.
+const MINI_HALO_OPACITY = 0.5
+const MINI_HALO_RADIUS_SCALE = 0.74
 
 export default function MiniNetwork({ data, style, fonts = {} }) {
   const fSans = fonts.sans ?? "'DM Sans', sans-serif"
@@ -93,6 +106,12 @@ export default function MiniNetwork({ data, style, fonts = {} }) {
 
   if (!layout) return null
 
+  // id-less edge → target-cluster lookup by exact settled position (edge.x2/y2
+  // equal the target node's x/y). Lets edges tint toward their target cluster
+  // without changing settle's edge shape.
+  const clusterAt = new Map()
+  for (const n of layout.nodes) clusterAt.set(n.x + ',' + n.y, n.cluster)
+
   const { x0, y0, x1, y1 } = layout.bbox
   const vbW = x1 - x0, rawH = y1 - y0
   // Extra bottom room for the hub's below-circle label: it's up to 2 lines and
@@ -113,7 +132,7 @@ export default function MiniNetwork({ data, style, fonts = {} }) {
   const u        = (px) => (scale > 0 ? px / scale : px)
   const nodeFont = u(11)     // ~11px node labels
   const hubFont  = u(10.5)   // ~10.5px hub label
-  const halo     = u(2.5)    // parchment outline
+  const labelHalo = u(3)     // light outline — whiter + wider for the pure-white card
   const gap      = u(5)      // node edge → label gap
   const lineH    = u(11)     // hub second-line spacing
 
@@ -127,64 +146,43 @@ export default function MiniNetwork({ data, style, fonts = {} }) {
       aria-hidden="true"
       style={{ display: 'block', background: '#f7f4ef', pointerEvents: 'none', ...style }}
     >
-      {/* Soft cluster region blobs — a whisper of category structure. */}
-      <g>
+      {/* Shared glass/halo defs — gradients + the single root blur filter. */}
+      <GraphDefs />
+
+      {/* Soft cluster halos — radialGradient pools (tint → transparent), damped
+          + tightened (see MINI_HALO_*) so they hint category on the small white
+          card without flooding it. Computed once from the settled blob geometry. */}
+      <g opacity={MINI_HALO_OPACITY}>
         {layout.clusterBlobs.map(bl => (
-          <circle key={bl.cluster}
-            cx={bl.cx} cy={bl.cy} r={bl.r}
-            fill={CLUSTER_TINT[bl.cluster] || '#9a958e'}
-            fillOpacity={0.06}
-          />
+          <ClusterHalo key={bl.cluster}
+            blob={{ ...bl, r: bl.r * MINI_HALO_RADIUS_SCALE }} />
         ))}
       </g>
 
-      {/* Edges — faint curved arcs; opacity fades with endpoint degree. */}
-      <g fill="none">
+      {/* Edges — soft curved arcs, tinted toward the target cluster. */}
+      <g>
         {layout.edges.map(e => {
-          const dx = e.x2 - e.x1, dy = e.y2 - e.y1
-          const len = Math.hypot(dx, dy) || 1
-          const off = len * 0.12
-          const mx = (e.x1 + e.x2) / 2 + (-dy / len) * off
-          const my = (e.y1 + e.y2) / 2 + ( dx / len) * off
-          const opacity = (EDGE_BASE_OPACITY[e.kind] ?? 0.1) * edgeFade(e.maxDeg)
+          const tc = clusterAt.get(e.x2 + ',' + e.y2)
           return (
-            <path key={e.key}
-              d={`M${e.x1.toFixed(1)} ${e.y1.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${e.x2.toFixed(1)} ${e.y2.toFixed(1)}`}
-              stroke={`rgba(${EDGE_RGB},${opacity.toFixed(3)})`}
-              strokeWidth={e.kind === 'import' ? 0.8 : 0.55}
-            />
+            <CurvedEdge key={e.key} edge={e} tint={tc ? edgeTintRgb(tc) : undefined} />
           )
         })}
       </g>
 
-      {/* Nodes — status colour dominates, else cluster tint. (Labels below.) */}
+      {/* Nodes — glass spheres: hero glow on the root, specular on prominent
+          nodes, tint-gradient (no highlight) on quiet leaves. (Labels below.) */}
       <g>
-        {layout.nodes.map(node => {
-          const statusLoud = STATUS_LOUD.has(node.status)
-          const fill = node.isHub ? '#2a5c45'
-                     : statusLoud ? FILL[node.status]
-                     : (CLUSTER_TINT[node.cluster] || FILL[node.status])
-          const stroke = node.isHub ? 'none'
-                       : statusLoud ? RING[node.status]
-                       : (CLUSTER_RING[node.cluster] || RING[node.status])
-          const sw = node.isEntry && !node.isHub ? 2.0 : 1.5
-          const fillOpacity = (node.isHub || node.isEntry || node.rank != null || statusLoud) ? 1 : 0.65
-          return (
-            <circle key={node.id}
-              cx={node.x} cy={node.y} r={node.r}
-              fill={fill} fillOpacity={fillOpacity}
-              stroke={stroke} strokeWidth={sw}
-            />
-          )
-        })}
+        {layout.nodes.map(node => (
+          <GlassNode key={node.id} node={node} />
+        ))}
       </g>
 
       {/* Labels — sparse on purpose (no hover/zoom/collision pass in the mini):
           hub domain + the MINI_MAX_LABELS most prominent entry/status-loud nodes.
           Counter-scaled to ~constant screen px (text would otherwise shrink with
           the graph). Hub label sits BELOW its circle — at this size, text inside a
-          ~7px-radius hub disc would be illegible. Parchment halo keeps it readable
-          over edges + blobs. */}
+          ~7px-radius hub disc would be illegible. A white stroke halo keeps it
+          readable over edges, halos + glass nodes on the pure-white card. */}
       <g>
         {layout.nodes.map(node => {
           if (node.isHub) {
@@ -195,7 +193,7 @@ export default function MiniNetwork({ data, style, fonts = {} }) {
                 x={node.x} y={y} textAnchor="middle"
                 style={{
                   fontSize: hubFont, fill: '#1c1917',
-                  stroke: 'rgba(247,244,239,0.9)', strokeWidth: halo, paintOrder: 'stroke fill',
+                  stroke: 'rgba(255,255,255,0.95)', strokeWidth: labelHalo, paintOrder: 'stroke fill',
                   fontFamily: fSans, fontWeight: 600,
                   pointerEvents: 'none', userSelect: 'none',
                 }}
@@ -211,7 +209,7 @@ export default function MiniNetwork({ data, style, fonts = {} }) {
               x={node.x} y={node.y + node.r + gap + nodeFont * 0.85} textAnchor="middle"
               style={{
                 fontSize: nodeFont, fill: '#1c1917',
-                stroke: 'rgba(247,244,239,0.9)', strokeWidth: halo, paintOrder: 'stroke fill',
+                stroke: 'rgba(255,255,255,0.95)', strokeWidth: labelHalo, paintOrder: 'stroke fill',
                 fontFamily: fSans, fontWeight: STATUS_LOUD.has(node.status) ? 600 : 400,
                 pointerEvents: 'none', userSelect: 'none',
               }}
