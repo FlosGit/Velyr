@@ -1,4 +1,6 @@
-// networkGlass — shared "glass sphere + soft cluster halo" visual primitives.
+// networkGlass — shared "flat-shaded node + bounded cluster region" visual
+// primitives. (The filename is legacy — the locked look is flat/modern, NOT the
+// old glossy glass: no specular highlight, no heavy dark rim.)
 //
 // Consumed by BOTH d3-force renders (SiteNetwork interactive tab + MiniNetwork
 // Overview thumbnail). PRESENTATION ONLY: these helpers never touch data, layout
@@ -12,28 +14,33 @@
 //   clusterLabel{ cluster, x, y }  → caller passes the resolved label text
 //   edge        { kind, x1, y1, x2, y2, maxDeg }                     (settle.edges[])
 //
-// Design rules honoured here (see the rework brief):
-//  1. Node FILL still encodes status exactly as the existing render decides it —
-//     glass is layered on top, never changes which colour a node shows.
-//  2. Cluster identity = a tinted soft halo (+ label), never the node fill. The
-//     halo palette (CLUSTER_HALO) is a SEPARATE derived set — node fills stay grey.
-//  3. Only the root (hub) gets a real glow (feGaussianBlur) + hero-green glass.
-//  4. Labels get a faint light stroke backdrop (paint-order: stroke) for legibility.
+// Locked visual (see the rework brief):
+//  1. NODES — flat, clean, subtle depth. Fill = a BARELY-perceptible radial shade
+//     of the SAME status/cluster colour (light stop = colour +~15%, base stop =
+//     colour, radial pulled top-left). NO specular dot, NO dark rim. Thin 1px
+//     low-contrast stroke (slightly darker than the fill). The "which colour
+//     shows" decision is byte-for-byte the old behaviour; CLUSTER_TINT untouched.
+//  2. CLUSTER REGIONS — bounded with a DEFINED edge: a soft radial fill (centre
+//     ~0.20 → edge ~0.05) PLUS a thin stroke in the cluster colour (~0.5). The
+//     stroke is what makes each region read as a region, not indistinct fog.
+//  3. EDGES — tinted toward the TARGET cluster (caller resolves it from an id→node
+//     map); hub-outgoing edges lean green (caller passes EDGE_RGB). ~1.1px, ~0.55.
+//  4. CLUSTER LABELS — tinted in a darker shade of their OWN region colour
+//     (clusterLabelColor), not uniform grey.
+//  5. HUB (root) — the single focal point: flat green fill + a thin concentric
+//     ring + the one soft green glow (the only feGaussianBlur). No glossy dot.
 //  6. No animation here; any future pulse must be gated on prefers-reduced-motion.
 //
-// PERFORMANCE: one shared <defs> (GraphDefs) — one radial gradient per status
-// colour + per cluster tint + per cluster halo, one shared specular, one hero
-// gradient, ONE root blur filter. All gradients use objectBoundingBox units so a
-// single def serves every node size. NEVER a per-node gradient/filter.
+// PERFORMANCE: one shared <defs> (GraphDefs) — one subtle radial fill gradient per
+// status colour + per cluster tint + per cluster halo, one hero fill, ONE root
+// blur filter. All gradients use objectBoundingBox units so a single def serves
+// every node size. NEVER a per-node gradient/filter; no specular highlights.
 
 import {
   FILL,
-  RING,
   CLUSTER_TINT,
-  CLUSTER_RING,
   STATUS_LOUD,
   EDGE_RGB,
-  EDGE_BASE_OPACITY,
   edgeFade,
 } from './SiteNetwork.jsx'
 
@@ -42,36 +49,34 @@ import {
 // this module reads the imported palettes at module top-level — every palette
 // read happens inside a function/component body. Keep it that way.
 
-// ─── hero / root tokens (rule 3) ────────────────────────────────────────────────
-// Reuse of existing brand tokens: hub fill #2a5c45 (= C.accent / EDGE_RGB green),
-// rim #1e4433 (= C.accentDark). No new brand colour invented.
+// ─── hero / root token (rule 5) ─────────────────────────────────────────────────
+// Reuse of an existing brand token: hub fill #2a5c45 (= C.accent / EDGE_RGB green).
 const HERO_BASE = '#2a5c45'
-const HERO_RIM  = '#1e4433'
 
-// ─── cluster halo palette (rule 2) ──────────────────────────────────────────────
-// DERIVED, halo-only. Deliberately cooler / more pastel than the warm parchment
-// and offset from the status hues (green #2f6b4f / gold #c2a45f / terracotta
-// #c2573d) so a loud node never dissolves into its own halo. Does NOT replace
-// CLUSTER_TINT — node fills keep using the grey CLUSTER_TINT unchanged; these feed
-// ONLY the halo gradients.
+// ─── cluster region palette (rule 2) ────────────────────────────────────────────
+// NEW region palette: muted dusty jewel tones that harmonize with the warm
+// parchment AND stay clear of the status hues (green #2f6b4f / gold #c2a45f /
+// terracotta #c2573d) so a loud node never dissolves into its own region. Anchored
+// on slate / dusty teal / mauve / blue-violet; the full 8-cluster set lives in the
+// same cool/dusty register. Feeds ONLY the region fill+stroke (and, darkened, the
+// region labels) — does NOT replace CLUSTER_TINT, which keeps node fills grey.
 export const CLUSTER_HALO = {
-  core:      '#c4c8c6', // (core has no blob, kept for completeness)
-  marketing: '#b9c2e0', // cool periwinkle — away from warm gold
-  auth:      '#aecfd0', // pale teal
-  product:   '#b3c6dd', // soft blue
-  content:   '#c8bdda', // pale lavender
-  utility:   '#bcc3cb', // cool grey-blue
-  legal:     '#c2c4cf', // pale slate
-  other:     '#c0c8cf', // muted blue-grey
+  core:      '#8190c8', // slate (core has no blob, kept for completeness)
+  marketing: '#8f8ac0', // blue-violet — away from warm gold
+  auth:      '#6fa89a', // dusty teal
+  product:   '#7d9ec9', // dusty sky-slate
+  content:   '#a884b4', // mauve
+  utility:   '#7e9ba1', // grey-teal / steel
+  legal:     '#9692c2', // soft slate-violet
+  other:     '#8196bb', // dusty blue
 }
 
 // ─── shared <defs> ids ──────────────────────────────────────────────────────────
 // Pure string builders (no palette dependency) so node renderers and GraphDefs
 // agree on ids without sharing state.
-export const HERO_GLASS_ID = 'vn-glass-hero'
-export const SPECULAR_ID   = 'vn-specular'
-export const ROOT_GLOW_ID  = 'vn-root-glow'
-export const statusGlassId = (status)  => `vn-glass-${status}`
+export const HERO_FILL_ID = 'vn-fill-hero'
+export const ROOT_GLOW_ID = 'vn-root-glow'
+export const statusFillId  = (status)  => `vn-fill-status-${status}`
 export const clusterFillId = (cluster) => `vn-fill-${cluster}`
 export const clusterHaloId = (cluster) => `vn-halo-${cluster}`
 
@@ -89,8 +94,8 @@ function mixHex(hex, withHex, t) {
 }
 const lighten = (hex, t) => mixHex(hex, '#ffffff', t)
 
-// Blend the brand-green edge colour a little toward a target cluster's halo hue
-// (rule: edges "tinted toward the target cluster"). Returns an "r,g,b" string to
+// Blend the brand-green edge colour a little toward a target cluster's region hue
+// (rule 3: edges "tinted toward the target cluster"). Returns an "r,g,b" string to
 // drop straight into rgba(...). Caller resolves the target cluster from an id→node
 // map (no change to the edge shape). Falls back to plain green for unknown clusters.
 export function edgeTintRgb(cluster) {
@@ -103,26 +108,39 @@ export function edgeTintRgb(cluster) {
   return `${m(er, r)},${m(eg, g)},${m(eb, b)}`
 }
 
+// Region label colour (rule 4): a darker, still-tinted shade of the region's own
+// hue so each cluster label reads in its category colour, not uniform grey.
+export function clusterLabelColor(cluster) {
+  const base = CLUSTER_HALO[cluster] || CLUSTER_TINT[cluster] || '#5b5b5b'
+  return mixHex(base, '#1a1916', 0.5)
+}
+
 // ─── shared defs block ──────────────────────────────────────────────────────────
 
-function GlassGradient({ id, base, rim }) {
-  // objectBoundingBox radial, focal point pulled top-left for a lit-sphere look:
-  // lightened top → base → darker rim. One def serves any node radius.
+function FillGradient({ id, base }) {
+  // Flat/clean node fill: a radial shade of the SAME colour, focal point pulled
+  // top-left, light stop only ~15% over base → a BARELY-perceptible hint of depth
+  // (no specular, no dark rim, no bright dot). One objectBoundingBox def serves
+  // any node radius.
   return (
-    <radialGradient id={id} cx="0.5" cy="0.5" r="0.7" fx="0.34" fy="0.30">
-      <stop offset="0%"   stopColor={lighten(base, 0.5)} />
-      <stop offset="45%"  stopColor={base} />
-      <stop offset="100%" stopColor={rim} />
+    <radialGradient id={id} cx="0.38" cy="0.32" r="0.75">
+      <stop offset="0%"   stopColor={lighten(base, 0.15)} />
+      <stop offset="100%" stopColor={base} />
     </radialGradient>
   )
 }
 
 function HaloGradient({ id, tint }) {
+  // Bounded region FILL (rule 2): a calm radial wash from a low centre alpha to a
+  // small-but-nonzero edge alpha. The defined boundary comes from ClusterHalo's
+  // STROKE, not from this fading to zero — so the fill can stay soft and the
+  // region still reads as a region. This is the shared baseline; each surface
+  // attenuates DOWN via ClusterHalo's fillOpacity prop (an opacity can't exceed
+  // it, so it's the ceiling).
   return (
     <radialGradient id={id} cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0%"   stopColor={tint} stopOpacity="0.22" />
-      <stop offset="55%"  stopColor={tint} stopOpacity="0.08" />
-      <stop offset="100%" stopColor={tint} stopOpacity="0" />
+      <stop offset="0%"   stopColor={tint} stopOpacity="0.20" />
+      <stop offset="100%" stopColor={tint} stopOpacity="0.05" />
     </radialGradient>
   )
 }
@@ -133,32 +151,26 @@ export function GraphDefs() {
   const clusters     = Object.keys(CLUSTER_TINT)
   return (
     <defs>
-      {/* glossy white specular dot (objectBoundingBox → scales per highlight) */}
-      <radialGradient id={SPECULAR_ID} cx="0.5" cy="0.5" r="0.5">
-        <stop offset="0%"   stopColor="#ffffff" stopOpacity="0.6" />
-        <stop offset="70%"  stopColor="#ffffff" stopOpacity="0.12" />
-        <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-      </radialGradient>
+      {/* hero (root) fill */}
+      <FillGradient id={HERO_FILL_ID} base={HERO_BASE} />
 
-      {/* hero (root) glass */}
-      <GlassGradient id={HERO_GLASS_ID} base={HERO_BASE} rim={HERO_RIM} />
-
-      {/* one glass gradient per loud status (base = FILL, rim = RING) */}
+      {/* one subtle fill gradient per loud status (base = FILL) */}
       {loudStatuses.map(s => (
-        <GlassGradient key={s} id={statusGlassId(s)} base={FILL[s]} rim={RING[s]} />
+        <FillGradient key={s} id={statusFillId(s)} base={FILL[s]} />
       ))}
 
-      {/* one glass gradient per cluster tint (grey base for quiet/neutral nodes) */}
+      {/* one subtle fill gradient per cluster tint (grey base for PROMINENT
+          neutral/tracked nodes; quiet leaves use a flat literal fill) */}
       {clusters.map(c => (
-        <GlassGradient key={c} id={clusterFillId(c)} base={CLUSTER_TINT[c]} rim={CLUSTER_RING[c] || RING.neutral} />
+        <FillGradient key={c} id={clusterFillId(c)} base={CLUSTER_TINT[c]} />
       ))}
 
-      {/* one soft halo gradient per cluster (tint → transparent) */}
+      {/* one soft region fill gradient per cluster (tint wash, centre → edge) */}
       {clusters.map(c => (
         <HaloGradient key={c} id={clusterHaloId(c)} tint={CLUSTER_HALO[c] || CLUSTER_TINT[c]} />
       ))}
 
-      {/* the ONLY blur filter — root glow (rule 3) */}
+      {/* the ONLY blur filter — root glow (rule 5) */}
       <filter id={ROOT_GLOW_ID} x="-80%" y="-80%" width="260%" height="260%">
         <feGaussianBlur stdDeviation="5.5" />
       </filter>
@@ -166,59 +178,71 @@ export function GraphDefs() {
   )
 }
 
-// ─── glass-sphere node ──────────────────────────────────────────────────────────
+// ─── node ─────────────────────────────────────────────────────────────────────
 
-// "Prominent" nodes (hub, status-loud, entry points, ranked) get the full glass
-// sphere + specular highlight; quiet leaves get the same radial-gradient tint but
-// NO highlight (subtle shading, not a matte dot) and recede at 0.65 opacity —
-// matching the existing fillOpacity rule exactly so this is a drop-in for the
-// inline <circle>. Renders the sphere visual only; the caller keeps its own hover
-// ring / hit-area / hub text wrapper.
+// Clean, flat node: a filled circle in its status/cluster colour with a thin,
+// low-contrast stroke. Prominent nodes (hub, status-loud, entry, ranked) get the
+// VERY subtle top-left fill gradient for a hint of depth; quiet leaves get a flat
+// literal fill and recede at 0.65 opacity. NO specular, NO dark rim. The "which
+// colour shows" decision is byte-for-byte the old behaviour. The hub is the single
+// focal point: flat green disc + a thin concentric ring + the one soft glow.
 export function GlassNode({ node }) {
   const isHub   = !!node.isHub
   const loud    = STATUS_LOUD.has(node.status)
   const prominent = isHub || loud || node.isEntry || node.rank != null  // ⇔ fillOpacity 1
 
-  const fill = isHub                       ? `url(#${HERO_GLASS_ID})`
-             : loud                        ? `url(#${statusGlassId(node.status)})`
-             : CLUSTER_TINT[node.cluster]  ? `url(#${clusterFillId(node.cluster)})`
-             : (FILL[node.status] || FILL.neutral)               // literal fallback
-  const stroke = isHub ? 'none'
-               : loud  ? RING[node.status]
-               : (CLUSTER_RING[node.cluster] || RING[node.status])
-  const sw = node.isEntry && !isHub ? 2.0 : 1.5
+  // Base colour — unchanged status/cluster decision.
+  const base = isHub ? HERO_BASE
+             : loud  ? FILL[node.status]
+             : (CLUSTER_TINT[node.cluster] || FILL[node.status] || FILL.neutral)
+  // Thin, low-contrast edge: a slightly darker shade of the fill (modern, calm).
+  const stroke = mixHex(base, '#1a1916', 0.16)
+
+  if (isHub) {
+    return (
+      <>
+        {/* the one soft glow — marks the single focal point (rule 5) */}
+        <circle cx={node.x} cy={node.y} r={node.r * 1.7}
+          fill={HERO_BASE} opacity={0.4} filter={`url(#${ROOT_GLOW_ID})`} />
+        {/* flat-shaded green disc */}
+        <circle cx={node.x} cy={node.y} r={node.r}
+          fill={`url(#${HERO_FILL_ID})`} stroke={stroke} strokeWidth={1} />
+        {/* thin concentric accent ring */}
+        <circle cx={node.x} cy={node.y} r={node.r + 2.5}
+          fill="none" stroke={HERO_BASE} strokeOpacity={0.6} strokeWidth={1} />
+      </>
+    )
+  }
+
+  // Prominent → subtle top-left gradient; quiet → flat literal fill at 0.65.
+  const fillId = loud ? statusFillId(node.status)
+               : CLUSTER_TINT[node.cluster] ? clusterFillId(node.cluster) : null
+  const fill = prominent && fillId ? `url(#${fillId})` : base
+  const sw = node.isEntry ? 1.5 : 1
   const fillOpacity = prominent ? 1 : 0.65
 
   return (
-    <>
-      {isHub && (
-        <circle cx={node.x} cy={node.y} r={node.r * 1.7}
-          fill={HERO_BASE} opacity={0.45} filter={`url(#${ROOT_GLOW_ID})`} />
-      )}
-      <circle cx={node.x} cy={node.y} r={node.r}
-        fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={sw} />
-      {prominent && (
-        <circle
-          cx={node.x - node.r * 0.32}
-          cy={node.y - node.r * 0.36}
-          r={node.r * 0.55}
-          fill={`url(#${SPECULAR_ID})`}
-        />
-      )}
-    </>
+    <circle cx={node.x} cy={node.y} r={node.r}
+      fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={sw} />
   )
 }
 
-// ─── cluster halo + label ───────────────────────────────────────────────────────
-// Halo and label are SEPARATE renderers consuming settle's two distinct arrays
+// ─── cluster region + label ───────────────────────────────────────────────────
+// Region and label are SEPARATE renderers consuming settle's two distinct arrays
 // (clusterBlobs centred on the cluster; clusterLabels pushed radially outward).
 // One combined renderer would have to invent a paired structure and would lose
-// settle's label placement — so they stay split (constraint 1).
+// settle's label placement — so they stay split.
 
-export function ClusterHalo({ blob }) {
+// Bounded region (rule 2): the radial fill wash + a thin defined stroke in the
+// cluster colour. fillOpacity / strokeOpacity / strokeWidth are per-surface knobs
+// (the small white mini damps them more than the big parchment canvas) — the
+// defaults are the interactive-canvas baseline.
+export function ClusterHalo({ blob, fillOpacity = 1, strokeOpacity = 0.5, strokeWidth = 1.2 }) {
+  const ring = CLUSTER_HALO[blob.cluster] || CLUSTER_TINT[blob.cluster] || '#9a958e'
   return (
     <circle cx={blob.cx} cy={blob.cy} r={blob.r}
-      fill={`url(#${clusterHaloId(blob.cluster)})`} />
+      fill={`url(#${clusterHaloId(blob.cluster)})`} fillOpacity={fillOpacity}
+      stroke={ring} strokeOpacity={strokeOpacity} strokeWidth={strokeWidth} />
   )
 }
 
@@ -245,22 +269,24 @@ export function ClusterLabel({
 }
 
 // ─── soft curved edge ───────────────────────────────────────────────────────────
-// Same geometry/opacity as the existing edge render (so it's a drop-in); optional
-// `tint` ("r,g,b") leans the colour toward the target cluster — pass
-// edgeTintRgb(targetCluster); defaults to the brand-green EDGE_RGB.
+// Same geometry as the existing edge render (so it's a drop-in); optional `tint`
+// ("r,g,b") leans the colour toward the target cluster — pass edgeTintRgb(target),
+// or EDGE_RGB for hub-outgoing edges (rule 3). ~1.1px, ~0.55 opacity; the opacity
+// still fades with endpoint degree so busy fans recede (edgeFade ≤ 1, so 0.55 is
+// the ceiling).
 export function CurvedEdge({ edge, tint }) {
   const dx = edge.x2 - edge.x1, dy = edge.y2 - edge.y1
   const len = Math.hypot(dx, dy) || 1
   const off = len * 0.12
   const mx = (edge.x1 + edge.x2) / 2 + (-dy / len) * off
   const my = (edge.y1 + edge.y2) / 2 + ( dx / len) * off
-  const opacity = (EDGE_BASE_OPACITY[edge.kind] ?? 0.1) * edgeFade(edge.maxDeg)
+  const opacity = 0.55 * edgeFade(edge.maxDeg)
   return (
     <path
       d={`M${edge.x1.toFixed(1)} ${edge.y1.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${edge.x2.toFixed(1)} ${edge.y2.toFixed(1)}`}
       fill="none"
       stroke={`rgba(${tint || EDGE_RGB},${opacity.toFixed(3)})`}
-      strokeWidth={edge.kind === 'import' ? 0.8 : 0.55}
+      strokeWidth={1.1}
     />
   )
 }

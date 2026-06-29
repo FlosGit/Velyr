@@ -282,6 +282,7 @@ export function settle(rawNodes, rawEdges) {
       const t = e.target
       return {
         key:  `${s.id}--${t.id}--${e.kind}`,
+        source: s.id, target: t.id,   // stable ids for an id→node lookup (edge cluster tint / hub-green)
         kind:  e.kind,
         x1: s.x, y1: s.y,
         x2: t.x, y2: t.y,

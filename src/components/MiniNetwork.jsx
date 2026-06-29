@@ -12,10 +12,12 @@
 // A capped, counter-scaled set of labels (hub + the most prominent few; see
 // MINI_MAX_LABELS) is drawn so the thumbnail reads as a real map, not bare dots.
 //
-// Visuals come from the shared networkGlass primitives (glass-sphere nodes, hero
-// glow on the root, soft cluster halos, cluster-tinted curved edges). Because the
-// card is small and on a PURE WHITE bg, halos are damped/tightened locally (see
-// MINI_HALO_*) and label outlines are white (not parchment) so they stay legible.
+// Visuals come from the shared networkGlass primitives (flat-shaded nodes, hero
+// glow + concentric ring on the root, bounded cluster regions, cluster-tinted
+// curved edges). Because the card is small and on a PURE WHITE bg, the bounded
+// regions are damped locally (see MINI_REGION_*) — low fill/stroke opacity + a
+// hairline stroke so categories read present-but-quiet — and label outlines are
+// white (not parchment) so they stay legible.
 //
 // Props:
 //   data:   SiteNetworkData (from buildNetworkData) — same shape SiteNetwork takes
@@ -27,6 +29,7 @@ import {
   settle,
   hubLabelLines,
   STATUS_LOUD,
+  EDGE_RGB,
 } from './SiteNetwork.jsx'
 import {
   GraphDefs,
@@ -45,13 +48,18 @@ import {
 // render hub + the top-N, never all of them. Tuned to stay legible at ~320×172px.
 const MINI_MAX_LABELS = 5
 
-// Halo tuning for the compact Overview card. The card is ~150px tall on a PURE
-// WHITE bgCard (not the parchment the big canvas uses), so the shared halo
-// gradient would flood this small box. Dampen locally: a group-opacity multiplier
-// + a radius shrink keep halos as discrete soft pools so the thumbnail stays airy.
-// Deliberately NOT the values the interactive graph will use.
-const MINI_HALO_OPACITY = 0.5
-const MINI_HALO_RADIUS_SCALE = 0.74
+// Bounded-region tuning for the compact Overview card. The card is ~150px tall on
+// a PURE WHITE bgCard (not the parchment the big canvas uses), so the region's
+// non-zero edge fill (0.20→0.05) PLUS its defined stroke would easily flood this
+// small box. Damp all three per-surface knobs: fill opacity (× the gradient),
+// stroke opacity, and a hairline stroke COUNTER-SCALED to a constant screen px
+// (the regions are big in viewBox units, so a unit-stroke renders thinner here via
+// meet anyway — pinning it to px keeps it predictable). A radius shrink keeps each
+// region contained. Deliberately NOT the interactive canvas's HALO_* values.
+const MINI_REGION_RADIUS_SCALE = 0.74
+const MINI_REGION_FILL_OPACITY = 0.5     // × the 0.20→0.05 gradient ⇒ ~0.10 centre — airy
+const MINI_REGION_STROKE_OPACITY = 0.32  // present, but quiet
+const MINI_REGION_STROKE_PX = 0.75       // hairline boundary (constant screen px via u())
 
 export default function MiniNetwork({ data, style, fonts = {} }) {
   const fSans = fonts.sans ?? "'DM Sans', sans-serif"
@@ -106,11 +114,11 @@ export default function MiniNetwork({ data, style, fonts = {} }) {
 
   if (!layout) return null
 
-  // id-less edge → target-cluster lookup by exact settled position (edge.x2/y2
-  // equal the target node's x/y). Lets edges tint toward their target cluster
-  // without changing settle's edge shape.
-  const clusterAt = new Map()
-  for (const n of layout.nodes) clusterAt.set(n.x + ',' + n.y, n.cluster)
+  // id → node map. settle's edges now carry stable source/target ids, so resolve
+  // an edge's target cluster (for the tint) and whether its source is the hub (for
+  // the green lean) by id — no fragile coordinate-key matching.
+  const nodeById = new Map()
+  for (const n of layout.nodes) nodeById.set(n.id, n)
 
   const { x0, y0, x1, y1 } = layout.bbox
   const vbW = x1 - x0, rawH = y1 - y0
@@ -146,31 +154,38 @@ export default function MiniNetwork({ data, style, fonts = {} }) {
       aria-hidden="true"
       style={{ display: 'block', background: '#f7f4ef', pointerEvents: 'none', ...style }}
     >
-      {/* Shared glass/halo defs — gradients + the single root blur filter. */}
+      {/* Shared defs — node/region gradients + the single root blur filter. */}
       <GraphDefs />
 
-      {/* Soft cluster halos — radialGradient pools (tint → transparent), damped
-          + tightened (see MINI_HALO_*) so they hint category on the small white
-          card without flooding it. Computed once from the settled blob geometry. */}
-      <g opacity={MINI_HALO_OPACITY}>
+      {/* Cluster regions — bounded fill + a thin defined stroke, but DAMPED for the
+          small white card (see MINI_REGION_*): low fill/stroke opacity + a hairline
+          stroke counter-scaled to constant screen px, so categories read present-
+          but-quiet, never flooding. Computed once from the settled blob geometry. */}
+      <g>
         {layout.clusterBlobs.map(bl => (
           <ClusterHalo key={bl.cluster}
-            blob={{ ...bl, r: bl.r * MINI_HALO_RADIUS_SCALE }} />
+            blob={{ ...bl, r: bl.r * MINI_REGION_RADIUS_SCALE }}
+            fillOpacity={MINI_REGION_FILL_OPACITY}
+            strokeOpacity={MINI_REGION_STROKE_OPACITY}
+            strokeWidth={u(MINI_REGION_STROKE_PX)} />
         ))}
       </g>
 
-      {/* Edges — soft curved arcs, tinted toward the target cluster. */}
+      {/* Edges — soft curved arcs tinted toward the target cluster; hub-outgoing
+          edges lean green (EDGE_RGB). Endpoints resolved by stable id. */}
       <g>
         {layout.edges.map(e => {
-          const tc = clusterAt.get(e.x2 + ',' + e.y2)
+          const tc = nodeById.get(e.target)?.cluster
+          const tint = nodeById.get(e.source)?.isHub ? EDGE_RGB
+                     : (tc ? edgeTintRgb(tc) : undefined)
           return (
-            <CurvedEdge key={e.key} edge={e} tint={tc ? edgeTintRgb(tc) : undefined} />
+            <CurvedEdge key={e.key} edge={e} tint={tint} />
           )
         })}
       </g>
 
-      {/* Nodes — glass spheres: hero glow on the root, specular on prominent
-          nodes, tint-gradient (no highlight) on quiet leaves. (Labels below.) */}
+      {/* Nodes — flat-shaded discs: hero glow + concentric ring on the root, a
+          subtle top-left fill on prominent nodes, flat fill on quiet leaves. */}
       <g>
         {layout.nodes.map(node => (
           <GlassNode key={node.id} node={node} />
