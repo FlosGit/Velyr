@@ -111,7 +111,7 @@ const CSS = `
   /* Overview Site Network mini-map: the bordered box IS the click target; hover +
      keyboard focus lift the border to accent + a soft shadow so it reads clickable
      (no text/link chrome). */
-  .dash-mini-net{ border:1px solid ${C.border}; border-radius:8px; overflow:hidden; transition: border-color .18s ease, box-shadow .18s ease; }
+  .dash-mini-net{ background:${C.bgCard}; border:1px solid ${C.border}; border-radius:12px; overflow:hidden; max-width:320px; transition: border-color .18s ease, box-shadow .18s ease; }
   .dash-mini-net:hover{ border-color:${C.accent}; box-shadow: 0 4px 18px rgba(42,92,69,0.12); }
   .dash-mini-net:focus-visible{ outline:none; border-color:${C.accent}; box-shadow: 0 0 0 3px rgba(42,92,69,0.18); }
   .tag-remove{ cursor:pointer; color:#a09890; }
@@ -714,6 +714,36 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
   return (
     <div className="dash-ctx-sidebar" style={{width:272,flexShrink:0,position:'sticky',top:20,alignSelf:'flex-start',display:'flex',flexDirection:'column',gap:10}}>
 
+      {/* Site Network mini-map — FIRST sidebar item, above the Status card (the
+          "top-right" slot). 272px column keeps it compact; fixed 150px height +
+          overflow:hidden mean it can't stretch to content. The box is the click
+          target → Network tab. Pure graph in a card-matched frame (white bg, 1px
+          border, radius 12 — same as the Status/Performance cards). max-width keeps
+          it compact when the sidebar drops full-width ≤1100px. Hidden when no
+          graph/structure exists yet. */}
+      {networkData && (
+        <div
+          className="dash-mini-net"
+          role="button"
+          tabIndex={0}
+          onClick={onOpenNetwork}
+          onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onOpenNetwork?.() } }}
+          aria-label="Open the full Network map"
+          style={{position:'relative',height:150,cursor:'pointer'}}
+        >
+          {isPreview && (
+            <span style={{
+              position:'absolute',top:8,left:8,zIndex:2,
+              fontSize:9,letterSpacing:'.08em',textTransform:'uppercase',
+              color:C.textLight,background:'rgba(255,255,255,0.92)',
+              border:`1px solid ${C.border}`,borderRadius:4,padding:'1px 5px',
+              fontWeight:500,pointerEvents:'none',
+            }}>Preview</span>
+          )}
+          <MiniNetwork data={networkData} fonts={{sans:"'DM Sans', sans-serif"}} style={{height:'100%',background:C.bgCard}}/>
+        </div>
+      )}
+
       <Card style={{overflow:'hidden'}}>
         <div style={{
           padding:'12px 16px',
@@ -828,34 +858,6 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
           </button>
         </div>
       </Card>
-
-      {/* Site Network mini-map — second sidebar item (Status → mini-map →
-          Performance). The 272px column keeps it compact; fixed 150px height +
-          overflow:hidden mean it can't stretch to content. The box itself is the
-          click target → Network tab. Just the graph, no card chrome. Hidden when
-          no graph/structure exists yet. */}
-      {networkData && (
-        <div
-          className="dash-mini-net"
-          role="button"
-          tabIndex={0}
-          onClick={onOpenNetwork}
-          onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onOpenNetwork?.() } }}
-          aria-label="Open the full Network map"
-          style={{position:'relative',height:150,cursor:'pointer'}}
-        >
-          {isPreview && (
-            <span style={{
-              position:'absolute',top:8,left:8,zIndex:2,
-              fontSize:9,letterSpacing:'.08em',textTransform:'uppercase',
-              color:C.textLight,background:'rgba(247,244,239,0.9)',
-              border:`1px solid ${C.border}`,borderRadius:4,padding:'1px 5px',
-              fontWeight:500,pointerEvents:'none',
-            }}>Preview</span>
-          )}
-          <MiniNetwork data={networkData} fonts={{sans:"'DM Sans', sans-serif"}} style={{height:'100%'}}/>
-        </div>
-      )}
 
       <Card style={{padding:'14px 16px'}}>
         <SectionLabel style={{marginBottom:12}}>Performance</SectionLabel>

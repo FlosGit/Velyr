@@ -94,7 +94,16 @@ export default function MiniNetwork({ data, style, fonts = {} }) {
   if (!layout) return null
 
   const { x0, y0, x1, y1 } = layout.bbox
-  const vbW = x1 - x0, vbH = y1 - y0
+  const vbW = x1 - x0, rawH = y1 - y0
+  // Extra bottom room for the hub's below-circle label: it's up to 2 lines and
+  // counter-scaled to constant screen px, so on a graph where the hub is the
+  // lowest element it can exceed settle's fixed ~36-unit bottom reserve and kiss
+  // the edge. Top up the viewBox bottom by the shortfall (~28px of label below the
+  // hub minus the 36u reserve) plus ~12px breathing room — sized in units from a
+  // pre-scale so it tracks the label's on-screen height across graph sizes.
+  const preScale  = (box.w > 0 && box.h > 0) ? Math.min(box.w / vbW, box.h / rawH) : 0
+  const padBottom = preScale > 0 ? Math.max(0, 28 / preScale - 36) + 12 / preScale : rawH * 0.08
+  const vbH = rawH + padBottom
   const viewBox = `${x0.toFixed(1)} ${y0.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}`
 
   // meet scale = px per viewBox unit (min of the two axes). Convert a target SCREEN
