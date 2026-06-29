@@ -108,6 +108,12 @@ const CSS = `
   .btn:active{ transform: scale(0.98); }
   .card-hover{ transition: box-shadow .2s, transform .15s; }
   .card-hover:hover{ box-shadow: 0 4px 20px rgba(26,25,22,0.07); transform: translateY(-1px); }
+  /* Overview Site Network mini-map: the bordered box IS the click target; hover +
+     keyboard focus lift the border to accent + a soft shadow so it reads clickable
+     (no text/link chrome). */
+  .dash-mini-net{ border:1px solid ${C.border}; border-radius:8px; overflow:hidden; transition: border-color .18s ease, box-shadow .18s ease; }
+  .dash-mini-net:hover{ border-color:${C.accent}; box-shadow: 0 4px 18px rgba(42,92,69,0.12); }
+  .dash-mini-net:focus-visible{ outline:none; border-color:${C.accent}; box-shadow: 0 0 0 3px rgba(42,92,69,0.18); }
   .tag-remove{ cursor:pointer; color:#a09890; }
   .tag-remove:hover{ color:#b83232; }
   ::-webkit-scrollbar { width:3px; height:3px; }
@@ -880,7 +886,7 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
           <KPIBar runs={runs} learnings={learnings}/>
         </div>
 
-        <div style={{display:'grid',gridTemplateColumns:hasInsights?'1fr 1fr':'1fr',gap:14}}>
+        <div style={{display:'grid',gridTemplateColumns:(networkData||hasInsights)?'1fr 1fr':'1fr',gap:14}}>
           <Card className="fade-up" style={{padding:'16px 18px',animationDelay:'.1s'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
               <div>
@@ -899,55 +905,45 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
             <LiveActivityStream runs={runs} activeRun={activeRun}/>
           </Card>
 
-          {hasInsights && (
-            <div className="fade-up" style={{animationDelay:'.12s',display:'flex',flexDirection:'column',gap:10}}>
-              <SectionLabel>Top Insights</SectionLabel>
-              <TopInsights runs={runs} funnelPages={funnelPages} learnings={learnings} impactMetrics={impactMetrics}/>
+          {/* Right column of the Activity row: Site Network mini-map on top — just
+              the graph, card chrome dropped; the box itself is the click target →
+              Network tab. Then Top Insights below. The 2-col grid collapses to one
+              stacked column at ≤600px (global .dash-content grid rule), so on phones
+              the order is Activity Stream → mini-map → Top Insights, full-width. */}
+          {(networkData || hasInsights) && (
+            <div className="fade-up" style={{animationDelay:'.12s',display:'flex',flexDirection:'column',gap:14}}>
+              {networkData && (
+                <div
+                  className="dash-mini-net"
+                  role="button"
+                  tabIndex={0}
+                  onClick={onOpenNetwork}
+                  onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onOpenNetwork?.() } }}
+                  aria-label="Open the full Network map"
+                  style={{position:'relative',height:190,cursor:'pointer'}}
+                >
+                  {isPreview && (
+                    <span style={{
+                      position:'absolute',top:8,left:8,zIndex:2,
+                      fontSize:9,letterSpacing:'.08em',textTransform:'uppercase',
+                      color:C.textLight,background:'rgba(247,244,239,0.9)',
+                      border:`1px solid ${C.border}`,borderRadius:4,padding:'1px 5px',
+                      fontWeight:500,pointerEvents:'none',
+                    }}>Preview</span>
+                  )}
+                  <MiniNetwork data={networkData} fonts={{sans:"'DM Sans', sans-serif"}} style={{height:'100%'}}/>
+                </div>
+              )}
+
+              {hasInsights && (
+                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                  <SectionLabel>Top Insights</SectionLabel>
+                  <TopInsights runs={runs} funnelPages={funnelPages} learnings={learnings} impactMetrics={impactMetrics}/>
+                </div>
+              )}
             </div>
           )}
         </div>
-
-        {/* Site Network mini-map — non-interactive preview; the whole card links
-            to the full Network tab. Hidden until the first run populates the
-            graph (mirrors the Top Insights day-1 behaviour above). */}
-        {networkData && (
-          <div
-            className="fade-up"
-            role="button"
-            tabIndex={0}
-            onClick={onOpenNetwork}
-            onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onOpenNetwork?.() } }}
-            aria-label="Open the full Network map"
-            style={{cursor:'pointer'}}
-          >
-            <Card style={{padding:'16px 18px'}}>
-              {/* Two-column widget: header/copy left, compact graph right. Wraps to
-                  stacked on narrow cards. Noticeably shorter than the old full-width
-                  260px version. */}
-              <div style={{display:'flex',flexWrap:'wrap',alignItems:'stretch',gap:18}}>
-                <div style={{flex:'1 1 200px',minWidth:0,display:'flex',flexDirection:'column'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-                    <SectionLabel style={{marginBottom:0}}>Site Network</SectionLabel>
-                    {isPreview && (
-                      <span style={{
-                        fontSize:9,letterSpacing:'.08em',textTransform:'uppercase',
-                        color:C.textLight,border:`1px solid ${C.border}`,borderRadius:4,
-                        padding:'1px 5px',fontWeight:500,
-                      }}>Preview</span>
-                    )}
-                  </div>
-                  <p style={{fontSize:11,color:C.textLight,lineHeight:1.5}}>
-                    {isPreview ? 'Folder structure — refines after first run' : 'How your pages connect'}
-                  </p>
-                  <span style={{marginTop:'auto',paddingTop:14,fontSize:11,color:C.accent,whiteSpace:'nowrap'}}>View full map →</span>
-                </div>
-                <div style={{flex:'0 0 320px',height:172,maxWidth:'100%',borderRadius:8,overflow:'hidden',border:`1px solid ${C.border}`}}>
-                  <MiniNetwork data={networkData} fonts={{sans:"'DM Sans', sans-serif"}} style={{height:'100%'}}/>
-                </div>
-              </div>
-            </Card>
-          </div>
-        )}
 
         {/* Condensed learnings strip; the full per-outcome list lives on Runs. */}
         <AgentLearningStrip learnings={learnings}/>
