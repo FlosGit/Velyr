@@ -678,7 +678,7 @@ function TopInsights(props) {
 }
 
 // ─── AGENT STATUS SIDEBAR ─────────────────────────────────────────────────────
-function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelectRun, onTriggerRun, triggerLoading, triggerMessage}) {
+function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelectRun, onTriggerRun, triggerLoading, triggerMessage, networkData, isPreview, onOpenNetwork}) {
   const isPaused  = subscription?.status==='paused'
   const activeRun = runs.find(r=>r.status==='running')
   const isRunning = !!activeRun
@@ -829,6 +829,34 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
         </div>
       </Card>
 
+      {/* Site Network mini-map — second sidebar item (Status → mini-map →
+          Performance). The 272px column keeps it compact; fixed 150px height +
+          overflow:hidden mean it can't stretch to content. The box itself is the
+          click target → Network tab. Just the graph, no card chrome. Hidden when
+          no graph/structure exists yet. */}
+      {networkData && (
+        <div
+          className="dash-mini-net"
+          role="button"
+          tabIndex={0}
+          onClick={onOpenNetwork}
+          onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onOpenNetwork?.() } }}
+          aria-label="Open the full Network map"
+          style={{position:'relative',height:150,cursor:'pointer'}}
+        >
+          {isPreview && (
+            <span style={{
+              position:'absolute',top:8,left:8,zIndex:2,
+              fontSize:9,letterSpacing:'.08em',textTransform:'uppercase',
+              color:C.textLight,background:'rgba(247,244,239,0.9)',
+              border:`1px solid ${C.border}`,borderRadius:4,padding:'1px 5px',
+              fontWeight:500,pointerEvents:'none',
+            }}>Preview</span>
+          )}
+          <MiniNetwork data={networkData} fonts={{sans:"'DM Sans', sans-serif"}} style={{height:'100%'}}/>
+        </div>
+      )}
+
       <Card style={{padding:'14px 16px'}}>
         <SectionLabel style={{marginBottom:12}}>Performance</SectionLabel>
         {/* Process detail — the demoted deploy-rate + failure metrics (kept out of
@@ -886,7 +914,7 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
           <KPIBar runs={runs} learnings={learnings}/>
         </div>
 
-        <div style={{display:'grid',gridTemplateColumns:(networkData||hasInsights)?'1fr 1fr':'1fr',gap:14}}>
+        <div style={{display:'grid',gridTemplateColumns:hasInsights?'1fr 1fr':'1fr',gap:14}}>
           <Card className="fade-up" style={{padding:'16px 18px',animationDelay:'.1s'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
               <div>
@@ -905,42 +933,10 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
             <LiveActivityStream runs={runs} activeRun={activeRun}/>
           </Card>
 
-          {/* Right column of the Activity row: Site Network mini-map on top — just
-              the graph, card chrome dropped; the box itself is the click target →
-              Network tab. Then Top Insights below. The 2-col grid collapses to one
-              stacked column at ≤600px (global .dash-content grid rule), so on phones
-              the order is Activity Stream → mini-map → Top Insights, full-width. */}
-          {(networkData || hasInsights) && (
-            <div className="fade-up" style={{animationDelay:'.12s',display:'flex',flexDirection:'column',gap:14}}>
-              {networkData && (
-                <div
-                  className="dash-mini-net"
-                  role="button"
-                  tabIndex={0}
-                  onClick={onOpenNetwork}
-                  onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onOpenNetwork?.() } }}
-                  aria-label="Open the full Network map"
-                  style={{position:'relative',height:190,cursor:'pointer'}}
-                >
-                  {isPreview && (
-                    <span style={{
-                      position:'absolute',top:8,left:8,zIndex:2,
-                      fontSize:9,letterSpacing:'.08em',textTransform:'uppercase',
-                      color:C.textLight,background:'rgba(247,244,239,0.9)',
-                      border:`1px solid ${C.border}`,borderRadius:4,padding:'1px 5px',
-                      fontWeight:500,pointerEvents:'none',
-                    }}>Preview</span>
-                  )}
-                  <MiniNetwork data={networkData} fonts={{sans:"'DM Sans', sans-serif"}} style={{height:'100%'}}/>
-                </div>
-              )}
-
-              {hasInsights && (
-                <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                  <SectionLabel>Top Insights</SectionLabel>
-                  <TopInsights runs={runs} funnelPages={funnelPages} learnings={learnings} impactMetrics={impactMetrics}/>
-                </div>
-              )}
+          {hasInsights && (
+            <div className="fade-up" style={{animationDelay:'.12s',display:'flex',flexDirection:'column',gap:10}}>
+              <SectionLabel>Top Insights</SectionLabel>
+              <TopInsights runs={runs} funnelPages={funnelPages} learnings={learnings} impactMetrics={impactMetrics}/>
             </div>
           )}
         </div>
@@ -958,6 +954,9 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
         onTriggerRun={onTriggerRun}
         triggerLoading={triggerLoading}
         triggerMessage={triggerMessage}
+        networkData={networkData}
+        isPreview={isPreview}
+        onOpenNetwork={onOpenNetwork}
       />
     </div>
   )
