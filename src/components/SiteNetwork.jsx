@@ -23,6 +23,15 @@ import {
 } from 'd3-force'
 import { select } from 'd3-selection'
 import { zoom as d3zoom, zoomIdentity } from 'd3-zoom'
+import {
+  GraphDefs,
+  GlassNode,
+  ClusterHalo,
+  ClusterLabel,
+  CurvedEdge,
+  edgeTintRgb,
+  clusterLabelColor,
+} from './networkGlass.jsx'
 
 // ─── simulation constants ─────────────────────────────────────────────────────
 
@@ -112,6 +121,17 @@ export const EDGE_BASE_OPACITY = { import: 0.16, structural: 0.09 }
 export function edgeFade(maxDeg) {
   return Math.max(0.22, Math.exp(-(maxDeg - 1) / 6))
 }
+
+// ── Interactive cluster-region strength (dial these in the browser) ─────────────
+// The shared region renderer (ClusterHalo) carries the fill wash (0.20→0.05) PLUS
+// a defined stroke; these set the BIG parchment canvas's strength — independent
+// from the mini's MINI_REGION_* (white 150px card). The canvas is large and
+// already warm-toned, so it can carry a touch more than the mini. Radius < 1 keeps
+// each region contained so its boundary doesn't bleed into its neighbours.
+const REGION_FILL_OPACITY = 0.9     // × the 0.20→0.05 gradient
+const REGION_STROKE_OPACITY = 0.5   // the defined boundary (rule 2)
+const REGION_STROKE_WIDTH = 1.2     // viewBox units (canvas scale ≈ 1px/unit at k=1)
+const REGION_RADIUS_SCALE = 0.9     // contain each region's boundary
 
 
 // ─── layout helpers ───────────────────────────────────────────────────────────
@@ -493,6 +513,16 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {}, reveal = fal
     [layout],
   )
 
+  // id → node map for edge tinting. Keyed on the stable node id (NOT settled
+  // coordinates) so it survives the live zoom/pan transform — edge.source/target
+  // are node ids (added to settle's edge output). Resolves an edge's target
+  // cluster (colour lean) and whether its source is the hub (green lean).
+  const nodeById = useMemo(() => {
+    const m = new Map()
+    if (layout) for (const n of layout.nodes) m.set(n.id, n)
+    return m
+  }, [layout])
+
   // Zoom-adaptive labels. Quantize the zoom scale to 0.25 steps so the greedy
   // O(n²) collision pass only re-runs on meaningful zoom changes (cheap at 30
   // nodes, safe at 200). All label geometry is divided by kq: the labels live
@@ -687,54 +717,46 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {}, reveal = fal
                    cursor: panning ? 'grabbing' : 'grab' }}
           preserveAspectRatio="xMidYMid meet"
         >
+         {/* Shared defs — node/region gradients + the single root blur filter.
+             Outside the zoom group: defs aren't rendered, transform is irrelevant. */}
+         <GraphDefs />
          {animate && <style>{`@keyframes _sn_fadein { from { opacity: 0 } to { opacity: 1 } }`}</style>}
          <g ref={zoomGroupRef} transform={transformRef.current.toString()}>
-          {/* Soft cluster region blobs — a whisper of category structure behind
-              the nodes. Very low alpha so status colours always read over them. */}
+          {/* Cluster regions — bounded soft fill + a DEFINED stroke (rule 2) so
+              each category reads as a region, not indistinct fog. Strength via the
+              per-surface REGION_* knobs; the group owns the reveal-fade (animating
+              group opacity is independent of the per-element fill/stroke opacity).
+              Cool/dusty region hues (CLUSTER_HALO) sit clear of the status hues. */}
           <g style={animate ? { opacity: 0, animation: '_sn_fadein .5s ease forwards' } : undefined}>
             {layout.clusterBlobs.map(bl => (
-              <circle key={bl.cluster}
-                cx={bl.cx} cy={bl.cy} r={bl.r}
-                fill={CLUSTER_TINT[bl.cluster] || '#9a958e'}
-                fillOpacity={0.06}
-              />
+              <ClusterHalo key={bl.cluster}
+                blob={{ ...bl, r: bl.r * REGION_RADIUS_SCALE }}
+                fillOpacity={REGION_FILL_OPACITY}
+                strokeOpacity={REGION_STROKE_OPACITY}
+                strokeWidth={REGION_STROKE_WIDTH} />
             ))}
           </g>
 
-          {/* Cluster section labels — readable muted ink, adjacent to nodes */}
+          {/* Cluster section labels — tinted in a darker shade of each region's own
+              hue (rule 4), with a parchment backdrop stroke so they stay legible
+              over the tinted regions. */}
           {layout.clusterLabels.filter(cl => cl.cluster !== 'core').map(cl => (
-            <text key={cl.cluster}
-              x={cl.x} y={cl.y}
-              textAnchor="middle"
-              style={{
-                fontSize: 9, fill: 'rgba(42,92,69,0.55)',
-                fontFamily: fSans, fontWeight: 500,
-                letterSpacing: '0.14em', userSelect: 'none',
-                pointerEvents: 'none',
-              }}
-            >
-              {CLUSTER_NAME[cl.cluster]?.toUpperCase()}
-            </text>
+            <ClusterLabel key={cl.cluster}
+              label={CLUSTER_NAME[cl.cluster]?.toUpperCase()}
+              x={cl.x} y={cl.y} font={fSans}
+              fill={clusterLabelColor(cl.cluster)} />
           ))}
 
-          {/* Edges — faint curved arcs; opacity fades with endpoint degree so
-              busy fans recede. Curve = control point offset perpendicular to
-              the midpoint by ~12% of edge length. */}
-          <g fill="none"
-            style={animate ? { opacity: 0, animation: '_sn_fadein .5s ease forwards', animationDelay: `${edgeDelay}s` } : undefined}>
+          {/* Edges — soft curved arcs tinted toward the target cluster; hub-outgoing
+              edges lean green (EDGE_RGB). Opacity still fades with endpoint degree
+              so busy fans recede. Endpoints resolved by stable id (survives zoom). */}
+          <g style={animate ? { opacity: 0, animation: '_sn_fadein .5s ease forwards', animationDelay: `${edgeDelay}s` } : undefined}>
             {layout.edges.map(e => {
-              const dx = e.x2 - e.x1, dy = e.y2 - e.y1
-              const len = Math.hypot(dx, dy) || 1
-              const off = len * 0.12
-              const mx = (e.x1 + e.x2) / 2 + (-dy / len) * off
-              const my = (e.y1 + e.y2) / 2 + ( dx / len) * off
-              const opacity = (EDGE_BASE_OPACITY[e.kind] ?? 0.1) * edgeFade(e.maxDeg)
+              const tc = nodeById.get(e.target)?.cluster
+              const tint = nodeById.get(e.source)?.isHub ? EDGE_RGB
+                         : (tc ? edgeTintRgb(tc) : undefined)
               return (
-                <path key={e.key}
-                  d={`M${e.x1.toFixed(1)} ${e.y1.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${e.x2.toFixed(1)} ${e.y2.toFixed(1)}`}
-                  stroke={`rgba(${EDGE_RGB},${opacity.toFixed(3)})`}
-                  strokeWidth={e.kind === 'import' ? 0.8 : 0.55}
-                />
+                <CurvedEdge key={e.key} edge={e} tint={tint} />
               )
             })}
           </g>
@@ -743,19 +765,11 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {}, reveal = fal
           <g>
             {layout.nodes.map(node => {
               const isHov   = tooltip?.node?.id === node.id
-              const statusLoud = STATUS_LOUD.has(node.status)
-              // Status colour dominates; otherwise the node wears its cluster tint.
-              const fill   = node.isHub ? '#2a5c45'
-                           : statusLoud ? FILL[node.status]
-                           : (CLUSTER_TINT[node.cluster] || FILL[node.status])
-              const stroke = node.isHub ? 'none'
-                           : statusLoud ? RING[node.status]
-                           : (CLUSTER_RING[node.cluster] || RING[node.status])
-              const sw      = node.isEntry && !node.isHub ? 2.0 : 1.5
               const [dl1, dl2] = node.isHub ? hubLabelLines(data.meta.domain) : []
-              // Hierarchy via opacity: ranked nodes + anchors lead; leaves recede
-              // to 0.65. Status-coloured nodes (gold/green/regression) stay full.
-              const fillOpacity = (node.isHub || node.isEntry || node.rank != null || statusLoud) ? 1 : 0.65
+              // Fill/stroke/opacity + the hub glow & concentric ring now live in
+              // GlassNode (it reproduces the exact status/cluster colour logic — the
+              // fill still encodes status). The wrapper keeps the hit-area, hover
+              // ring & hub text label.
 
               return (
                 <g key={node.id} className="sn-node"
@@ -775,10 +789,7 @@ export function SiteNetwork({ data, onNodeClick, style, fonts = {}, reveal = fal
                     />
                   )}
 
-                  <circle
-                    cx={node.x} cy={node.y} r={node.r}
-                    fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={sw}
-                  />
+                  <GlassNode node={node} />
 
                   {/* Hub: two-line domain label inside circle */}
                   {node.isHub && (
