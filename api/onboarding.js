@@ -23,7 +23,7 @@ import { createClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
 import { createAppAuth } from '@octokit/auth-app'
 import { Octokit } from '@octokit/rest'
-import { encryptSecret } from './_lib/secret-crypto.js'
+import { encryptSecret, decryptSecret } from './_lib/secret-crypto.js'
 import { verifySessionCookie } from './github/_oauth-state.js'
 
 export const config = { maxDuration: 60 }
@@ -39,6 +39,9 @@ const DEFAULT_PH_HOST   = 'https://us.i.posthog.com'
 // purely through GitHub PRs, so this is informational only — no run-path logic
 // branches on it. 'vercel' is the historical default for legacy connections.
 const HOSTING_PROVIDERS = ['vercel', 'netlify', 'render', 'railway', 'cloudflare_pages']
+// Shopify Admin API version — keep in sync with supabase/functions/shopify-oauth and
+// agent-run (SHOPIFY_API_VERSION). Used by the list_themes / set_theme actions.
+const SHOPIFY_API_VERSION = '2026-04'
 
 // Anon client used only to validate the bearer token → user.
 const authClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -295,9 +298,10 @@ async function handleFinalize(req, res) {
   // hit the CHECK constraint with a 500 — it lands as a clean, known value.
   const provider = HOSTING_PROVIDERS.includes(hostingProvider) ? hostingProvider : 'vercel'
 
-  // Ownership + GitHub-step gate. github_installation_verified_at is non-null
-  // only after complete_onboarding ran, so this also proves the GitHub step is
-  // done before we flip onboarding_completed_at to its final meaning.
+  // Ownership check. github_installation_verified_at is non-null only after the
+  // GitHub complete_onboarding ran — used below as the GitHub-step gate, but it
+  // does NOT apply to a Shopify-direct connection (created by the shopify-oauth
+  // callback, which never runs complete_onboarding).
   const { data: sub, error: subErr } = await serviceClient
     .from('agent_subscriptions')
     .select('auth_user_id, github_installation_verified_at')
@@ -310,14 +314,12 @@ async function handleFinalize(req, res) {
   if (!sub || sub.auth_user_id !== auth.user.id) {
     return res.status(403).json({ error: 'subscription does not belong to authenticated user' })
   }
-  if (!sub.github_installation_verified_at) {
-    return res.status(400).json({ error: 'Connect GitHub before finishing onboarding.' })
-  }
 
-  // The connection row must already exist (complete_onboarding created it).
+  // The connection row must already exist: complete_onboarding created it for a
+  // GitHub connection, the shopify-oauth callback for a Shopify-direct one.
   const { data: conn, error: connErr } = await serviceClient
     .from('agent_connections')
-    .select('subscription_id')
+    .select('subscription_id, connection_source, shopify_shop_domain, github_repo_name')
     .eq('subscription_id', subscriptionId)
     .maybeSingle()
   if (connErr) {
@@ -325,7 +327,16 @@ async function handleFinalize(req, res) {
     return res.status(500).json({ error: 'Could not complete onboarding. Try again.' })
   }
   if (!conn) {
-    return res.status(400).json({ error: 'GitHub connection not found. Reconnect GitHub.' })
+    return res.status(400).json({ error: 'Connection not found. Reconnect your store or repo.' })
+  }
+
+  // GitHub-step gate applies only to GitHub connections. A Shopify-direct connection
+  // is fully established at the OAuth callback (token + theme id persisted), so it has
+  // no github_installation_verified_at and must skip this check.
+  const isShopifyDirect = conn.connection_source === 'shopify_direct'
+    || (conn.shopify_shop_domain && !conn.github_repo_name)
+  if (!isShopifyDirect && !sub.github_installation_verified_at) {
+    return res.status(400).json({ error: 'Connect GitHub before finishing onboarding.' })
   }
 
   // ── OA6: validate + atomically consume the Telegram verification code ───────
@@ -734,6 +745,149 @@ async function handleListBranches(req, res) {
   }
 }
 
+// ─── Shopify theme fetch (shared by list_themes / set_theme) ─────────────────
+// Reads MAIN + UNPUBLISHED themes via the Admin GraphQL API (metadata only — id,
+// name, role; read_themes suffices). Returns { ok, themes:[{id,name,role}] } with id
+// as the trailing numeric segment of the GID (matches shopify_main_theme_id's bigint).
+// Never throws — a failed/garbled response is { ok: false } so callers degrade softly.
+async function fetchShopifyThemes(shop, accessToken) {
+  let json
+  try {
+    const r = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ query: '{ themes(first: 50, roles: [MAIN, UNPUBLISHED]) { edges { node { id name role } } } }' }),
+    })
+    json = await r.json().catch(() => ({}))
+    if (!r.ok || json?.errors || json?.data?.themes == null) return { ok: false }
+  } catch (err) {
+    console.error('onboarding/themes: Shopify GraphQL call failed:', err?.message)
+    return { ok: false }
+  }
+  const themes = (json.data.themes.edges || [])
+    .map((e) => {
+      const node = e?.node
+      if (!node?.id) return null
+      const id = parseInt(String(node.id).split('/').pop() || '', 10)
+      if (!Number.isFinite(id)) return null
+      return { id, name: node.name || `Theme ${id}`, role: node.role || null }
+    })
+    .filter(Boolean)
+  return { ok: true, themes }
+}
+
+// Ownership + Shopify-connection lookup shared by both theme actions. Returns
+// { ok:false, status, error } on any failure, else { ok:true, conn, token }.
+async function getShopifyConnForOwner(req, subscriptionId, label) {
+  const auth = await getUser(req)
+  if (!auth) return { ok: false, status: 401, error: 'Unauthorized' }
+  if (!subscriptionId) return { ok: false, status: 400, error: 'Missing subscriptionId.' }
+
+  const { data: sub, error: subErr } = await serviceClient
+    .from('agent_subscriptions')
+    .select('auth_user_id')
+    .eq('id', subscriptionId)
+    .maybeSingle()
+  if (subErr) {
+    console.error(`onboarding/${label}: subscription lookup failed:`, subErr.message)
+    return { ok: false, status: 500, error: 'Could not load themes.' }
+  }
+  if (!sub || sub.auth_user_id !== auth.user.id) {
+    return { ok: false, status: 403, error: 'subscription does not belong to authenticated user' }
+  }
+
+  const { data: conn, error: connErr } = await serviceClient
+    .from('agent_connections')
+    .select('shopify_shop_domain, shopify_access_token, shopify_main_theme_id, connection_source')
+    .eq('subscription_id', subscriptionId)
+    .maybeSingle()
+  if (connErr) {
+    console.error(`onboarding/${label}: connection lookup failed:`, connErr.message)
+    return { ok: false, status: 500, error: 'Could not load themes.' }
+  }
+  if (!conn?.shopify_shop_domain || !conn?.shopify_access_token) {
+    return { ok: false, status: 400, error: 'No Shopify store is connected for this subscription.' }
+  }
+  let token
+  try {
+    token = decryptSecret(conn.shopify_access_token)
+  } catch (e) {
+    console.error(`onboarding/${label}: token decrypt failed:`, e?.message)
+    token = null
+  }
+  if (!token) return { ok: false, status: 400, error: 'Your Shopify connection expired. Reconnect your store.' }
+  return { ok: true, conn, token }
+}
+
+// ─── action=list_themes (POST) ───────────────────────────────────────────────
+// Stage 2a: the inline theme picker lists the merchant's MAIN (live) + UNPUBLISHED
+// themes so they can confirm/change which theme Velyr optimizes (default = MAIN, set
+// at the OAuth callback). Bound to the caller's OWN connection by subscriptionId; the
+// access token never leaves the server. Soft-empty on a Shopify read failure so the UI
+// can fall back to "we'll optimize your live theme".
+async function handleListThemes(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+  if (!SERVICE_ROLE_KEY) {
+    console.error('onboarding/list_themes: SUPABASE_SERVICE_ROLE_KEY not configured')
+    return res.status(500).json({ error: 'Onboarding is not configured. Contact support.' })
+  }
+  const { subscriptionId } = req.body || {}
+  const gate = await getShopifyConnForOwner(req, subscriptionId, 'list_themes')
+  if (!gate.ok) return res.status(gate.status).json({ error: gate.error })
+
+  const result = await fetchShopifyThemes(gate.conn.shopify_shop_domain, gate.token)
+  const currentThemeId = gate.conn.shopify_main_theme_id ?? null
+  if (!result.ok) {
+    // Soft: don't block onboarding — the UI shows "your live theme" and continues.
+    return res.status(200).json({ themes: [], currentThemeId })
+  }
+  return res.status(200).json({ themes: result.themes, currentThemeId })
+}
+
+// ─── action=set_theme (POST) ─────────────────────────────────────────────────
+// Stage 2a: persist the merchant's chosen theme (→ shopify_main_theme_id). The id is
+// validated against the LIVE themes(roles:[MAIN,UNPUBLISHED]) set, so a crafted body
+// can't point the agent at an arbitrary/foreign theme or a non-MAIN/UNPUBLISHED role.
+async function handleSetTheme(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+  if (!SERVICE_ROLE_KEY) {
+    console.error('onboarding/set_theme: SUPABASE_SERVICE_ROLE_KEY not configured')
+    return res.status(500).json({ error: 'Onboarding is not configured. Contact support.' })
+  }
+  const { subscriptionId, themeId } = req.body || {}
+  const id = Number(themeId)
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid themeId.' })
+
+  const gate = await getShopifyConnForOwner(req, subscriptionId, 'set_theme')
+  if (!gate.ok) return res.status(gate.status).json({ error: gate.error })
+
+  const result = await fetchShopifyThemes(gate.conn.shopify_shop_domain, gate.token)
+  if (!result.ok) return res.status(502).json({ error: "Couldn't reach Shopify to verify the theme. Try again." })
+  if (!result.themes.some((t) => t.id === id)) {
+    return res.status(400).json({ error: 'That theme is no longer available on your store.' })
+  }
+
+  const { error: updErr } = await serviceClient
+    .from('agent_connections')
+    .update({ shopify_main_theme_id: id })
+    .eq('subscription_id', subscriptionId)
+  if (updErr) {
+    console.error('onboarding/set_theme: update failed:', updErr.message)
+    return res.status(500).json({ error: 'Could not save your theme choice. Try again.' })
+  }
+  return res.status(200).json({ ok: true, themeId: id })
+}
+
 // ─── dispatcher ──────────────────────────────────────────────────────────────
 // No top-level method guard — snapshot is GET, the rest are POST; each guards
 // its own method internally.
@@ -752,5 +906,7 @@ export default async function handler(req, res) {
   if (action === 'discover_structure')   return handleDiscoverStructure(req, res)
   if (action === 'verify_telegram_code') return handleVerifyTelegramCode(req, res)
   if (action === 'list_branches')        return handleListBranches(req, res)
+  if (action === 'list_themes')          return handleListThemes(req, res)
+  if (action === 'set_theme')            return handleSetTheme(req, res)
   return res.status(400).json({ error: 'Unknown action' })
 }

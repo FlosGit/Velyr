@@ -4,7 +4,9 @@
 // Mirrors the GitHub OAuth security model (api/github/oauth-initiate.js +
 // oauth-callback.js + _oauth-state.js) exactly, re-implemented for the Deno /
 // Web-Crypto runtime because Supabase Edge Functions cannot import across
-// function dirs (or from the Vercel Node bundle). Scope: read_themes only.
+// function dirs (or from the Vercel Node bundle). Scope: read_themes + write_themes
+// (write is needed for the direct theme-write path — approval apply, rollback, and
+// the PostHog injection; the write_themes exemption is granted).
 //
 // Redirect URI (registered with Shopify, fixed): this function's public URL.
 //
@@ -37,7 +39,10 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 const REDIRECT_URI = 'https://mtqctjgecbscjmottauv.supabase.co/functions/v1/shopify-oauth'
 const APP_BASE     = 'https://velyr.io'
 const SHOPIFY_API_VERSION = '2026-04'
-const SHOPIFY_SCOPE = 'read_themes'
+// Comma-separated per Shopify's OAuth `scope` param. write_themes is required by
+// the direct write path (themeFilesUpsert): approval apply, rollback re-upsert, and
+// the Stage-4 PostHog theme injection. read_themes alone covers the read/analysis.
+const SHOPIFY_SCOPE = 'read_themes,write_themes'
 
 // Shop-domain allowlist. SSRF guard: the token exchange + theme read make
 // outbound calls to https://{shop}/…, so an unvalidated shop would let an
@@ -465,6 +470,10 @@ async function handleCallback(url: URL): Promise<Response> {
       .upsert(
         {
           subscription_id: subscriptionId,
+          // Stamp the explicit discriminator so processConnection routes this to the
+          // pure-Shopify pipeline without relying on the legacy shape-inference (which
+          // would otherwise fire a connection_source_shape_mismatch warning every run).
+          connection_source: 'shopify_direct',
           shopify_shop_domain: shop,
           shopify_access_token: encrypted,
           shopify_refresh_token: encryptedRefresh,
