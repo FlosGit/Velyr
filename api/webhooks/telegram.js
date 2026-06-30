@@ -461,6 +461,13 @@ async function handleApprove(runId, chatId) {
       })
       const json = await res.json().catch(() => ({}))
       const userErrors = json?.data?.themeFilesUpsert?.userErrors
+      // TODO (write stages, Stage 3): a 403 / scope error here likely means this
+      // connection was authorized under the OLD read_themes-only scope (before
+      // write_themes). A silent generic "retry next run" is a trust-breaking moment for
+      // a live-theme tool — detect the scope/403 case specifically and surface a clear
+      // "reconnect your store to grant theme-write access" prompt (re-run the Shopify
+      // OAuth) instead. Not built now; the new write_themes scope only applies to
+      // connections authorized after Stage 2a deploys.
       if (!res.ok || json?.errors || (Array.isArray(userErrors) && userErrors.length)) {
         const detail = (Array.isArray(userErrors) && userErrors.length)
           ? userErrors.map(e => e?.message).filter(Boolean).join('; ')

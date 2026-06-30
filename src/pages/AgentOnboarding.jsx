@@ -783,7 +783,9 @@ function Step3({ onNext, onBack }) {
 }
 
 // ─── STEP 4: Telegram ────────────────────────────────────────────────────────
-function Step4({ onNext, onBack, loading }) {
+// stepLabel defaults to the GitHub flow's "Step 6 of 6"; the Shopify branch passes
+// "Step 4 of 4". All other copy is connection-agnostic, so the step is shared.
+function Step4({ onNext, onBack, loading, stepLabel = 'Step 6 of 6' }) {
   const [code, setCode]           = useState('')
   const [error, setError]         = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -862,7 +864,7 @@ function Step4({ onNext, onBack, loading }) {
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 6 of 6</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>{stepLabel}</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect Telegram
       </h2>
@@ -933,7 +935,8 @@ function Step4({ onNext, onBack, loading }) {
 // with the C2 "your network sharpens on Monday" beat and routes to the dashboard
 // Overview. Honest: structure-only, neutral nodes, NO verdicts. Failure-safe: on
 // status:'error' / timeout / empty it skips the build beat and still closes clean.
-function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
+function OnboardingBuild({ subscriptionId, websiteUrl, navigate, connectionType }) {
+  const isShopifyDirect = connectionType === 'shopify_direct'
   const [phase, setPhase] = useState('polling')   // polling | building | skip
   const [data, setData]   = useState(null)
   const [framework, setFramework] = useState(null)   // SO1c: theme-aware outro copy
@@ -944,6 +947,10 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
   // error / timeout / empty → skip (never hang, never show a broken graph).
   useEffect(() => {
     if (!subscriptionId) { setPhase('skip'); return }
+    // Shopify-direct has no repo structure preview (discover_structure is fired only
+    // on the GitHub path), so skip the poll and go straight to the outro — never sit
+    // on a spinner waiting for a row that will never exist.
+    if (isShopifyDirect) { setPhase('skip'); return }
     let cancelled = false
     let polls = 0
     const MAX_POLLS = 14   // ~21s at 1.5s
@@ -1020,7 +1027,9 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
           opacity: showOutro ? 1 : 0, transition: 'opacity .6s ease',
         }}>
           <p style={{ fontSize: 14, color: C.text, fontWeight: 400, lineHeight: 1.6, marginBottom: 6 }}>
-            {isTheme
+            {isShopifyDirect
+              ? 'Your store is connected. Each week Velyr finds the single highest-impact conversion fix and sends it to Telegram — approve it and we apply it straight to your theme. Your first fix lands on Monday’s run.'
+              : isTheme
               ? 'This is your Shopify theme’s structure. Each conversion fix arrives as a pull request against your connected theme repo — approve it and Shopify syncs it to your connected theme: live right away if that’s your published theme, or you publish it when you’re ready if it’s a staging theme. Your first fix lands on Monday’s run.'
               : <>This is your site’s structure. On your first run Monday, the agent maps how your
             pages actually connect — and ships its first conversion fix.</>}
@@ -1029,6 +1038,336 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate }) {
             Enter your dashboard →
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── CONNECTION-TYPE FORK (top-of-funnel) ─────────────────────────────────────
+// The first screen. Branches onboarding into the existing GitHub flow or the new
+// Shopify-direct flow (connection_source = 'shopify_direct'). Not counted in either
+// branch's StepIndicator — it's the pre-step that decides which indicator to show.
+function ConnectionTypeChoice({ onPick }) {
+  const Card = ({ icon, title, desc, onClick }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 14, textAlign: 'left',
+        background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: '18px', cursor: 'pointer', fontFamily: 'Jost, sans-serif', width: '100%',
+        transition: 'all .2s',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(42,92,69,0.4)'; e.currentTarget.style.background = 'rgba(42,92,69,0.03)' }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = '#fff' }}
+    >
+      <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1, marginTop: 1, width: 24, display: 'flex', justifyContent: 'center' }}>{icon}</span>
+      <span style={{ flex: 1 }}>
+        <span style={{ display: 'block', fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 4 }}>{title}</span>
+        <span style={{ display: 'block', fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>{desc}</span>
+      </span>
+      <span style={{ fontSize: 14, color: C.accent, marginTop: 2 }}>→</span>
+    </button>
+  )
+  return (
+    <div>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Get started</p>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+        How do you want to connect?
+      </h2>
+      <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
+        Velyr finds and ships one high-impact conversion fix a week. Pick how your site is built.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Card
+          icon={<GitHubIcon size={20} />}
+          title="Connect a GitHub repo"
+          desc="React, Next.js, or Vite — or a Shopify theme synced to GitHub. Fixes ship as pull requests against your repo."
+          onClick={() => onPick('github')}
+        />
+        <Card
+          icon="🛍️"
+          title="Connect a Shopify store directly"
+          desc="No GitHub needed. Velyr reads and updates your live theme through Shopify — you approve every change in Telegram first."
+          onClick={() => onPick('shopify_direct')}
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─── SHOPIFY STEP 1: Storefront URL ───────────────────────────────────────────
+// The PostHog $host partition + PageSpeed signal key on website_url, so we collect
+// the public storefront URL (often a custom domain, not *.myshopify.com). Dedicated
+// component (not the GitHub Step1) so the consent copy is Shopify-accurate.
+function ShopifyWebsite({ onNext, onBack, navigate }) {
+  const [url, setUrl] = useState('')
+  const [error, setError] = useState('')
+  const handleNext = () => {
+    if (!url.trim()) { setError('Please enter your store URL.'); return }
+    const clean = url.startsWith('http') ? url : `https://${url}`
+    onNext({ websiteUrl: clean })
+  }
+  return (
+    <div>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 1 of 4</p>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+        Your store
+      </h2>
+      <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 16 }}>
+        Your public storefront URL — the domain shoppers visit (your custom domain if you have one).
+      </p>
+      <div style={{ background: 'rgba(42,92,69,0.05)', border: '1px solid rgba(42,92,69,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 22 }}>
+        <p style={{ fontSize: 12.5, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>
+          By connecting your Shopify store, storefront, and analytics, you authorize Velyr to access and process this data to run the Growth Agent. See our{' '}
+          {navigate ? (
+            <button onClick={() => navigate('/privacy')} style={{ background: 'none', border: 'none', padding: 0, color: C.accent, fontSize: 12.5, fontFamily: 'Jost, sans-serif', fontWeight: 400, cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'rgba(42,92,69,0.35)' }}>
+              Privacy Policy
+            </button>
+          ) : (
+            <a href="/privacy" style={{ color: C.accent, fontWeight: 400, textDecoration: 'underline', textDecorationColor: 'rgba(42,92,69,0.35)' }}>Privacy Policy</a>
+          )}
+          {' '}for details.
+        </p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div>
+          <label style={{ fontSize: 12, color: C.textLight, display: 'block', marginBottom: 6, letterSpacing: '.03em' }}>Storefront URL</label>
+          <input className="ob-inp" placeholder="yourstore.com" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleNext()} />
+        </div>
+        {error && <p style={{ fontSize: 13, color: C.red }}>{error}</p>}
+        <div style={{ height: 8 }} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
+          <button className="ob-btn" onClick={handleNext}>Continue →</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── SHOPIFY STEP 2: Connect store (Admin OAuth) ──────────────────────────────
+// Calls the shopify-oauth Edge Function ROUTE A (install) → { url }, then redirects
+// the browser to Shopify's authorize screen. On return Shopify redirects to
+// /agent/onboarding?shopify=connected, which the root resumes at the theme picker.
+// Mirrors Step2's GitHub pattern: set auth_user_id first (the OAuth ownership check
+// keys on it) and persist form data across the full-page redirect.
+function ShopifyConnect({ onBack, user, subscriptionId, formData, initialError }) {
+  const [shop, setShop]   = useState('')
+  const [state, setState] = useState('idle') // idle | redirecting | error
+  const [error, setError] = useState(initialError || '')
+
+  const normalizeShop = (raw) => {
+    let s = (raw || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+    if (!s) return ''
+    return s.endsWith('.myshopify.com') ? s : `${s}.myshopify.com`
+  }
+
+  const connect = async () => {
+    const shopDomain = normalizeShop(shop)
+    if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopDomain)) {
+      setError('Enter your .myshopify.com domain, e.g. your-store.myshopify.com'); return
+    }
+    if (!subscriptionId) { setError('Your session expired. Refresh and try again.'); return }
+    setState('redirecting'); setError('')
+    try {
+      // The OAuth ownership check (handleInstall) keys on agent_subscriptions.auth_user_id.
+      await supabase.from('agent_subscriptions')
+        .update({ auth_user_id: user.id, email: user.email, plan: 'growth' })
+        .eq('id', subscriptionId)
+      // The redirect to Shopify is a full page navigation — persist collected form
+      // data + the chosen connection type so we can restore on return.
+      try { localStorage.setItem('velyr_onboarding_data', JSON.stringify({ ...(formData || {}), connectionType: 'shopify_direct' })) } catch {}
+
+      const { data: { session } } = await supabase.auth.getSession()
+      const base = import.meta.env.NEXT_PUBLIC_SUPABASE_URL
+      const url = `${base}/functions/v1/shopify-oauth?subscriptionId=${encodeURIComponent(subscriptionId)}&shop=${encodeURIComponent(shopDomain)}`
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${session?.access_token}` } })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok && json.url) {
+        window.location.href = json.url
+      } else {
+        setError(json.error || 'Could not start Shopify authorization. Please try again.')
+        setState('error')
+      }
+    } catch {
+      setError('Could not start Shopify authorization. Please try again.')
+      setState('error')
+    }
+  }
+
+  return (
+    <div>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 4</p>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+        Connect Shopify
+      </h2>
+      <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 22 }}>
+        Authorize Velyr to read and update your theme. We never see your password, and you can revoke access any time from your Shopify admin.
+      </p>
+      <div style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 12, padding: '18px', marginBottom: 16 }}>
+        <label style={{ fontSize: 12, color: C.textLight, display: 'block', marginBottom: 6, letterSpacing: '.03em' }}>Your Shopify domain</label>
+        <input
+          className="ob-inp"
+          placeholder="your-store.myshopify.com"
+          value={shop}
+          onChange={e => setShop(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && connect()}
+          disabled={state === 'redirecting'}
+          style={{ marginBottom: 14, fontFamily: 'DM Mono, monospace', fontSize: 14 }}
+        />
+        <button
+          onClick={connect}
+          disabled={state === 'redirecting' || !subscriptionId}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            width: '100%', background: C.text, color: '#fff', border: 'none', borderRadius: 10,
+            padding: '15px', fontFamily: 'Jost, sans-serif', fontWeight: 500, fontSize: 15,
+            cursor: state === 'redirecting' ? 'not-allowed' : 'pointer', opacity: state === 'redirecting' ? 0.6 : 1,
+            transition: 'background .2s', letterSpacing: '.03em',
+          }}
+          onMouseEnter={e => { if (state !== 'redirecting') e.currentTarget.style.background = C.accent }}
+          onMouseLeave={e => { e.currentTarget.style.background = C.text }}
+        >
+          {state === 'redirecting' ? <Spinner size={16} color="#fff" /> : <span style={{ fontSize: 16 }}>🛍️</span>}
+          {state === 'redirecting' ? 'Redirecting to Shopify…' : 'Connect Shopify'}
+        </button>
+      </div>
+      {error && <p style={{ fontSize: 13, color: C.red, marginBottom: 12 }}>{error}</p>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── SHOPIFY STEP 3: Theme picker ─────────────────────────────────────────────
+// Loads MAIN + UNPUBLISHED themes (?action=list_themes), preselects the live (MAIN)
+// theme, and persists the choice (?action=set_theme, server-validated). Soft-empty:
+// if Shopify can't be read we proceed silently (the OAuth callback already defaulted
+// to MAIN), so onboarding never stalls on this.
+function ShopifyThemePicker({ onNext, onBack, subscriptionId }) {
+  const [state, setState]       = useState('loading') // loading | ready | saving
+  const [themes, setThemes]     = useState([])
+  const [selected, setSelected] = useState(null)
+  const [error, setError]       = useState('')
+
+  useEffect(() => {
+    // On an OAuth resume the subscription id loads a tick after mount — wait for it
+    // rather than firing a doomed null request (and flashing the empty state).
+    if (!subscriptionId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const res = await fetch('/api/onboarding?action=list_themes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ subscriptionId }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (cancelled) return
+        const list = Array.isArray(json.themes) ? json.themes : []
+        setThemes(list)
+        const def = json.currentThemeId ?? list.find(t => t.role === 'MAIN')?.id ?? list[0]?.id ?? null
+        setSelected(def)
+      } catch { /* soft — empty list path below */ }
+      finally { if (!cancelled) setState('ready') }
+    })()
+    return () => { cancelled = true }
+  }, [subscriptionId])
+
+  const cont = async () => {
+    // Empty list (soft read failure) → proceed; the callback already set MAIN.
+    if (selected == null || themes.length === 0) { onNext({}); return }
+    setState('saving'); setError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/onboarding?action=set_theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ subscriptionId, themeId: selected }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok && json.ok) { onNext({}) }
+      else { setError(json.error || 'Could not save your theme choice. Try again.'); setState('ready') }
+    } catch { setError('Could not save your theme choice. Try again.'); setState('ready') }
+  }
+
+  const heading = (
+    <>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 3 of 4</p>
+      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
+        Which theme?
+      </h2>
+    </>
+  )
+
+  if (state === 'loading') {
+    return (
+      <div>
+        {heading}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '40px 0' }}>
+          <Spinner size={28} />
+          <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300 }}>Loading your themes…</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {heading}
+      {themes.length === 0 ? (
+        <div style={{ background: 'rgba(42,92,69,0.06)', border: '1px solid rgba(42,92,69,0.2)', borderRadius: 12, padding: '16px 18px', marginBottom: 20 }}>
+          <p style={{ fontSize: 13, color: C.text, fontWeight: 400, marginBottom: 4 }}>✅ Connected.</p>
+          <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>Velyr will optimize your <strong style={{ fontWeight: 500 }}>live theme</strong>. You can change the target theme later in Settings.</p>
+        </div>
+      ) : (
+        <>
+          <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 20 }}>
+            Pick the theme Velyr should optimize. Your live theme is selected by default.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+            {themes.map((t) => {
+              const isSel = selected === t.id
+              const isLive = t.role === 'MAIN'
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setSelected(t.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+                    border: `1px solid ${isSel ? 'rgba(42,92,69,0.45)' : C.border}`,
+                    borderRadius: 12, background: isSel ? 'rgba(42,92,69,0.05)' : '#fff',
+                    padding: '14px 16px', cursor: 'pointer', fontFamily: 'Jost, sans-serif',
+                  }}
+                >
+                  <span style={{ flex: 1, fontSize: 14, fontWeight: isSel ? 500 : 300, color: C.text }}>
+                    {t.name}
+                    {isLive && <span style={{ marginLeft: 8, fontSize: 11, color: C.accent, fontWeight: 400 }}>● Live</span>}
+                  </span>
+                  <span style={{
+                    width: 18, height: 18, flexShrink: 0, borderRadius: '50%',
+                    border: `1px solid ${isSel ? C.accent : 'rgba(28,25,23,0.2)'}`,
+                    background: isSel ? C.accent : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {isSel && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+      {error && <p style={{ fontSize: 13, color: C.red, marginBottom: 12 }}>{error}</p>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
+        <button className="ob-btn" onClick={cont} disabled={state === 'saving'}>
+          {state === 'saving' ? 'Saving…' : 'Continue →'}
+        </button>
       </div>
     </div>
   )
@@ -1045,6 +1384,11 @@ export default function AgentOnboarding({ navigate }) {
   const [formData, setFormData] = useState({})
   const [gateChecked, setGateChecked] = useState(false)
   const [subscriptionId, setSubscriptionId] = useState(null)
+  // null until the user picks at the top-of-funnel fork: 'github' | 'shopify_direct'.
+  // A page-reloading OAuth round-trip (either provider) restores it in the resume
+  // effect below before the wizard re-renders its branch.
+  const [connectionType, setConnectionType] = useState(null)
+  const [shopifyErr, setShopifyErr]         = useState('')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1059,12 +1403,33 @@ export default function AgentOnboarding({ navigate }) {
   // ?oauth= param itself to drive its snapshot fetch / error display.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get('oauth')) {
+    const restoreSaved = () => {
       try {
         const saved = localStorage.getItem('velyr_onboarding_data')
         if (saved) setFormData(prev => ({ ...JSON.parse(saved), ...prev }))
       } catch {}
+    }
+    // GitHub OAuth return → resume at the GitHub connect step (Step2 reads ?oauth
+    // itself + strips it). connectionType is restored so the right branch renders.
+    if (params.get('oauth')) {
+      restoreSaved()
+      setConnectionType('github')
       setStep(2)
+      return
+    }
+    // Shopify OAuth return → resume the Shopify branch. 'connected' → theme picker
+    // (step 2); anything else → back to the connect step (step 1) with the reason.
+    const shopify = params.get('shopify')
+    if (shopify) {
+      restoreSaved()
+      setConnectionType('shopify_direct')
+      if (shopify === 'connected') {
+        setStep(2)
+      } else {
+        setShopifyErr(params.get('reason') || 'Shopify connection failed. Please try again.')
+        setStep(1)
+      }
+      window.history.replaceState({}, '', '/agent/onboarding')
     }
   }, [])
 
@@ -1107,6 +1472,15 @@ export default function AgentOnboarding({ navigate }) {
 
     return () => { cancelled = true }
   }, [user])
+
+  // Top-of-funnel fork: both branches start at their own step 0 (GitHub → Step0
+  // requirements; Shopify → ShopifyWebsite).
+  const pickConnectionType = (type) => { setConnectionType(type); setStep(0) }
+
+  // Shopify branch handlers. ShopifyConnect redirects out and the resume effect lands
+  // the user back at the theme picker (step 2); Telegram reuses handleStep4/finalize.
+  const handleShopifyWebsite = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(1) }
+  const handleShopifyTheme   = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(3) }
 
   const handleStep0 = ()     => setStep(1)
   const handleStep1 = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(2) }
@@ -1253,7 +1627,7 @@ export default function AgentOnboarding({ navigate }) {
     return (
       <>
         <style>{CSS + MOTION_CSS}</style>
-        <OnboardingBuild subscriptionId={subscriptionId} websiteUrl={formData.websiteUrl} navigate={navigate} />
+        <OnboardingBuild subscriptionId={subscriptionId} websiteUrl={formData.websiteUrl} navigate={navigate} connectionType={connectionType} />
       </>
     )
   }
@@ -1270,13 +1644,31 @@ export default function AgentOnboarding({ navigate }) {
           </div>
 
           <div className="ob-card ob-card-inner" style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 18, padding: '36px 32px', boxShadow: '0 4px 32px rgba(28,25,23,0.07)' }}>
-            <StepIndicator current={step} total={6} />
-            {step === 0 && <Step0 onNext={handleStep0} />}
-            {step === 1 && <Step1 onNext={handleStep1} onBack={() => setStep(0)} navigate={navigate} />}
-            {step === 2 && <Step2 onNext={handleStep2} onBack={() => setStep(1)} user={user} subscriptionId={subscriptionId} formData={formData} />}
-            {step === 3 && <StepPlatform onNext={handlePlatform} onBack={() => setStep(2)} subscriptionId={subscriptionId} />}
-            {step === 4 && <Step3 onNext={handleStep3} onBack={() => setStep(3)} />}
-            {step === 5 && <Step4 onNext={handleStep4} onBack={() => setStep(4)} loading={loading} />}
+            {/* Top-of-funnel fork: the choice screen has no StepIndicator; each branch
+                renders its own (GitHub = 6 steps, Shopify-direct = 4). */}
+            {connectionType === null && <ConnectionTypeChoice onPick={pickConnectionType} />}
+
+            {connectionType === 'github' && (
+              <>
+                <StepIndicator current={step} total={6} />
+                {step === 0 && <Step0 onNext={handleStep0} />}
+                {step === 1 && <Step1 onNext={handleStep1} onBack={() => setStep(0)} navigate={navigate} />}
+                {step === 2 && <Step2 onNext={handleStep2} onBack={() => setStep(1)} user={user} subscriptionId={subscriptionId} formData={formData} />}
+                {step === 3 && <StepPlatform onNext={handlePlatform} onBack={() => setStep(2)} subscriptionId={subscriptionId} />}
+                {step === 4 && <Step3 onNext={handleStep3} onBack={() => setStep(3)} />}
+                {step === 5 && <Step4 onNext={handleStep4} onBack={() => setStep(4)} loading={loading} />}
+              </>
+            )}
+
+            {connectionType === 'shopify_direct' && (
+              <>
+                <StepIndicator current={step} total={4} />
+                {step === 0 && <ShopifyWebsite onNext={handleShopifyWebsite} onBack={() => { setConnectionType(null); setShopifyErr('') }} navigate={navigate} />}
+                {step === 1 && <ShopifyConnect onBack={() => { setStep(0); setShopifyErr('') }} user={user} subscriptionId={subscriptionId} formData={formData} initialError={shopifyErr} />}
+                {step === 2 && <ShopifyThemePicker onNext={handleShopifyTheme} onBack={() => setStep(1)} subscriptionId={subscriptionId} />}
+                {step === 3 && <Step4 onNext={handleStep4} onBack={() => setStep(2)} loading={loading} stepLabel="Step 4 of 4" />}
+              </>
+            )}
             {error && (
               <div style={{ marginTop: 16, background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.2)', borderRadius: 8, padding: '10px 13px', fontSize: 13, color: C.red }}>
                 {error}

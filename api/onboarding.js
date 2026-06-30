@@ -411,7 +411,10 @@ async function handleFinalize(req, res) {
       telegram_chat_id:      telegramChatId ?? null,
       verification_code_id:  verificationCodeId ?? null,
       verified_at:           new Date().toISOString(),
-      hosting_provider:      provider,
+      // A Shopify-direct store has no external web host — Shopify hosts it — so stamp
+      // 'shopify' (requires 20260630_hosting_provider_shopify.sql) instead of the
+      // 'vercel' default, which would be a silent falsehood for these rows.
+      hosting_provider:      isShopifyDirect ? 'shopify' : provider,
       shopify_connected_branch: connectedBranchClean,
     })
     .eq('subscription_id', subscriptionId)
@@ -753,6 +756,12 @@ async function handleListBranches(req, res) {
 async function fetchShopifyThemes(shop, accessToken) {
   let json
   try {
+    // first: 50, no pagination loop — DELIBERATE. A store has exactly one MAIN theme
+    // plus its unpublished/draft themes; 50 covers the overwhelming majority. We don't
+    // loop because this is a human-facing PICKER (a list of 50 is already more than a
+    // merchant scrolls), not a completeness-critical read. Known edge: a theme dev /
+    // agency store with 50+ draft themes could have an intended UNPUBLISHED theme fall
+    // off the list — acceptable for onboarding; they can re-target later via Settings.
     const r = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
       method: 'POST',
       headers: {
