@@ -1639,10 +1639,33 @@ async function setupPostHogForConnection(conn: any) {
 // Keep in sync with setupPostHogForConnection above.
 const VELYR_POSTHOG_TOKEN = 'phc_qmLvjZawzLuEnR5ns5eFKXSFiSD5AX4y87LvELP9nqB5'
 
-// Resolve the target entry file for snippet insertion from mapResult.
-// Priority order as per product spec: framework → repoTree scan.
-// Returns a repo-root-relative path or null if none found.
-function resolveSnippetTarget(mapResult: MapResult): string | null {
+// PostHog browser loader (CDN array.js) — verbatim twin of the inline snippet in
+// index.html (the site's own analytics). The loader/script-tag form needs NO npm
+// dependency, so it can never break a bundler build with an unresolved `posthog-js`
+// import (the reason the old import-based Setup-PR failed on lockfile repos). Keep
+// this IIFE in sync with index.html.
+const POSTHOG_ARRAY_LOADER = `!function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);`
+
+// Build the loader JS (IIFE + init + register), partitioned by $host. Returns plain
+// JS with NO `<script>` wrapper and NO ES import — the caller wraps it for an HTML
+// file or hands it to next/script. token/host are repo-safe literals (a phc_ token
+// and a hostname), interpolated the same way index.html does.
+function buildPostHogLoaderJS(token: string, host: string): string {
+  return `${POSTHOG_ARRAY_LOADER}\nposthog.init('${token}', { api_host: 'https://us.i.posthog.com' });\nposthog.register({ $host: '${host}' });`
+}
+
+// Where (and how) the Setup-PR injects the loader, decided from the framework.
+//  html          — vite-react/cra: insert <script>LOADER</script> into the HTML entry
+//  next-component — nextjs-app: create a next/script client component + render in layout
+//  next-pages-doc — nextjs-pages: put a next/script <Script> in pages/_document (create if absent)
+type SnippetTarget =
+  | { mode: 'html'; path: string }
+  | { mode: 'next-component'; path: string }            // path = root layout file
+  | { mode: 'next-pages-doc'; path: string; exists: boolean }  // path = _document file
+
+// Resolve the snippet injection target from mapResult. Pure (repoTree only).
+// Returns null for frameworks with no auto-PR target (vue-vite, sveltekit, …).
+function resolveSnippetTarget(mapResult: MapResult): SnippetTarget | null {
   const root = mapResult.siteRoot ? mapResult.siteRoot + '/' : ''
   const has = (p: string) => mapResult.repoTree.some(e => e.path === p && e.type === 'blob')
 
@@ -1650,32 +1673,34 @@ function resolveSnippetTarget(mapResult: MapResult): string | null {
     for (const ext of ['tsx', 'jsx', 'ts', 'js']) {
       for (const prefix of ['app', 'src/app']) {
         const p = `${root}${prefix}/layout.${ext}`
-        if (has(p)) return p
+        if (has(p)) return { mode: 'next-component', path: p }
       }
     }
     return null
   }
 
   if (mapResult.framework === 'nextjs-pages') {
-    for (const ext of ['tsx', 'jsx', 'ts', 'js']) {
-      for (const prefix of ['pages', 'src/pages']) {
-        const p = `${root}${prefix}/_app.${ext}`
-        if (has(p)) return p
+    // Prefer an existing _document; else create one in whichever pages dir is present.
+    for (const prefix of ['pages', 'src/pages']) {
+      for (const ext of ['tsx', 'jsx', 'ts', 'js']) {
+        const doc = `${root}${prefix}/_document.${ext}`
+        if (has(doc)) return { mode: 'next-pages-doc', path: doc, exists: true }
       }
+    }
+    for (const prefix of ['pages', 'src/pages']) {
+      const dirPrefix = `${root}${prefix}/`
+      const dirExists = mapResult.repoTree.some(e => e.path.startsWith(dirPrefix))
+      if (dirExists) return { mode: 'next-pages-doc', path: `${dirPrefix}_document.tsx`, exists: false }
     }
     return null
   }
 
   if (mapResult.framework === 'vite-react' || mapResult.framework === 'cra') {
-    // Use entryPoints first — repo-mapper already resolved the canonical entry.
-    const mainEntry = mapResult.entryPoints.find(e => /(?:^|\/)main\.(tsx|jsx|ts|js)$/.test(e))
-    if (mainEntry) return mainEntry
-    for (const ext of ['tsx', 'jsx', 'ts', 'js']) {
-      for (const prefix of ['src', '']) {
-        const p = prefix ? `${root}${prefix}/main.${ext}` : `${root}main.${ext}`
-        if (has(p)) return p
-      }
-    }
+    // Script-tag goes in the HTML entry: Vite's root index.html / CRA's public/index.html.
+    const candidates = mapResult.framework === 'cra'
+      ? [`${root}public/index.html`, `${root}index.html`]
+      : [`${root}index.html`]
+    for (const p of candidates) if (has(p)) return { mode: 'html', path: p }
     return null
   }
 
@@ -1685,14 +1710,16 @@ function resolveSnippetTarget(mapResult: MapResult): string | null {
 type SnippetDetectResult =
   | { state: 'installed' }
   | { state: 'foreign_detected' }
-  | { state: 'missing'; targetPath: string; hasDep: boolean }
+  | { state: 'missing'; target: SnippetTarget }
   | { state: 'error'; reason: string }
 
-// Column fast-path + file-read fallback.
+// Column fast-path + file-read fallback (no dependency check — the script-tag loader
+// needs no posthog-js dep).
 // 1. posthog_snippet_installed_at set → installed (zero GitHub calls).
-// 2. Read targetPath → our token present → backfill installed_at → installed.
-// 3. posthog.init / posthog-js import but NOT our token → foreign_detected.
-// 4. Neither → missing. Also checks package.json for posthog-js dep.
+// 2. A _document we'd create from scratch can't already contain our snippet → missing.
+// 3. Read the target file → our marker present → backfill installed_at → installed.
+// 4. Foreign posthog.init / posthog-js but NOT ours → foreign_detected.
+// 5. Neither → missing.
 async function detectSnippetState(
   conn: any,
   mapResult: MapResult,
@@ -1701,22 +1728,30 @@ async function detectSnippetState(
 ): Promise<SnippetDetectResult> {
   if (conn.posthog_snippet_installed_at) return { state: 'installed' }
 
-  const targetPath = resolveSnippetTarget(mapResult)
-  if (!targetPath) return { state: 'error', reason: `No snippet target for framework ${mapResult.framework}` }
+  const target = resolveSnippetTarget(mapResult)
+  if (!target) return { state: 'error', reason: `No snippet target for framework ${mapResult.framework}` }
+
+  // A _document we will create from scratch has no existing content to inspect.
+  if (target.mode === 'next-pages-doc' && !target.exists) return { state: 'missing', target }
 
   let fileContent: string
   try {
     const { data: f } = await octokit.rest.repos.getContent({
       owner: conn.github_repo_owner, repo: conn.github_repo_name,
-      path: targetPath, ref: defaultBranch,
+      path: target.path, ref: defaultBranch,
     })
     fileContent = base64Decode(f.content)
   } catch (err: any) {
-    return { state: 'error', reason: `Could not read ${targetPath}: ${err?.message}` }
+    return { state: 'error', reason: `Could not read ${target.path}: ${err?.message}` }
   }
 
-  if (fileContent.includes(VELYR_POSTHOG_TOKEN)) {
-    // Self-heal: customer manually pasted the snippet — record it so we skip Setup-PR forever.
+  // "Installed" marker. For next-component the token lives in the generated
+  // velyr-analytics component, not the layout — so the layout's marker is the import.
+  const installed = target.mode === 'next-component'
+    ? /velyr-analytics/i.test(fileContent)
+    : fileContent.includes(VELYR_POSTHOG_TOKEN)
+  if (installed) {
+    // Self-heal: customer manually added the snippet — record it so we skip Setup-PR forever.
     await dbWrite(
       supabase.from('agent_connections')
         .update({ posthog_snippet_installed_at: new Date().toISOString() })
@@ -1732,47 +1767,23 @@ async function detectSnippetState(
     fileContent.includes('from "posthog-js"')
   if (hasForeignPostHog) return { state: 'foreign_detected' }
 
-  // Check package.json for posthog-js dep (read + devDependencies).
-  let hasDep = false
-  try {
-    const pkgPath = mapResult.siteRoot ? `${mapResult.siteRoot}/package.json` : 'package.json'
-    const { data: pkgFile } = await octokit.rest.repos.getContent({
-      owner: conn.github_repo_owner, repo: conn.github_repo_name,
-      path: pkgPath, ref: defaultBranch,
-    })
-    const pkg = JSON.parse(base64Decode(pkgFile.content))
-    hasDep = !!(pkg.dependencies?.['posthog-js'] || pkg.devDependencies?.['posthog-js'])
-  } catch { /* package.json read failure → hasDep stays false, PR warns */ }
-
-  return { state: 'missing', targetPath, hasDep }
+  return { state: 'missing', target }
 }
 
-// Discriminates the dependency situation for the Setup-PR receipt + Telegram.
-//  present         — posthog-js already in package.json (no action)
-//  auto_added      — no dep + no frozen lockfile → we add it to package.json in this PR
-//  manual_lockfile — no dep but a frozen lockfile exists → user must install + commit it
-type DepAction = 'present' | 'auto_added' | 'manual_lockfile'
-
 function buildSnippetReceipt(opts: {
-  framework: string; targetPath: string; filesChanged: string[];
-  depAction: DepAction; coexist: boolean; hostFilter: string;
+  mode: SnippetTarget['mode']; targetPath: string; filesChanged: string[];
+  coexist: boolean; hostFilter: string;
 }): string {
-  const { framework, targetPath, filesChanged, depAction, coexist, hostFilter } = opts
+  const { mode, targetPath, filesChanged, coexist, hostFilter } = opts
 
-  const whatChanged = framework === 'nextjs-app'
-    ? `- Created \`${filesChanged.find(f => f.includes('velyr-analytics'))}\` (client component with PostHog init)\n- Added \`<VelyrAnalytics/>\` inside \`<body>\` in \`${targetPath}\``
-    : `- Added PostHog snippet to \`${targetPath}\``
-
-  // Dependency messaging: auto-added needs no action; lockfile repos need a manual install.
-  const depNote =
-    depAction === 'auto_added'
-      ? '\n\nposthog-js has been added to your package.json automatically.'
-      : depAction === 'manual_lockfile'
-      ? '\n\n## ⚠️ Your repo uses a lockfile\n\nBefore merging, run:\n\n```\nnpm install posthog-js   # or: yarn add posthog-js / pnpm add posthog-js\n```\n\nand commit the updated lockfile.'
-      : ''
+  const whatChanged = mode === 'next-component'
+    ? `- Created \`${filesChanged.find(f => f.includes('velyr-analytics')) || 'velyr-analytics'}\` (loads PostHog via \`next/script\`)\n- Rendered \`<VelyrAnalytics/>\` inside \`<body>\` in \`${targetPath}\``
+    : mode === 'next-pages-doc'
+    ? `- Added the PostHog analytics \`<Script>\` (via \`next/script\`) to \`${targetPath}\``
+    : `- Added the PostHog analytics \`<script>\` snippet to \`${targetPath}\``
 
   const coexistNote = coexist
-    ? '\n\n**Note:** your existing `posthog.init` is left untouched — this is a separate top-level call; both instances will fire.'
+    ? '\n\n**Note:** any existing PostHog setup is left untouched — this loads Velyr\'s analytics alongside it.'
     : ''
 
   return `## Setup: Add Velyr analytics tracking
@@ -1791,24 +1802,18 @@ Standard pageview events (URL, session, device type, referrer). No PII beyond wh
 
 ### Next steps
 
-1. Review the changes — this is a mechanical snippet add with no conversion logic.
-2. Merge when ready.${depNote}
+1. Review the changes — a mechanical analytics snippet with no conversion logic. It loads PostHog from their CDN, so there's **no dependency to install** and nothing to build.
+2. Merge when ready.
 
 _Once merged, the agent will read real visitor data on its next weekly run._`
 }
 
-async function sendSnippetTelegram(chatId: string, prUrl: string, depAction: DepAction) {
-  const depNote =
-    depAction === 'auto_added'
-      ? '\n\n<code>posthog-js</code> has been added to your <code>package.json</code> automatically.'
-      : depAction === 'manual_lockfile'
-      ? '\n\n⚠️ <b>Your repo uses a lockfile.</b> Before merging, run <code>npm install posthog-js</code> (or yarn add / pnpm add) and commit the updated lockfile.'
-      : ''
+async function sendSnippetTelegram(chatId: string, prUrl: string) {
   await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `📊 <b>Velyr wants to install analytics tracking</b> — required for the agent to read your funnel data. Reply <b>YES</b> to merge, <b>NO</b> to skip. Full details in the PR: <a href="${escapeHtml(prUrl)}">${escapeHtml(prUrl)}</a>${depNote}`,
+      text: `📊 <b>Velyr wants to install analytics tracking</b> — required for the agent to read your funnel data. It loads PostHog from their CDN (no dependency to install). Reply <b>YES</b> to merge, <b>NO</b> to skip. Full details in the PR: <a href="${escapeHtml(prUrl)}">${escapeHtml(prUrl)}</a>`,
       parse_mode: 'HTML',
     }),
   }).catch(err => console.error('[snippet-telegram] send failed:', err))
@@ -1834,11 +1839,11 @@ async function createSnippetPR(
   mapResult: MapResult,
   octokit: any,
   defaultBranch: string,
-  detection: { state: 'missing'; targetPath: string; hasDep: boolean },
+  detection: { state: 'missing'; target: SnippetTarget },
   chatId: string | null,
   coexist = false,
 ): Promise<void> {
-  const { targetPath, hasDep } = detection
+  const target = detection.target
   const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || VELYR_POSTHOG_TOKEN
   const hostFilter = conn.posthog_host_filter || ''
   const owner = conn.github_repo_owner
@@ -1847,33 +1852,13 @@ async function createSnippetPR(
   const branchName = `agent/setup-posthog-${shortId}`
 
   // Defensive forbidden-path check (target is OUR resolved path, but belt-and-suspenders).
-  const forbiddenMatch = isForbiddenEditPath(targetPath)
-  if (forbiddenMatch) throw new Error(`Target path ${targetPath} is in FORBIDDEN_EDIT_PATHS (${forbiddenMatch})`)
+  const forbiddenMatch = isForbiddenEditPath(target.path)
+  if (forbiddenMatch) throw new Error(`Target path ${target.path} is in FORBIDDEN_EDIT_PATHS (${forbiddenMatch})`)
 
   const filesChanged: string[] = []
   let branchCreatedThisRun = false
 
   try {
-    // PART 1 (dep fix): detect a frozen lockfile in the package.json directory.
-    // If one exists we must NOT hand-edit package.json — it would desync the
-    // lockfile and break `npm ci` / frozen installs — so the receipt tells the
-    // user to install + commit the lockfile instead. Only relevant when the dep
-    // is missing, so we skip the lookups when hasDep is already true.
-    const pkgDir = mapResult.siteRoot ? `${mapResult.siteRoot}/` : ''
-    let hasFrozenLockfile = false
-    if (!hasDep) {
-      for (const lf of ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']) {
-        try {
-          await octokit.rest.repos.getContent({ owner, repo, path: `${pkgDir}${lf}`, ref: defaultBranch })
-          hasFrozenLockfile = true
-          break
-        } catch { /* lockfile absent → keep checking */ }
-      }
-    }
-    const depAction: DepAction = hasDep
-      ? 'present'
-      : hasFrozenLockfile ? 'manual_lockfile' : 'auto_added'
-
     let branchExists = false
     try {
       await octokit.rest.git.getRef({ owner, repo, ref: `heads/${branchName}` })
@@ -1904,14 +1889,48 @@ async function createSnippetPR(
     await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: baseSha })
     branchCreatedThisRun = true
 
-    if (mapResult.framework === 'nextjs-app') {
-      // App Router: create velyr-analytics component + edit layout to import+render it.
-      const ext = targetPath.split('.').pop() || 'tsx'
-      const componentPath = targetPath.replace(/\/layout\.[^.]+$/, `/velyr-analytics.${ext}`)
-      const componentBaseName = `velyr-analytics`
+    // The script-tag / next/script loader needs NO posthog-js dependency, so a
+    // merge can never fail on an unresolved import. Injection differs by mode.
+    const loaderJs = buildPostHogLoaderJS(snippetToken, hostFilter)
+
+    if (target.mode === 'html') {
+      // vite-react / cra: insert <script>LOADER</script> into the HTML entry's
+      // <head> (fallback: before </body>). No module resolution at all.
+      const { data: htmlFile } = await octokit.rest.repos.getContent({
+        owner, repo, path: target.path, ref: defaultBranch,
+      })
+      const htmlContent = base64Decode(htmlFile.content)
+      const anchorMatch = htmlContent.match(/<\/head>/i) || htmlContent.match(/<\/body>/i)
+      if (!anchorMatch) throw new Error(`No </head> or </body> in ${target.path}`)
+      const anchor = anchorMatch[0]
+      const fvr = validateFindReplaceSafe(htmlContent, anchor, '')
+      if (!fvr.ok) throw new Error(`Cannot anchor <script> in ${target.path}: ${fvr.reason}`)
+      const scriptBlock = `    <script>\n${loaderJs}\n    </script>\n`
+      const newHtml = htmlContent.slice(0, fvr.anchorPos)
+        + scriptBlock + fvr.actualFind
+        + htmlContent.slice(fvr.anchorPos + fvr.actualFind.length)
+      // validateSyntax no-ops on .html — this is a mechanical <script> insert.
+      await octokit.rest.repos.createOrUpdateFileContents({
+        owner, repo, path: target.path,
+        message: 'setup: add Velyr analytics snippet',
+        content: base64Encode(newHtml),
+        sha: htmlFile.sha,
+        branch: branchName,
+      })
+      filesChanged.push(target.path)
+
+    } else if (target.mode === 'next-component') {
+      // App Router: create a velyr-analytics component that loads PostHog via
+      // next/script (a core Next export — zero extra dependency), then import +
+      // render it in the root layout. Force a JSX-capable extension so the Babel
+      // syntax check (and Next) accept the JSX.
+      const layoutExt = target.path.split('.').pop() || 'tsx'
+      const compExt = layoutExt === 'ts' || layoutExt === 'tsx' ? 'tsx' : 'jsx'
+      const componentPath = target.path.replace(/\/layout\.[^.]+$/, `/velyr-analytics.${compExt}`)
+      const componentBaseName = 'velyr-analytics'
 
       const componentContent =
-        `'use client'\nimport { useEffect } from 'react'\nimport posthog from 'posthog-js'\nexport default function VelyrAnalytics() {\n  useEffect(() => {\n    posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n    posthog.register({ $host: '${hostFilter}' })\n  }, [])\n  return null\n}\n`
+        `'use client'\nimport Script from 'next/script'\nexport default function VelyrAnalytics() {\n  return (\n    <Script id="velyr-analytics" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: ${JSON.stringify(loaderJs)} }} />\n  )\n}\n`
 
       const componentSyntax = validateSyntax(componentPath, componentContent)
       if (!componentSyntax.ok) throw new Error(`VelyrAnalytics component syntax check failed: ${componentSyntax.reason}`)
@@ -1926,101 +1945,107 @@ async function createSnippetPR(
 
       // Edit layout: add import + <VelyrAnalytics/> inside <body>.
       const { data: layoutFile } = await octokit.rest.repos.getContent({
-        owner, repo, path: targetPath, ref: defaultBranch,
+        owner, repo, path: target.path, ref: defaultBranch,
       })
       const layoutContent = base64Decode(layoutFile.content)
       const importLine = `import VelyrAnalytics from './${componentBaseName}'`
 
       // Step 1: insert import after the last import statement.
       const importMatches = [...layoutContent.matchAll(/^(import\b[^\n]+)$/gm)]
-      if (importMatches.length === 0) throw new Error(`No import statements found in ${targetPath}`)
+      if (importMatches.length === 0) throw new Error(`No import statements found in ${target.path}`)
       const lastImportStr = importMatches[importMatches.length - 1][0]
       const importFVR = validateFindReplaceSafe(layoutContent, lastImportStr, '')
-      if (!importFVR.ok) throw new Error(`Cannot anchor import in ${targetPath}: ${importFVR.reason}`)
+      if (!importFVR.ok) throw new Error(`Cannot anchor import in ${target.path}: ${importFVR.reason}`)
       let newLayout = layoutContent.slice(0, importFVR.anchorPos)
         + importFVR.actualFind + '\n' + importLine
         + layoutContent.slice(importFVR.anchorPos + importFVR.actualFind.length)
 
       // Step 2: insert <VelyrAnalytics/> right after the <body...> opening tag.
       const bodyTagMatch = newLayout.match(/<body[^>]*>/)
-      if (!bodyTagMatch) throw new Error(`No <body> tag found in ${targetPath}`)
+      if (!bodyTagMatch) throw new Error(`No <body> tag found in ${target.path}`)
       const bodyTag = bodyTagMatch[0]
       const bodyFVR = validateFindReplaceSafe(newLayout, bodyTag, '')
-      if (!bodyFVR.ok) throw new Error(`Cannot anchor <body> in ${targetPath}: ${bodyFVR.reason}`)
+      if (!bodyFVR.ok) throw new Error(`Cannot anchor <body> in ${target.path}: ${bodyFVR.reason}`)
       newLayout = newLayout.slice(0, bodyFVR.anchorPos)
         + bodyFVR.actualFind + '\n        <VelyrAnalytics/>'
         + newLayout.slice(bodyFVR.anchorPos + bodyFVR.actualFind.length)
 
-      const layoutSyntax = validateSyntax(targetPath, newLayout)
+      const layoutSyntax = validateSyntax(target.path, newLayout)
       if (!layoutSyntax.ok) throw new Error(`Edited layout syntax check failed: ${layoutSyntax.reason}`)
 
       await octokit.rest.repos.createOrUpdateFileContents({
-        owner, repo, path: targetPath,
+        owner, repo, path: target.path,
         message: 'setup: import and render VelyrAnalytics in root layout',
         content: base64Encode(newLayout),
         sha: layoutFile.sha,
         branch: branchName,
       })
-      filesChanged.push(targetPath)
+      filesChanged.push(target.path)
 
     } else {
-      // nextjs-pages or vite-react/cra: edit a single entry file.
-      const { data: targetFile } = await octokit.rest.repos.getContent({
-        owner, repo, path: targetPath, ref: defaultBranch,
-      })
-      const fileContent = base64Decode(targetFile.content)
+      // nextjs-pages: put a next/script <Script> in pages/_document's <Head>.
+      // beforeInteractive scripts must live in _document (a Next requirement).
+      const scriptJsx = `<Script id="velyr-analytics" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: ${JSON.stringify(loaderJs)} }} />`
 
-      const snippet = mapResult.framework === 'nextjs-pages'
-        ? `import posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n  posthog.register({ $host: '${hostFilter}' })\n}`
-        : `import posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\nposthog.register({ $host: '${hostFilter}' })`
+      if (!target.exists) {
+        // Create _document.tsx from the standard template with the Script in <Head>.
+        const docContent =
+          `import { Html, Head, Main, NextScript } from 'next/document'\nimport Script from 'next/script'\n\nexport default function Document() {\n  return (\n    <Html>\n      <Head>\n        ${scriptJsx}\n      </Head>\n      <body>\n        <Main />\n        <NextScript />\n      </body>\n    </Html>\n  )\n}\n`
+        const docSyntax = validateSyntax(target.path, docContent)
+        if (!docSyntax.ok) throw new Error(`_document syntax check failed: ${docSyntax.reason}`)
+        await octokit.rest.repos.createOrUpdateFileContents({
+          owner, repo, path: target.path,
+          message: 'setup: add pages/_document with Velyr analytics',
+          content: base64Encode(docContent),
+          branch: branchName,
+        })
+        filesChanged.push(target.path)
 
-      const importMatches = [...fileContent.matchAll(/^(import\b[^\n]+)$/gm)]
-      if (importMatches.length === 0) throw new Error(`No import statements found in ${targetPath}`)
-      const lastImportStr = importMatches[importMatches.length - 1][0]
-      const fvr = validateFindReplaceSafe(fileContent, lastImportStr, '')
-      if (!fvr.ok) throw new Error(`Cannot anchor snippet in ${targetPath}: ${fvr.reason}`)
+      } else {
+        // Edit an existing _document: ensure the next/script import, then insert the
+        // <Script/> right after the <Head> opening tag.
+        const { data: docFile } = await octokit.rest.repos.getContent({
+          owner, repo, path: target.path, ref: defaultBranch,
+        })
+        let docContent = base64Decode(docFile.content)
 
-      const newContent = fileContent.slice(0, fvr.anchorPos)
-        + fvr.actualFind + '\n' + snippet
-        + fileContent.slice(fvr.anchorPos + fvr.actualFind.length)
+        if (!/from ['"]next\/script['"]/.test(docContent)) {
+          const importMatches = [...docContent.matchAll(/^(import\b[^\n]+)$/gm)]
+          if (importMatches.length === 0) throw new Error(`No import statements found in ${target.path}`)
+          const lastImportStr = importMatches[importMatches.length - 1][0]
+          const importFVR = validateFindReplaceSafe(docContent, lastImportStr, '')
+          if (!importFVR.ok) throw new Error(`Cannot anchor import in ${target.path}: ${importFVR.reason}`)
+          docContent = docContent.slice(0, importFVR.anchorPos)
+            + importFVR.actualFind + `\nimport Script from 'next/script'`
+            + docContent.slice(importFVR.anchorPos + importFVR.actualFind.length)
+        }
 
-      const syntaxCheck = validateSyntax(targetPath, newContent)
-      if (!syntaxCheck.ok) throw new Error(`Edited entry file syntax check failed: ${syntaxCheck.reason}`)
+        const headTagMatch = docContent.match(/<Head[^>]*>/)
+        if (!headTagMatch || headTagMatch[0].endsWith('/>')) {
+          throw new Error(`No usable <Head> tag in ${target.path}`)
+        }
+        const headTag = headTagMatch[0]
+        const headFVR = validateFindReplaceSafe(docContent, headTag, '')
+        if (!headFVR.ok) throw new Error(`Cannot anchor <Head> in ${target.path}: ${headFVR.reason}`)
+        docContent = docContent.slice(0, headFVR.anchorPos)
+          + headFVR.actualFind + `\n        ${scriptJsx}`
+          + docContent.slice(headFVR.anchorPos + headFVR.actualFind.length)
 
-      await octokit.rest.repos.createOrUpdateFileContents({
-        owner, repo, path: targetPath,
-        message: 'setup: add Velyr analytics snippet',
-        content: base64Encode(newContent),
-        sha: targetFile.sha,
-        branch: branchName,
-      })
-      filesChanged.push(targetPath)
-    }
-
-    // PART 2 (dep fix): when there's no frozen lockfile, add posthog-js to
-    // package.json in this same PR so the merge is self-contained and the build
-    // won't fail on a missing import. NARROW, mechanical exception scoped to the
-    // Setup-PR only — package.json stays in FORBIDDEN_EDIT_PATHS for the LLM fix
-    // pipeline (that guard is untouched).
-    if (depAction === 'auto_added') {
-      const pkgPath = `${pkgDir}package.json`
-      const { data: pkgFile } = await octokit.rest.repos.getContent({
-        owner, repo, path: pkgPath, ref: defaultBranch,
-      })
-      const pkg = JSON.parse(base64Decode(pkgFile.content))
-      pkg.dependencies = pkg.dependencies || {}
-      pkg.dependencies['posthog-js'] = '^1.160.0'
-      await octokit.rest.repos.createOrUpdateFileContents({
-        owner, repo, path: pkgPath,
-        message: 'setup: add posthog-js dependency',
-        content: base64Encode(JSON.stringify(pkg, null, 2) + '\n'),
-        sha: pkgFile.sha, branch: branchName,
-      })
-      filesChanged.push(pkgPath)
+        const docSyntax = validateSyntax(target.path, docContent)
+        if (!docSyntax.ok) throw new Error(`Edited _document syntax check failed: ${docSyntax.reason}`)
+        await octokit.rest.repos.createOrUpdateFileContents({
+          owner, repo, path: target.path,
+          message: 'setup: add Velyr analytics Script to _document',
+          content: base64Encode(docContent),
+          sha: docFile.sha,
+          branch: branchName,
+        })
+        filesChanged.push(target.path)
+      }
     }
 
     const receipt = buildSnippetReceipt({
-      framework: mapResult.framework, targetPath, filesChanged, depAction, coexist, hostFilter,
+      mode: target.mode, targetPath: target.path, filesChanged, coexist, hostFilter,
     })
 
     const { data: pr } = await octokit.rest.pulls.create({
@@ -2042,7 +2067,7 @@ async function createSnippetPR(
       DB_TIMEOUT_MS, 'createpr_waiting_approval_update'
     )
 
-    if (chatId) await sendSnippetTelegram(chatId, pr.html_url, depAction)
+    if (chatId) await sendSnippetTelegram(chatId, pr.html_url)
 
   } catch (err: any) {
     slog('error', 'snippet_pr_failed', {
@@ -2062,16 +2087,12 @@ async function createSnippetPR(
       DB_TIMEOUT_MS, 'createpr_failed_update'
     )
     if (chatId) {
-      const fallbackSnippet = mapResult.framework === 'nextjs-app'
-        ? `// app/velyr-analytics.tsx\n'use client'\nimport { useEffect } from 'react'\nimport posthog from 'posthog-js'\nexport default function VelyrAnalytics() {\n  useEffect(() => {\n    posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n    posthog.register({ $host: '${hostFilter}' })\n  }, [])\n  return null\n}`
-        : mapResult.framework === 'nextjs-pages'
-        ? `import posthog from 'posthog-js'\nif (typeof window !== 'undefined') {\n  posthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\n  posthog.register({ $host: '${hostFilter}' })\n}`
-        : `import posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\nposthog.register({ $host: '${hostFilter}' })`
+      const fallbackSnippet = `<script>\n${buildPostHogLoaderJS(snippetToken, hostFilter)}\n</script>`
       await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: `📊 <b>Analytics setup — one paste</b>\n\n(Automatic PR failed — add this manually:)\n\n<pre><code>${escapeHtml(fallbackSnippet)}</code></pre>${hasDep ? '' : '\n\nFirst install: <code>npm install posthog-js</code>'}\n\n<i>Scoped to <code>${escapeHtml(hostFilter)}</code>.</i>`,
+          text: `📊 <b>Analytics setup — one paste</b>\n\n(Automatic PR failed — paste this into your site's HTML &lt;head&gt; once:)\n\n<pre><code>${escapeHtml(fallbackSnippet)}</code></pre>\n\n<i>Loads PostHog from their CDN — no dependency to install. Scoped to <code>${escapeHtml(hostFilter)}</code>.</i>`,
           parse_mode: 'HTML',
         }),
       }).catch(() => {})
@@ -2112,14 +2133,14 @@ async function createForeignSetupPR(subscriptionId: string): Promise<any> {
     )
     if (mapResult.framework === 'unsupported') throw new Error(`Unsupported framework: ${mapResult.unsupportedReason}`)
 
-    const targetPath = resolveSnippetTarget(mapResult)
-    if (!targetPath) throw new Error(`Cannot resolve snippet target for ${mapResult.framework}`)
+    const target = resolveSnippetTarget(mapResult)
+    if (!target) throw new Error(`Cannot resolve snippet target for ${mapResult.framework}`)
 
-    // coexist=true: customer has existing posthog.init (they said YES to side-by-side).
-    // hasDep is always true for foreign: their posthog-js dep is already installed.
+    // coexist=true: customer has their own PostHog (they said YES to side-by-side).
+    // The script-tag loader needs no dependency, so there are no foreign-dep assumptions.
     await createSnippetPR(
       conn, run, mapResult, octokit, preflight.defaultBranch,
-      { state: 'missing', targetPath, hasDep: true },
+      { state: 'missing', target },
       sub?.telegram_chat_id || null,
       true,
     )
@@ -2378,13 +2399,12 @@ async function maybeRunSnippetSetup(
     if (wasFirstRun && chatId && conn.posthog_host_filter) {
       const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || VELYR_POSTHOG_TOKEN
       const hostFilter = conn.posthog_host_filter
-      const snippetCode =
-        `import posthog from 'posthog-js'\nposthog.init('${snippetToken}', { api_host: 'https://us.i.posthog.com' })\nposthog.register({ $host: '${hostFilter}' })`
+      const snippetCode = `<script>\n${buildPostHogLoaderJS(snippetToken, hostFilter)}\n</script>`
       await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: `📊 <b>Analytics setup — one paste</b>\n\nAdd this to your app's entry file once:\n\n<pre><code>${escapeHtml(snippetCode)}</code></pre>\n\nFirst install the package:\n<code>npm install posthog-js</code>\n\n<i>Your visitor data is scoped to your domain (<code>${escapeHtml(hostFilter)}</code>). Once added, the agent uses real visitor data for smarter recommendations.</i>`,
+          text: `📊 <b>Analytics setup — one paste</b>\n\nPaste this into your site's HTML &lt;head&gt; once:\n\n<pre><code>${escapeHtml(snippetCode)}</code></pre>\n\nIt loads PostHog from their CDN — <i>no dependency to install</i>. Your visitor data is scoped to your domain (<code>${escapeHtml(hostFilter)}</code>). Once added, the agent uses real visitor data for smarter recommendations.`,
           parse_mode: 'HTML',
         }),
       }).catch(err => console.error('[unsupported-framework-snippet] send failed:', err))
