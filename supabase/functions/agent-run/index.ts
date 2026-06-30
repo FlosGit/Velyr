@@ -3387,7 +3387,21 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
         ...fixResult,
         analytics_snapshot: analytics?.last7Days,
         revenue:            revenue || null,
-        pending_write:      { filename: fixResult.file_to_edit, themeId: conn.shopify_main_theme_id, newContent: applied.newContent },
+        // Stage 3: per-file pending write. The forward analysis only ever edits an
+        // EXISTING theme file (op:'modified'), capturing priorContent (rollback
+        // re-upsert basis) and the analysis-time checksumMd5 (optimistic-concurrency
+        // basis). The files[] shape lets a future created file (Stage-4 snippet)
+        // carry op:'created' + a delete-on-rollback without reshaping this.
+        pending_write:      {
+          themeId: conn.shopify_main_theme_id,
+          files: [{
+            filename:     fixResult.file_to_edit,
+            op:           'modified',
+            newContent:   applied.newContent,
+            priorContent: target.content,
+            checksumMd5:  target.checksumMd5,
+          }],
+        },
       },
       problem_description: fixResult.problem,
       pages_fixed:         [fixResult.file_to_edit],

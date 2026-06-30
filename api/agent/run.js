@@ -725,6 +725,37 @@ async function backfillAfterScreenshots(handlerStart) {
   return captured
 }
 
+// Stage 3: propose a Shopify-direct rollback (no PR). Sends the YES/NO Telegram, pins
+// the run via telegram_message_id so the reply resolves it, and flips the run to
+// shopify_rollback_pending (off shopify_deployed, so the candidate query won't re-pick
+// it). The merchant's YES executes the re-upsert/delete (telegram.js); NO keeps it.
+async function proposeShopifyDirectRollback(run, bounceBefore, bounceAfter, bounceDelta) {
+  const { data: subRow } = await supabase
+    .from('agent_subscriptions').select('telegram_chat_id').eq('id', run.subscription_id).single()
+  let messageId = null
+  if (subRow?.telegram_chat_id) {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: subRow.telegram_chat_id,
+          text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Site-wide bounce rate: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\nReply <b>YES</b> to undo this change on your live theme, or <b>NO</b> to keep it.`,
+          parse_mode: 'HTML',
+        }),
+      })
+      const j = await res.json().catch(() => ({}))
+      messageId = j?.result?.message_id || null
+    } catch (e) {
+      console.error('[rollback] shopify proposal telegram failed:', e?.message)
+    }
+  }
+  await supabase.from('agent_runs').update({
+    status:          'shopify_rollback_pending',
+    rollback_reason: 'metrics_dropped',
+    ...(messageId ? { telegram_message_id: messageId } : {}),
+  }).eq('id', run.id)
+}
+
 async function handleRollbackCheck(res) {
   // The sole deterministic rollback trigger: site-wide bounce rate rose by at
   // least this many percentage points in the 48h after a change merged. The
@@ -755,7 +786,10 @@ async function handleRollbackCheck(res) {
   const lookbackStart = new Date(Date.now() - ROLLBACK_LOOKBACK_MS).toISOString()
   const { data: deployedRuns } = await supabase
     .from('agent_runs').select('*')
-    .eq('status', 'deployed')
+    // Stage 3: include shopify_deployed so a Shopify-direct change is rollback-checked
+    // too. The bounce measurement below is connection-agnostic (keys on posthog_host_
+    // filter); only the rollback ACTION branches on connection_source.
+    .in('status', ['deployed', 'shopify_deployed'])
     .gte('completed_at', lookbackStart)
     .lte('completed_at', fortyEightHoursAgo)
 
@@ -908,7 +942,16 @@ async function handleRollbackCheck(res) {
         await recordDNA(run.subscription_id, run.id, fixType, 'pending', `48h check positive: ${noteSuffix}`)
       }
 
-      if (shouldRollback) {
+      const isShopifyDirect = conn?.connection_source === 'shopify_direct'
+        || (conn?.shopify_shop_domain && !conn?.github_repo_name)
+      if (shouldRollback && isShopifyDirect) {
+        // Shopify-direct: no revert PR exists. Propose the rollback via Telegram; the
+        // merchant's YES reply executes the re-upsert(prior)/delete(created) strategy
+        // (api/webhooks/telegram.js executeShopifyDirectRollback). Fully separate from
+        // the GitHub revert-PR path below — selected by connection_source, no interleaved
+        // if(hasPR) conditionals.
+        await proposeShopifyDirectRollback(run, bounceBefore, bounceAfter, bounceDelta)
+      } else if (shouldRollback) {
         const octokit = await getOctokit(conn.github_installation_id)
         const owner   = conn.github_repo_owner
         const repo    = conn.github_repo_name
