@@ -670,7 +670,12 @@ const SHOPIFY_THEME_MAX_PAGES  = Number(Deno.env.get('SHOPIFY_THEME_MAX_PAGES') 
 const SHOPIFY_THEME_FILE_GLOBS = ['templates/*', 'sections/*', 'snippets/*']
 const SHOPIFY_KEEP_RE          = /^(templates|sections|snippets)\//
 
-export interface ShopifyThemeFile { filename: string; content: string; size: number }
+// checksumMd5 is Shopify's own MD5 of the file body, captured at read time. The
+// direct-write path uses it for optimistic concurrency (re-read before write and
+// abort if the merchant edited the file in between) — see Stage 3. It is null for
+// sources that don't carry it (the GitHub-blob theme reader, which opens a PR and
+// never does a direct in-place upsert).
+export interface ShopifyThemeFile { filename: string; content: string; size: number; checksumMd5: string | null }
 
 type ShopifyThemeReadResult =
   | { ok: true; files: ShopifyThemeFile[]; pagesRead: number; truncatedAtPageCap: boolean }
@@ -683,6 +688,7 @@ const SHOPIFY_THEME_FILES_QUERY = `query VelyrThemeFiles($themeId: ID!, $cursor:
         node {
           filename
           size
+          checksumMd5
           contentType
           body {
             ... on OnlineStoreThemeFileBodyText { content }
@@ -758,9 +764,13 @@ async function readShopifyTheme(
       if (!SHOPIFY_KEEP_RE.test(node.filename)) continue   // authoritative client-side re-filter
       const content = node.body?.content
       if (typeof content === 'string') {
-        files.push({ filename: node.filename, content, size: Number(node.size) || 0 })
+        // checksumMd5 may be absent on some payloads — null is fine (concurrency
+        // re-check treats a null stored checksum as "can't verify", see Stage 3).
+        files.push({ filename: node.filename, content, size: Number(node.size) || 0, checksumMd5: node.checksumMd5 ?? null })
       } else {
-        // Base64 / Url body on a kept liquid file shouldn't happen — log + skip.
+        // A non-Text body (Base64 / Url) or an EMPTY body on a kept liquid file
+        // shouldn't normally happen — log + skip GRACEFULLY (never crash the tree
+        // build); the file simply doesn't enter the analysis.
         slog('warn', 'shopify_theme_read_nontext_body', { shop, filename: node.filename, contentType: node.contentType ?? null })
       }
     }
@@ -3393,7 +3403,9 @@ async function readThemeFilesFromGithub(
       try {
         const { data } = await octokit.rest.git.getBlob({ owner, repo, file_sha: e.sha })
         const content = data.encoding === 'base64' ? base64Decode(data.content) : (data.content ?? '')
-        out.push({ filename: e.path, content, size: e.size ?? byteLength(content) })
+        // checksumMd5 is null here: the GitHub theme path opens a PR (no direct
+        // in-place upsert), so it never needs Shopify's optimistic-concurrency hash.
+        out.push({ filename: e.path, content, size: e.size ?? byteLength(content), checksumMd5: null })
       } catch {
         // Unreadable blob (rare) — skip; the file just doesn't enter the analysis.
         slog('warn', 'shopify_github_blob_read_failed', { owner, repo, path: e.path })
@@ -3649,13 +3661,33 @@ async function processConnection(conn: any) {
       return
     }
 
-    // ── Shopify fork (Step 3) ────────────────────────────────────────────────
-    // A Shopify connection has no GitHub repo (github_repo_name IS NULL). Fork
-    // here — AFTER the shared run-insert + spend-cap preamble, BEFORE getOctokit
-    // (which dereferences a null github_installation_id) — into the Liquid-theme
-    // pipeline, then return. Any throw propagates to the shared catch below. The
-    // GitHub path that follows is unchanged.
-    if (conn.shopify_shop_domain && !conn.github_repo_name) {
+    // ── Shopify-direct fork (Step 3) ─────────────────────────────────────────
+    // A pure-Shopify connection has no GitHub repo and takes the Liquid-theme
+    // pipeline (read+analyze+write via the Admin GraphQL API). Fork here — AFTER
+    // the shared run-insert + spend-cap preamble, BEFORE getOctokit (which
+    // dereferences a null github_installation_id) — then return. Any throw
+    // propagates to the shared catch below. The GitHub path that follows is unchanged.
+    //
+    // Route on the explicit connection_source discriminator; fall back to the
+    // legacy shape (shop domain set, no GitHub repo) so rows written before the
+    // connection_source backfill still route correctly. When the two signals
+    // DISAGREE, warn loudly (never silently override): the
+    // agent_connections_single_type_check constraint already blocks the genuinely
+    // ambiguous both-set row, so a mismatch here means a stale/missing backfill or a
+    // misconfigured row worth surfacing. We still route toward Shopify-direct if
+    // EITHER signal says so, but the warning makes the override auditable.
+    const sourceIsShopify = conn.connection_source === 'shopify_direct'
+    const shapeIsShopify  = Boolean(conn.shopify_shop_domain && !conn.github_repo_name)
+    if (sourceIsShopify !== shapeIsShopify) {
+      slog('warn', 'connection_source_shape_mismatch', {
+        subscriptionId:   conn.subscription_id,
+        connectionSource: conn.connection_source ?? null,
+        hasShopDomain:    Boolean(conn.shopify_shop_domain),
+        hasGithubRepo:    Boolean(conn.github_repo_name),
+        routedTo:         'shopify_direct',
+      })
+    }
+    if (sourceIsShopify || shapeIsShopify) {
       await processShopifyConnection(conn, run, subRow)
       return
     }
