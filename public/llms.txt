@@ -1,37 +1,37 @@
 # Velyr
 
-Velyr is an AI growth agent that ships one weekly conversion fix as a GitHub Pull Request. Your code, your repo, your approval. €29/month after a 14-day free trial.
+Velyr is an AI growth agent that ships one weekly conversion fix: a GitHub Pull Request on your repo, or a direct theme change on your Shopify store. Your code, your approval. €29/month after a 14-day free trial.
 
-> Velyr finds your site's #1 conversion problem each week, writes the code fix as a Pull Request, and waits for your one-tap approval over Telegram. If the change hurts your numbers, it reverts itself within 48 hours.
+> Velyr finds your site's #1 conversion problem each week, writes the code fix, and waits for your one-tap approval over Telegram. On GitHub the fix is a Pull Request; on Shopify it is written to your live theme after your YES. If a change hurts your numbers, Velyr proposes a rollback within 48 hours.
 
 ## What it does
-- Every Monday, reads your PostHog analytics (traffic, bounce rate, scroll depth, click behavior) and scans every page in your GitHub repo.
+- Every Monday, reads your PostHog analytics (traffic, bounce rate, scroll depth, click behavior) and scans every page in your GitHub repo or Shopify theme.
 - Identifies the single highest-impact conversion problem across your full funnel — not just the homepage.
-- Writes the actual code change and opens a GitHub Pull Request with a Vercel preview link.
+- Writes the actual code change: a GitHub Pull Request with a preview link, or a staged Shopify theme change.
 - Sends a Telegram message summarizing the problem, the data, and the fix — reply YES to deploy, NO to skip.
-- 48 hours after a merge, checks site-wide bounce rate; if it spikes by 15 percentage points or more, it automatically opens a rollback Pull Request.
+- 48 hours after a fix ships, checks site-wide bounce rate; if it spikes by 15 percentage points or more, it proposes a rollback for your approval.
 
 ## How it's different
-- It ships real code as Pull Requests, not a dashboard of suggestions you have to implement yourself.
-- You approve every change before anything merges — nothing ships silently.
-- It has an automatic safety net: a measured rollback if a fix backfires, not just a promise.
-- It works inside your existing GitHub + Vercel + PostHog workflow. No new platform to migrate to.
+- It ships real code, not a dashboard of suggestions you have to implement yourself.
+- You approve every change before anything ships — nothing ships silently.
+- It has a safety net: a measured, approval-gated rollback if a fix backfires, not just a promise.
+- It works inside your existing workflow — GitHub + your host + PostHog, or Shopify directly. No new platform to migrate to.
 
 ## Who it's for
-React, Next.js, or Vite sites deployed on Vercel with a GitHub repository. Indie hackers, solo founders, and small SaaS teams who want continuous conversion optimization without hiring a CRO agency or running it manually.
+React, Next.js, or Vite sites in a GitHub repo that auto-deploys (Vercel, Netlify, Render, Railway, Cloudflare Pages), and Shopify stores connected directly or via GitHub theme sync. Indie hackers, solo founders, small SaaS teams, and store owners who want continuous conversion optimization without hiring a CRO agency or running it manually.
 
 ## Not supported
-Shopify, Wix, Squarespace, and Webflow. The agent edits source code, and these site builders don't expose that.
+Wix, Squarespace, and Webflow. The agent edits source code, and these site builders don't expose that.
 
 ## Pricing
 €29/month. 14-day free trial with all features included; a credit card is required to start, and you can cancel anytime during the trial without being charged. Cancel anytime after that too.
 
 ## Common questions
-- **Do I approve every change?** Yes. Nothing merges without your explicit YES reply, and you see the exact code diff in the Pull Request first.
-- **What if a fix makes things worse?** Velyr checks bounce rate 48 hours after each merge and auto-opens a revert PR if it rose by 15 percentage points or more.
-- **Does it touch my whole funnel?** Yes — it maps every page in your repo and cross-references your analytics to find where users drop off, then fixes the highest-impact issue.
+- **Do I approve every change?** Yes. Nothing ships without your explicit YES reply, and you see the exact change first.
+- **What if a fix makes things worse?** Velyr checks bounce rate 48 hours after each shipped fix and proposes a rollback if it rose by 15 percentage points or more: a revert PR on GitHub, or restoring the previous theme files on Shopify.
+- **Does it touch my whole funnel?** Yes — it maps every page of your site and cross-references your analytics to find where users drop off, then fixes the highest-impact issue.
 - **Can I protect certain copy or design?** Yes. Brand Guardrails are written rules the agent must respect; violating suggestions are rejected before they reach you.
-- **Is my code safe?** Velyr only proposes changes as Pull Requests on your own GitHub repo. You review and approve before anything merges.
+- **Is my code safe?** On GitHub, Velyr only proposes changes as Pull Requests on your own repo. On Shopify, nothing is written to your theme before your YES, and every change can be rolled back.
 
 ## Key pages
 - https://velyr.io/ — homepage and pricing
