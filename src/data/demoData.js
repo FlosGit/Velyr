@@ -129,8 +129,8 @@ const RUN_TEMPLATES = [
     file_to_edit: 'src/components/Hero/Hero.tsx',
     confidence_score: 78,
     bounce_before: 54, bounce_after: 58,
-    metric_label: 'Bounce +4pp · auto-rolled-back',
-    rollback_note: 'Bounce rate rose 4pp 48h after deploy — auto-rolled-back per guardrail.',
+    metric_label: 'Bounce +4pp · rolled back',
+    rollback_note: 'Bounce rate rose 4pp 48h after deploy — rolled back per guardrail.',
   },
   {
     weeks: 6,

@@ -60,7 +60,7 @@ const AGENT_STEPS = [
   { id:'seasonal',    label:'Checking seasonal',       desc:'Picking the right priority for this month' },
   { id:'read_dna',    label:'Reading Business DNA',    desc:'Loading what works and what to avoid' },
   { id:'map_funnel',  label:'Mapping funnel',          desc:'Detecting pages and conversion flow' },
-  { id:'analyze',     label:'Finding biggest issue',   desc:'Claude analyzing drop-off & opportunities' },
+  { id:'analyze',     label:'Finding biggest issue',   desc:'Claude analyzing where visitors drop off' },
   { id:'screenshot',  label:'Taking before screenshot',desc:'Capturing the page before any changes' },
   { id:'write_fix',   label:'Writing fix',             desc:'Editing file and generating patch' },
   { id:'open_pr',     label:'Opening pull request',    desc:'Pushing branch and creating PR on GitHub' },
@@ -422,7 +422,7 @@ function LiveActivityStream({runs, activeRun}) {
         </div>
       ))}
       {streamItems.length===0 && (
-        <p style={{fontSize:12,color:C.textLight,padding:'16px 0',textAlign:'center'}}>No activity yet. Agent runs every Monday.</p>
+        <p style={{fontSize:12,color:C.textLight,padding:'16px 0',textAlign:'center'}}>No runs yet. Kick one off with Run now, or wait for Monday morning.</p>
       )}
     </div>
   )
@@ -981,7 +981,7 @@ function AgentLearningStrip({learnings}) {
         <span style={{fontSize:18}}>🧠</span>
         <div>
           <SectionLabel style={{color:C.accent,marginBottom:1}}>Business DNA · Agent is learning</SectionLabel>
-          <p style={{fontSize:11,color:C.textMuted}}>Every fix makes the agent smarter for your site</p>
+          <p style={{fontSize:11,color:C.textMuted}}>A record of what worked on your site, and what didn’t</p>
         </div>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
