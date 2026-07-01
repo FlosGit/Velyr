@@ -3152,6 +3152,145 @@ async function sendShopifyTelegram(chatId: string | null, html: string) {
   }).catch(err => console.error('[shopify] telegram send failed:', err))
 }
 
+// ─── STAGE 4: PostHog snippet read + injection proposal ──────────────────────
+// layout/theme.liquid is OUTSIDE the conversion surface (SHOPIFY_KEEP_RE =
+// templates|sections|snippets), so readShopifyTheme never returns it. This reads the
+// ONE named file (content + checksumMd5) for the injection target. Same endpoint/
+// headers/timeout as the other reads; never throws.
+type ShopifyThemeFileReadResult =
+  | { ok: true; content: string; checksumMd5: string | null }
+  | { ok: false; reason: 'unauthorized' | 'not_found' | 'graphql_error' | 'request_failed'; message: string }
+
+async function readShopifyThemeFile(
+  shop: string, themeIdNumeric: number | string, accessToken: string, filename: string,
+): Promise<ShopifyThemeFileReadResult> {
+  const themeGid = `gid://shopify/OnlineStoreTheme/${themeIdNumeric}`
+  const endpoint = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`
+  const query = `query VelyrThemeFile($themeId: ID!, $filenames: [String!]) {
+    theme(id: $themeId) {
+      files(first: 1, filenames: $filenames) {
+        edges { node { filename checksumMd5 body { ... on OnlineStoreThemeFileBodyText { content } } } }
+      }
+    }
+  }`
+  let res: Response
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ query, variables: { themeId: themeGid, filenames: [filename] } }),
+      signal: AbortSignal.timeout(20000),
+    })
+  } catch (e: any) {
+    return { ok: false, reason: 'request_failed', message: `theme file read threw: ${e?.message || String(e)}` }
+  }
+  if (res.status === 401) return { ok: false, reason: 'unauthorized', message: 'Shopify returned 401 reading theme file' }
+  const json: any = await res.json().catch(() => ({}))
+  if (!res.ok || json?.errors || json?.data?.theme?.files == null) {
+    return { ok: false, reason: 'graphql_error', message: `theme file read failed (HTTP ${res.status})` }
+  }
+  const node = (json.data.theme.files.edges || [])[0]?.node
+  const content = node?.body?.content
+  if (typeof content !== 'string') {
+    return { ok: false, reason: 'not_found', message: `${filename} not found or has no text body` }
+  }
+  return { ok: true, content, checksumMd5: node.checksumMd5 ?? null }
+}
+
+// Marker comments wrapping the injected loader — for human readability + a stable
+// detection anchor (alongside the token) so we never double-inject.
+const VELYR_POSTHOG_MARKER_OPEN  = '<!-- Velyr Analytics -->'
+const VELYR_POSTHOG_MARKER_CLOSE = '<!-- /Velyr Analytics -->'
+
+// One-time, approval-gated, rollback-safe PostHog injection into layout/theme.liquid.
+// A shopify_direct store emits no analytics until this loader is in the theme. Rather
+// than auto-writing the live theme, this stages a pending_write and routes it through
+// the SAME Stage-3 apply path (YES → applyShopifyDirectWrite: optimistic-concurrency
+// checked, recorded as a rollback-able applied_write). Gated once per connection on
+// posthog_snippet_installed_at. Returns 'proposed' (caller returns from the run, await
+// approval) or 'continue' (already installed / can't inject → run the conversion analysis).
+async function maybeProposeShopifyPostHogSetup(
+  conn: any, run: any, subRow: any, accessToken: string,
+): Promise<'proposed' | 'continue'> {
+  const chatId: string | null = subRow?.telegram_chat_id || null
+  const hostFilter = conn.posthog_host_filter
+  // No $host partition key yet → the loader would register nothing useful; skip setup
+  // (the conversion analysis still runs, on funnel-only signal).
+  if (!hostFilter) return 'continue'
+
+  const read = await readShopifyThemeFile(conn.shopify_shop_domain, conn.shopify_main_theme_id, accessToken, 'layout/theme.liquid')
+  if (!read.ok) {
+    slog('warn', 'shopify_posthog_layout_read_failed', { subscriptionId: conn.subscription_id, reason: read.reason })
+    return 'continue'   // can't read the layout → never block the product on analytics setup
+  }
+
+  const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || VELYR_POSTHOG_TOKEN
+  // Self-heal: the loader (or our marker) is already present → record + proceed; never double-inject.
+  if (read.content.includes(snippetToken) || read.content.includes(VELYR_POSTHOG_MARKER_OPEN)) {
+    await dbWrite(
+      supabase.from('agent_connections').update({ posthog_snippet_installed_at: new Date().toISOString() }).eq('id', conn.id),
+      DB_TIMEOUT_MS, 'shopify_posthog_selfheal_update',
+    ).catch(() => ({ error: null }))
+    return 'continue'
+  }
+
+  // Build the injected content: the CDN loader (twin of index.html) before </head>
+  // (fallback </body>). No npm/bundler path — a <script> tag can't break a build.
+  const loaderJs = buildPostHogLoaderJS(snippetToken, hostFilter)
+  const snippet  = `${VELYR_POSTHOG_MARKER_OPEN}\n<script>\n${loaderJs}\n</script>\n${VELYR_POSTHOG_MARKER_CLOSE}\n`
+  const m = read.content.match(/<\/head>/i) || read.content.match(/<\/body>/i)
+  if (!m || m.index == null) {
+    slog('warn', 'shopify_posthog_no_anchor', { subscriptionId: conn.subscription_id })
+    return 'continue'   // no </head>/</body> to anchor → can't inject safely; skip (analysis still runs)
+  }
+  const newContent = read.content.slice(0, m.index) + snippet + read.content.slice(m.index)
+
+  // Send the YES/NO approval first (capture message_id so the reply resolves this run),
+  // then stage the pending write under the shared shopify_awaiting_approval status. The
+  // YES handler (applyShopifyDirectWrite) applies it and, seeing setup_kind:'posthog',
+  // stamps posthog_snippet_installed_at.
+  let messageId: number | null = null
+  if (chatId) {
+    const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `📊 <b>Velyr — turn on analytics</b>\n\nTo measure conversions and prove every change pays off, Velyr adds a tiny analytics snippet to your theme's <code>layout/theme.liquid</code> (the same loader velyr.io uses — no apps, no slowdown).\n\nReply <b>YES</b> to install it on your live theme / <b>NO</b> to skip.`,
+        parse_mode: 'HTML',
+      }),
+    })
+    const tgData = await tgRes.json().catch(() => ({}))
+    messageId = tgData?.result?.message_id || null
+  }
+
+  await dbWrite(
+    supabase.from('agent_runs').update({
+      status:              'shopify_awaiting_approval',
+      run_type:            'setup_posthog',
+      current_step:        'done',
+      completed_at:        new Date().toISOString(),
+      problem_description: 'Install Velyr analytics snippet',
+      pages_fixed:         ['layout/theme.liquid'],
+      telegram_message_id: messageId,
+      analysis_result: {
+        setup_kind: 'posthog',
+        pending_write: {
+          themeId: conn.shopify_main_theme_id,
+          files: [{
+            filename:     'layout/theme.liquid',
+            op:           'modified',
+            newContent,
+            priorContent: read.content,
+            checksumMd5:  read.checksumMd5,
+          }],
+        },
+      },
+    }).eq('id', run.id),
+    DB_TIMEOUT_MS, 'shopify_posthog_propose_update',
+  )
+  return 'proposed'
+}
+
 async function processShopifyConnection(conn: any, run: any, subRow: any): Promise<void> {
   const chatId: string | null = subRow?.telegram_chat_id || null
 
@@ -3200,6 +3339,17 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     return
   }
   const files = read.files
+
+  // ── Stage 4: PostHog snippet injection gate (one-time, approval-gated) ────────
+  // Before any conversion analysis: if analytics isn't installed yet, propose injecting
+  // the loader into layout/theme.liquid (approval → the Stage-3 apply path) and return;
+  // conversion analysis resumes on the next run. Placed BEFORE the no-files check so a
+  // sparse theme still gets analytics (the snippet is independent of conversion files).
+  if (!conn.posthog_snippet_installed_at) {
+    const setup = await maybeProposeShopifyPostHogSetup(conn, run, subRow, accessToken)
+    if (setup === 'proposed') return
+  }
+
   if (files.length === 0) {
     await dbWrite(
       supabase.from('agent_runs').update({

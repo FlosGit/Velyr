@@ -790,6 +790,10 @@ async function handleRollbackCheck(res) {
     // too. The bounce measurement below is connection-agnostic (keys on posthog_host_
     // filter); only the rollback ACTION branches on connection_source.
     .in('status', ['deployed', 'shopify_deployed'])
+    // Stage 4: never bounce-roll-back an analytics-setup run — it doesn't affect
+    // conversions, and rolling it back would delete the snippet while the install-once
+    // gate (posthog_snippet_installed_at) stays set, silently losing analytics.
+    .neq('run_type', 'setup_posthog')
     .gte('completed_at', lookbackStart)
     .lte('completed_at', fortyEightHoursAgo)
 

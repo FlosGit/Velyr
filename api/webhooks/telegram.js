@@ -429,6 +429,14 @@ async function applyShopifyDirectWrite(run, conn, chatId) {
     // confirm-via-poll upgrade; not polled today (confirmation stays option (a)).
     analysis_result: { ...run.analysis_result, applied_write: { themeId: pending.themeId, files: appliedFiles, upsertJobId: up.jobId ?? null } },
   }).eq('id', run.id)
+
+  // Stage 4: a PostHog-setup apply also stamps the install-once gate + gets its own copy.
+  if (run.analysis_result?.setup_kind === 'posthog') {
+    await supabase.from('agent_connections')
+      .update({ posthog_snippet_installed_at: new Date().toISOString() })
+      .eq('subscription_id', run.subscription_id)
+    return sendMessage(chatId, `✅ Analytics installed on your live theme — Velyr can now measure your conversions. Your first conversion fix lands on the next run.`)
+  }
   return sendMessage(chatId, `✅ Applied <code>${escapeHtml(appliedFiles.map(f => f.filename).join(', '))}</code> to your live theme.`)
 }
 
@@ -695,6 +703,16 @@ async function handleReject(runId, chatId) {
     await supabase.from('agent_runs').update({
       status: 'shopify_rejected', completed_at: new Date().toISOString(),
     }).eq('id', run.id)
+    // Stage 4: NO on the analytics-setup proposal = "don't ask again". Stamp the
+    // install-once gate (resolved) so it isn't re-proposed every run; the agent then
+    // runs on funnel-only signal. (A future "enable analytics" re-trigger is a TODO —
+    // this reuses posthog_snippet_installed_at as a resolved sentinel, no new column.)
+    if (run.analysis_result?.setup_kind === 'posthog') {
+      await supabase.from('agent_connections')
+        .update({ posthog_snippet_installed_at: new Date().toISOString() })
+        .eq('subscription_id', run.subscription_id)
+      return sendMessage(chatId, `👍 No problem — I won't add analytics. I'll keep working from your funnel structure. You can enable analytics later from your dashboard.`)
+    }
     return sendMessage(chatId, `❌ <b>Skipped.</b> Nothing was changed in your theme — the agent will analyze again on the next run.`)
   }
 
