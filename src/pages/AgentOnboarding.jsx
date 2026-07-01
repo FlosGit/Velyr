@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-import { supabase } from '../lib/supabase.js'
+import { supabase, SUPABASE_URL } from '../lib/supabase.js'
 import { MOTION_CSS } from '../lib/motion.jsx'
 import { SiteNetwork } from '../components/SiteNetwork.jsx'
 import { buildNetworkData, hubDomainFromUrl } from '../lib/siteNetworkData.js'
@@ -1180,8 +1180,11 @@ function ShopifyConnect({ onBack, user, subscriptionId, formData, initialError }
       try { localStorage.setItem('velyr_onboarding_data', JSON.stringify({ ...(formData || {}), connectionType: 'shopify_direct' })) } catch {}
 
       const { data: { session } } = await supabase.auth.getSession()
-      const base = import.meta.env.NEXT_PUBLIC_SUPABASE_URL
-      const url = `${base}/functions/v1/shopify-oauth?subscriptionId=${encodeURIComponent(subscriptionId)}&shop=${encodeURIComponent(shopDomain)}`
+      // Loud-fail on a missing base — never fall through to a frontend-relative URL,
+      // which the Vercel SPA catch-all silently answers with index.html (res.json() then
+      // throws). SUPABASE_URL is the single source shared with the supabase-js client.
+      if (!SUPABASE_URL) { setError('Configuration error — please contact support.'); setState('error'); return }
+      const url = `${SUPABASE_URL}/functions/v1/shopify-oauth?subscriptionId=${encodeURIComponent(subscriptionId)}&shop=${encodeURIComponent(shopDomain)}`
       const res = await fetch(url, { headers: { Authorization: `Bearer ${session?.access_token}` } })
       const json = await res.json().catch(() => ({}))
       if (res.ok && json.url) {
