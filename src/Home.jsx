@@ -541,11 +541,11 @@ function Hero({ navigate }) {
         </div>
 
         <h1 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(38px, 5.6vw, 66px)', lineHeight:1.08, letterSpacing:'-.025em', color:C.text }}>
-          Conversion fixes, <em style={{ fontStyle:'italic', color:C.accent }}>shipped weekly</em>.
+          Ship a conversion fix <em style={{ fontStyle:'italic', color:C.accent }}>every week</em>.
         </h1>
 
         <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 18px)', color:C.textMuted, maxWidth:540, margin:'22px auto 0', lineHeight:1.6 }}>
-          An AI agent that finds your site's biggest conversion leak each week and writes the fix as a Pull Request — you approve it with one Telegram reply.
+          Velyr finds your site's biggest conversion leak, writes the fix, and sends it to Telegram. Reply YES and it goes live. Works with your GitHub repo or your Shopify store.
         </p>
 
         <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:34, flexWrap:'wrap', alignItems:'center', justifyContent:'center' }}>
@@ -575,18 +575,18 @@ function GrowthAgentSection({ navigate }) {
   const stepEls = useRef([])
 
   const markers = [
-    { label:'Detect',       sub:'reads analytics + repo' },
-    { label:'Pull Request', sub:'writes the fix' },
-    { label:'Approve',      sub:'one Telegram reply' },
-    { label:'Ship',         sub:'merged + deployed' },
-    { label:'Measure',      sub:'auto-reverts if worse' },
+    { label:'Detect',  sub:'reads analytics + code' },
+    { label:'Fix',     sub:'writes the code change' },
+    { label:'Approve', sub:'one Telegram reply' },
+    { label:'Ship',    sub:'live after your YES' },
+    { label:'Measure', sub:'rollback if worse' },
   ]
   const steps = [
-    { n:'01', label:'Detect',       time:'Mon · 9:00',  text:'The agent reads your PostHog analytics — traffic, bounce, how far visitors scroll and what they click — and scans every page in your GitHub repo to pinpoint the #1 conversion problem across your funnel.' },
-    { n:'02', label:'Pull Request', time:'Mon · 9:15',  text:'It writes the code fix and opens a GitHub Pull Request — with a preview deploy from your host, so you can see the change before it ever goes live.' },
-    { n:'03', label:'Approve',      time:'Mon · 9:20',  text:'A Telegram message arrives with the problem, the data behind it, the fix and the PR link. Reply YES to ship or NO to skip — nothing goes live without you.' },
-    { n:'04', label:'Ship',         time:'On your YES', text:'The agent merges the Pull Request and your host deploys it to production automatically. No manual steps, no waiting around.' },
-    { n:'05', label:'Measure',      time:'48h later',   text:'It checks your bounce rate 48 hours after deploy — if it rose 15 points or more, the agent auto-reverts and tells you. A Wednesday mid-week check watches traffic and bounce too.' },
+    { n:'01', label:'Detect',  time:'Mon · 9:00',  text:'The agent reads your analytics: traffic, bounce rate, how far visitors scroll, what they click. Then it scans every page in your GitHub repo or Shopify theme to find the #1 conversion problem in your funnel.' },
+    { n:'02', label:'Fix',     time:'Mon · 9:15',  text:'It writes the code change. On a GitHub repo that becomes a Pull Request with a preview deploy from your host. On a Shopify store it becomes a staged theme change for you to review.' },
+    { n:'03', label:'Approve', time:'Mon · 9:20',  text:'A Telegram message shows you the problem, the data behind it, and the exact change. Reply YES to ship it or NO to skip it. Nothing goes live without you.' },
+    { n:'04', label:'Ship',    time:'On your YES', text:'On GitHub the agent merges the PR and your host deploys it. On Shopify it writes the change straight to your live theme. No manual steps.' },
+    { n:'05', label:'Measure', time:'48h later',   text:'It checks your bounce rate 48 hours after deploy. If it rose 15 points or more, the agent proposes a rollback and reverts it on your YES. A Wednesday check watches traffic and bounce too.' },
   ]
 
   // Two observers on the step blocks: a thin centre band lights the rail markers
@@ -612,7 +612,7 @@ function GrowthAgentSection({ navigate }) {
 
   const stats = [
     { value:'Every Monday', label:'Agent runs automatically', sub:'plus on-demand runs anytime' },
-    { value:'48h', num:48, format:(n)=>`${Math.round(n)}h`, label:'Auto-rollback window', sub:'reverts if metrics drop' },
+    { value:'48h', num:48, format:(n)=>`${Math.round(n)}h`, label:'Rollback check', sub:'a fix that hurt gets reverted' },
     { value:'100%', num:100, format:(n)=>`${Math.round(n)}%`, label:'Approval stays with you', sub:'nothing ships without your OK' },
   ]
 
@@ -626,14 +626,14 @@ function GrowthAgentSection({ navigate }) {
             <span style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, fontWeight:400 }}>How it works</span>
           </div>
           <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(32px, 5vw, 60px)', letterSpacing:'-.025em', lineHeight:1.08, color:C.text, marginBottom:20 }}>
-            Your website,<br />
-            <em style={{ fontStyle:'italic', color:C.warm }}>always improving.</em>
+            One fix a week,<br />
+            shipped with your YES.
           </h2>
           <p style={{ fontSize:17, color:C.textMuted, lineHeight:1.72, fontWeight:300, maxWidth:520 }}>
-            A semi-autonomous AI agent that analyses your analytics, writes conversion fixes, and deploys them — with your approval. Every week, automatically — or on demand, the moment you want it.
+            The agent reads your analytics, writes a conversion fix, and ships it once you approve. It runs every Monday, and on demand whenever you want.
           </p>
           <p style={{ fontSize:12, color:C.textLight, fontWeight:300, marginTop:12, letterSpacing:'.01em' }}>
-            Requires a React, Next.js, or Vite site on GitHub that auto-deploys — Vercel, Netlify, Render, Railway or Cloudflare Pages. (On Shopify? Works via GitHub theme sync — see below.)
+            Works with a React, Next.js or Vite repo that auto-deploys (Vercel, Netlify, Render, Railway, Cloudflare Pages), or with a Shopify store connected directly. No GitHub needed for Shopify.
           </p>
         </div>
 
@@ -893,9 +893,9 @@ function AgentDashboardPreview({ navigate, booted = true }) {
   ]
 
   const HEADER = {
-    overview: { kicker:'Growth Agent Dashboard', title:<>Autonomous growth <em style={{ fontStyle:'italic', color:DC.accent }}>optimization.</em></>, sub:'Your agent analyzes, fixes and improves your website — continuously. · Auto-refreshes every 30s' },
+    overview: { kicker:'Growth Agent Dashboard', title:<>Your agent, <em style={{ fontStyle:'italic', color:DC.accent }}>at work.</em></>, sub:'Runs, fixes and results in one place. · Auto-refreshes every 30s' },
     funnel:   { kicker:'Funnel',                 title:<>Where visitors <em style={{ fontStyle:'italic', color:DC.accent }}>drop off.</em></>, sub:'Every page cross-referenced with analytics to find the biggest leak.' },
-    network:  { kicker:'Site Network',           title:<>The map the agent <em style={{ fontStyle:'italic', color:DC.accent }}>works from.</em></>, sub:'Every page in your repo and how visitors move between them.' },
+    network:  { kicker:'Site Network',           title:<>The map the agent <em style={{ fontStyle:'italic', color:DC.accent }}>works from.</em></>, sub:'Every page on your site and how visitors move between them.' },
   }
   const head = HEADER[tab] || HEADER.overview
 
@@ -1348,7 +1348,7 @@ function AgentDashboardPreview({ navigate, booted = true }) {
               />
             </div>
             <p style={{ fontSize:10.5, color:DC.textLight, marginTop:9, lineHeight:1.5 }}>
-              Every page in your repo and how visitors move between them. <span style={{ color:DC.yellow }}>Gold</span> = fix awaiting your approval · <span style={{ color:DC.green }}>green</span> = optimized and holding.
+              Every page on your site and how visitors move between them. <span style={{ color:DC.yellow }}>Gold</span> = fix awaiting your approval · <span style={{ color:DC.green }}>green</span> = optimized and holding.
             </p>
           </div>
         )}
@@ -1363,11 +1363,11 @@ function AgentRequirements() {
   const [ref, visible] = useReveal()
 
   const requirements = [
-    { icon:'git',      title:'GitHub repo',             desc:'Your website code lives in a GitHub repository the agent can read and open PRs against.' },
-    { icon:'deploy',   title:'Auto-deploy from Git',    desc:'Your repo auto-deploys on merge — Vercel, Netlify, Render, Railway or Cloudflare Pages — so approved fixes go live after you reply YES.' },
-    { icon:'code',     title:'React, Next.js or Vite',  desc:'The agent writes React/JSX code — or Liquid, for a Shopify theme synced to GitHub. Plain HTML and no-code builders aren’t supported.' },
-    { icon:'key',      title:'Admin access',             desc:'You can install GitHub Apps on the repo and merge Pull Requests.' },
-    { icon:'send',     title:'Telegram account',         desc:'Weekly approvals arrive on Telegram — reply YES or NO to deploy or skip each fix.' },
+    { icon:'git',      title:'GitHub repo or Shopify store', desc:'Your site lives in a GitHub repo (React, Next.js or Vite) or on Shopify. Either one connects in onboarding.' },
+    { icon:'deploy',   title:'A way to go live',             desc:'GitHub repos auto-deploy on merge via Vercel, Netlify, Render, Railway or Cloudflare Pages. Shopify themes update directly, no deploy setup needed.' },
+    { icon:'code',     title:'Code the agent can edit',      desc:'React/JSX in repos, Liquid in Shopify themes. Plain HTML and no-code builders aren’t supported.' },
+    { icon:'key',      title:'Admin access',                 desc:'You can install apps on the repo or store, and approve the changes the agent proposes.' },
+    { icon:'send',     title:'Telegram account',             desc:'Approvals arrive on Telegram. Reply YES to ship a fix or NO to skip it.' },
   ]
 
   return (
@@ -1377,14 +1377,14 @@ function AgentRequirements() {
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Before you subscribe</p>
           <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4vw, 52px)', letterSpacing:'-.02em', lineHeight:1.12 }}>Will the agent work for you?</h2>
           <p style={{ fontSize:15, color:C.textMuted, fontWeight:300, marginTop:14, maxWidth:560, lineHeight:1.65 }}>
-            The Growth Agent reads your code, opens Pull Requests, and notifies you on Telegram. To do its job it needs five things — check you have them before you subscribe.
+            The agent reads your code, writes fixes, and asks you on Telegram before anything ships. It needs five things. Check you have them before you subscribe.
           </p>
         </div>
 
         {/* "runs on your stack" — the three supported frameworks light green in sequence */}
         <div className={`stack-chips ${visible?'in':''}`} style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginBottom:30 }}>
           <span style={{ fontSize:12, color:C.textLight, fontWeight:400, letterSpacing:'.02em', marginRight:4 }}>Runs on your stack</span>
-          {['React','Next.js','Vite'].map((name, i) => (
+          {['React','Next.js','Vite','Shopify'].map((name, i) => (
             <span key={name} className="stack-chip" style={{ transitionDelay:`${0.15 + i*0.16}s` }}>
               <span className="stack-dot" />{name}
             </span>
@@ -1422,24 +1422,21 @@ function AgentRequirements() {
           </span>
         </div>
 
-        {/* Shopify is supported via GitHub theme sync — a discreet, opt-in detail (the
-            agent opens PRs against the synced theme repo, Shopify syncs them live). Kept
-            collapsed so non-Shopify visitors see one extra line they can ignore. */}
+        {/* Shopify — the store connects directly in onboarding (OAuth + theme picker);
+            approved fixes are written to the connected theme. GitHub theme sync stays
+            a supported alternative for merchants who already use it. Kept collapsed so
+            non-Shopify visitors see one extra line they can ignore. */}
         <details className="sl-shopify">
           <summary>
             <span style={{ fontSize:15 }}>🛍️</span>
-            <span style={{ flex:1 }}>On Shopify? Velyr works if your theme is synced to GitHub.</span>
+            <span style={{ flex:1 }}>On Shopify? Connect your store directly. No GitHub needed.</span>
             <span className="sl-chev">▶</span>
           </summary>
           <div className="sl-shopify-body">
-            If your Shopify theme is synced to a GitHub repo (via Shopify’s official GitHub integration), Velyr treats it like any other repo: each conversion fix arrives as a <strong style={{ color:C.text, fontWeight:500 }}>pull request</strong> against your theme, and once you approve it, Shopify syncs the change to your connected theme — live right away if that’s your published theme, or you publish it when you’re ready if it’s a staging theme. No plugins, no editing theme code by hand.
+            During onboarding you authorize Velyr on your store and pick the theme it should work on. Each week the agent reads your live theme, finds the biggest conversion problem, and sends the fix to Telegram. Reply <strong style={{ color:C.text, fontWeight:500 }}>YES</strong> and Velyr writes the change to your theme. If a fix hurts your numbers, the agent proposes a rollback and restores the previous version on your YES. No plugins, no editing theme code by hand.
             <div style={{ marginTop:12, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
-              <p style={{ fontWeight:400, color:C.text, margin:0 }}>Requires Shopify’s GitHub theme sync — a one-time setup:</p>
-              <ol>
-                <li>Shopify admin → <strong style={{ color:C.text, fontWeight:400 }}>Online Store → Themes</strong></li>
-                <li><strong style={{ color:C.text, fontWeight:400 }}>Add theme → Connect from GitHub</strong></li>
-                <li>Authorize GitHub and pick the repo &amp; branch Shopify should sync</li>
-              </ol>
+              <p style={{ fontWeight:400, color:C.text, margin:0 }}>Prefer pull requests?</p>
+              If your theme is already synced to a GitHub repo via Shopify’s official GitHub integration, connect that repo instead and every fix arrives as a pull request you merge yourself.
             </div>
           </div>
         </details>
@@ -1453,8 +1450,8 @@ function Pricing({ navigate }) {
   const [ref, visible] = useReveal()
   const [allFeaturesOpen, setAllFeaturesOpen] = useState(false)
 
-  const agentFeaturesTop = ['AI analyses your repo + analytics — weekly or on demand','Writes the code fix automatically','Reply YES or NO via Telegram','Auto-rollback if metrics drop','Competitor weekly scan']
-  const agentFeaturesExtra = ['Identifies #1 conversion problem','Opens a GitHub Pull Request','Brand Guardrails — your rules enforced','Full funnel analysis (all pages)','Reads scroll depth + click behavior','Weekly summary on Telegram','Monthly roast report — brutal honesty','Business DNA — learns over time','Public impact timeline (shareable)']
+  const agentFeaturesTop = ['Reads your analytics and your repo or Shopify theme','Writes the code fix, weekly or on demand','You approve on Telegram with YES or NO','Rollback when a fix hurts your metrics','Weekly competitor scan']
+  const agentFeaturesExtra = ['Finds the #1 conversion problem each week','Ships as a GitHub PR or a Shopify theme change','Brand Guardrails: your rules, enforced','Full funnel analysis across all pages','Reads scroll depth and click behavior','Weekly summary on Telegram','Monthly roast report on what still lags','Business DNA: learns what works on your site','Public impact timeline you can share']
 
   return (
     <section id="pricing-section" className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, padding:'96px 24px' }}>
@@ -1477,7 +1474,7 @@ function Pricing({ navigate }) {
               Autonomous
             </div>
             <p style={{ fontWeight:500, fontSize:15, marginBottom:5, color:'rgba(247,244,239,0.9)' }}>Growth Agent</p>
-            <p style={{ color:'rgba(247,244,239,0.6)', fontSize:13, fontWeight:300, marginBottom:20 }}>Autonomous weekly improvements.</p>
+            <p style={{ color:'rgba(247,244,239,0.6)', fontSize:13, fontWeight:300, marginBottom:20 }}>One fix a week, with your approval.</p>
             <span style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:52, letterSpacing:'-.03em', color:'#fff' }}><CountUp value={visible ? 29 : 0} format={(n)=>`€${Math.round(n)}`} /></span>
             <sup style={{ fontSize:14, color:'rgba(247,244,239,0.5)', fontWeight:300, marginLeft:2 }}>*</sup>
             <p style={{ color:'rgba(247,244,239,0.5)', fontSize:12, marginBottom:4, fontWeight:300, marginTop:4 }}>per month · cancel anytime</p>
@@ -1546,12 +1543,13 @@ function FAQ() {
   const [open, setOpen] = useState(null)
 
   const agentItems = [
-    { q:'What is the Growth Agent?', a:'The Growth Agent is a semi-autonomous AI that runs every Monday — and on demand whenever you want. It reads your real PostHog analytics and your GitHub repo, finds the biggest conversion problem, writes the code fix, opens a Pull Request, and sends you a Telegram message — reply YES to deploy or NO to skip. All automatically.' },
-    { q:'When does it start — and can I run it myself?', a:'The agent gets to work the moment you finish setup — no waiting for Monday. After that it runs on its own every Monday morning, and you can trigger an extra run yourself any time from the dashboard with the Run now button (up to once a day) — handy right after you ship something new.' },
-    { q:'Do I have to approve every change before it goes live?', a:'Yes, always. Nothing ships without your explicit approval. You receive a Telegram message with the problem, the data behind it, the solution, and the PR link. Reply YES to deploy it, or NO to skip it.' },
-    { q:"What happens if the agent's change makes things worse?", a:'The agent checks your bounce rate 48 hours after every deployment. If it increased by 15+ percentage points, it automatically creates a rollback PR, merges it, and notifies you via Telegram. Your site reverts without any manual work.' },
-    { q:'What are Brand Guardrails?', a:'Rules you set in your dashboard that the agent must follow on every run — tone of voice, things it can never do, elements it must never change. Any suggestion that violates your guardrails is automatically rejected.' },
-    { q:'What is Full Funnel analysis?', a:'Instead of only looking at your homepage, the agent scans every page in your GitHub repo and cross-references them with your real analytics — including how far visitors scroll and what they click on each page — to identify where visitors are dropping off. It then prioritises the highest-leverage page to fix.' },
+    { q:'What is the Growth Agent?', a:'An AI agent that runs every Monday and on demand. It reads your PostHog analytics and your code, on GitHub or Shopify, finds the biggest conversion problem, writes the fix, and sends it to you on Telegram. Reply YES to ship it or NO to skip it.' },
+    { q:'Does it work with Shopify?', a:'Yes, two ways. Connect your store directly in onboarding: Velyr reads your live theme and writes approved fixes straight to it. No GitHub needed. Or, if your theme is already synced to a GitHub repo, connect the repo and fixes arrive as pull requests.' },
+    { q:'When does it start, and can I run it myself?', a:'The agent gets to work the moment you finish setup, no waiting for Monday. After that it runs every Monday morning, and you can trigger an extra run any time from the dashboard with the Run now button, up to once a day.' },
+    { q:'Do I have to approve every change before it goes live?', a:'Yes, always. You get a Telegram message with the problem, the data behind it, and the exact change. Reply YES to ship it or NO to skip it. Nothing goes live without you.' },
+    { q:"What happens if a change makes things worse?", a:'The agent checks your bounce rate 48 hours after every deploy. If it rose 15 percentage points or more, it proposes a rollback on Telegram and reverts the change once you approve. On GitHub that is a revert PR, on Shopify the previous theme files are restored.' },
+    { q:'What are Brand Guardrails?', a:'Rules you set in your dashboard that the agent must follow on every run: tone of voice, things it can never do, elements it must never touch. Suggestions that violate them are rejected before they reach you.' },
+    { q:'What is Full Funnel analysis?', a:'The agent maps every page of your site, not just the homepage, and cross-references each one with your analytics, including scroll depth and clicks. It finds where visitors drop off and fixes the highest-leverage page first.' },
   ]
 
   const items = agentItems
@@ -1621,8 +1619,8 @@ function TrustStrip() {
   const items = [
     'Powered by Claude',
     'You approve every change before it ships',
-    'Auto-reverts if the metric drops',
-    'Read + Pull-Request access only — revoke anytime',
+    'A fix that hurts your numbers gets rolled back',
+    'Revoke access anytime',
   ]
   return (
     <section className="trust-strip" style={{ background:C.bg, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, padding:'22px 24px', overflow:'hidden' }}>
@@ -1655,9 +1653,9 @@ function WhySection() {
   const [ref, visible] = useReveal()
   const [rowsRef, rowsVis] = useReveal()
   const rows = [
-    { old:'Hire a CRO agency at €2–5k/mo — or never get around to it.', neu:'€29/mo. One high-impact fix every week, automatically.' },
-    { old:'Receive a slide deck of recommendations to build yourself.', neu:'Receive a ready-to-merge Pull Request with the code already written.' },
-    { old:'Ship the change and hope it helped.', neu:'Measured 48h later — it auto-reverts if it made things worse.' },
+    { old:'Hire a CRO agency at €2–5k/mo, or never get around to it.', neu:'€29/mo. One high-impact fix every week.' },
+    { old:'Receive a slide deck of recommendations to build yourself.', neu:'Get the fix already written. You approve it, it ships.' },
+    { old:'Ship the change and hope it helped.', neu:'Measured after 48 hours. If it made things worse, it gets rolled back.' },
   ]
   const cellOld = { display:'flex', justifyContent:'flex-end', alignItems:'center', gap:12, paddingRight:16, textAlign:'right' }
   const cellNeu = { display:'flex', justifyContent:'flex-start', alignItems:'center', gap:12, paddingLeft:16 }
@@ -1667,10 +1665,10 @@ function WhySection() {
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:44, maxWidth:640 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>Why Velyr</p>
           <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text, marginBottom:18 }}>
-            Every site leaks conversions.<br /><em style={{ fontStyle:'italic', color:C.warm }}>Fixing them never makes the to-do list.</em>
+            Every site leaks conversions.<br />Fixing them never makes the to-do list.
           </h2>
           <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7 }}>
-            Conversion work is slow, manual, and easy to postpone — so it waits behind the next feature, forever. Velyr does it for you, one fix a week, and proves whether it worked.
+            Conversion work is slow and easy to postpone. It waits behind the next feature, forever. Velyr does one fix a week and measures whether it worked.
           </p>
         </div>
 
@@ -1720,7 +1718,7 @@ function ShowcaseSection({ navigate }) {
             See exactly what it found, fixed, <em style={{ fontStyle:'italic', color:C.warm }}>and shipped.</em>
           </h2>
           <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7 }}>
-            Every run, every fix, the funnel it worked from, and the map of your whole site — in one place. <span style={{ color:C.text }}>Click the tabs</span> to look around. Figures are example data to show the layout.
+            Every run, every fix, the funnel it worked from, and a map of your whole site, in one place. <span style={{ color:C.text }}>Click the tabs</span> to look around. The figures are example data.
           </p>
         </div>
 
@@ -1732,7 +1730,7 @@ function ShowcaseSection({ navigate }) {
           <AgentDashboardPreview navigate={navigate} booted={booted} />
         </div>
         <p style={{ fontSize:11.5, color:C.textLight, fontWeight:300, marginTop:12, textAlign:'center', letterSpacing:'.02em' }}>
-          Interactive preview with example data — your real dashboard appears here after onboarding.
+          Interactive preview with example data. Your real dashboard appears here after onboarding.
         </p>
       </div>
     </section>
@@ -1796,10 +1794,10 @@ function DiffRow({ item, i }) {
 function DifferentiatorsSection() {
   const [ref, visible] = useReveal()
   const rows = [
-    { icon:'chat',   title:'One-tap Telegram approval', desc:'Every Monday you get the problem, the data, the fix and the PR link in Telegram. Reply YES to ship or NO to skip — nothing goes live without you.' },
+    { icon:'chat',   title:'Approval on Telegram', desc:'Every Monday you get the problem, the data, the fix and the link in Telegram. Reply YES to ship it or NO to skip it. Nothing goes live without you.' },
     { icon:'scan',   title:'Competitor weekly scan', desc:"Track up to 2 competitors. The agent watches their hero, CTA and pricing each week and tells you what they shipped that you didn't." },
-    { icon:'report', title:'Monthly roast report', desc:'Once a month, brutal honesty: what improved, what is still embarrassingly bad versus competitors, and what you keep ignoring.' },
-    { icon:'share',  title:'Public impact timeline', desc:'An optional shareable page at velyr.io/agent/your-slug showing every run and its result. Use it as social proof.' },
+    { icon:'report', title:'Monthly roast report', desc:'Once a month the agent tells you straight what improved, what still looks weak next to your competitors, and what you keep ignoring.' },
+    { icon:'share',  title:'Public impact timeline', desc:'An optional public page at velyr.io/agent/your-slug that shows every run and its result. Use it as social proof.' },
   ]
   return (
     <section className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
@@ -1807,7 +1805,7 @@ function DifferentiatorsSection() {
         <div ref={ref} className={`reveal ${visible?'in':''}`} style={{ marginBottom:24, maxWidth:640 }}>
           <p style={{ fontSize:11, letterSpacing:'.14em', textTransform:'uppercase', color:C.accent, marginBottom:14, fontWeight:400 }}>More than a weekly fix</p>
           <h2 style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:'clamp(30px, 4.5vw, 52px)', letterSpacing:'-.025em', lineHeight:1.1, color:C.text }}>
-            Always watching, <em style={{ fontStyle:'italic', color:C.warm }}>always honest.</em>
+            The rest of the job.
           </h2>
         </div>
         <div className="diff-rows">
@@ -1836,7 +1834,7 @@ function ClosingCTA({ navigate }) {
           Let the agent ship your <em style={{ fontStyle:'italic', color:C.warm }}>next win.</em>
         </h2>
         <p style={{ fontSize:16, color:C.textMuted, fontWeight:300, lineHeight:1.7, marginBottom:32, maxWidth:520, marginLeft:'auto', marginRight:'auto' }}>
-          Connect your repo and get your first conversion fix this week. You approve every change — nothing ships without your YES.
+          Connect your repo or your Shopify store and get the first fix this week. Nothing ships without your YES.
         </p>
         <div style={{ display:'flex', gap:12, justifyContent:'center', flexWrap:'wrap' }}>
           <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
