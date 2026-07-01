@@ -45,7 +45,7 @@ function faqFallback() {
     (f) =>
       `<h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(f.q)}</h2><p style="font-size:15px;line-height:1.78;color:#6b6460">${esc(f.a)}</p>`
   ).join('')
-  return `<div id="root">${MAIN_OPEN}${H1('Frequently Asked Questions')}<p style="font-size:16px;color:#6b6460;max-width:640px">Common questions about the Velyr Growth Agent — how it ships weekly conversion fixes as GitHub Pull Requests, the approval and rollback model, and the 14-day free trial.</p>${items}${HOME_LINK}</main></div>`
+  return `<div id="root">${MAIN_OPEN}${H1('Frequently Asked Questions')}<p style="font-size:16px;color:#6b6460;max-width:640px">Common questions about the Velyr Growth Agent — how it ships weekly conversion fixes to your GitHub repo or Shopify store, the approval and rollback model, and the 14-day free trial.</p>${items}${HOME_LINK}</main></div>`
 }
 
 function legalFallback(title, intro) {
@@ -68,7 +68,7 @@ const ROUTES = [
     path: '/faq',
     title: 'FAQ — Velyr Growth Agent',
     description:
-      'Frequently asked questions about Velyr — how the AI growth agent ships weekly conversion fixes as GitHub Pull Requests, the approval and 48h rollback model, supported frameworks, and the 14-day free trial.',
+      'Frequently asked questions about Velyr — how the AI growth agent ships weekly conversion fixes to your GitHub repo or Shopify store, the approval and 48h rollback model, supported platforms, and the 14-day free trial.',
     fallback: faqFallback(),
     jsonLd: faqJsonLd,
   },
@@ -401,7 +401,7 @@ writeFileSync(join(DIST, 'sitemap.xml'), sitemap, 'utf8')
 // --- llms-full.txt: machine-readable index of all published articles ---
 const llmsFull =
   `# Velyr Blog — Full Index\n\n` +
-  `> Every published article on the Velyr blog. Velyr is an AI growth agent that ships one weekly conversion fix as a GitHub Pull Request. These guides cover conversion optimization, PostHog analysis, Core Web Vitals, and shipping growth fixes as code.\n\n` +
+  `> Every published article on the Velyr blog. Velyr is an AI growth agent that ships one weekly conversion fix — a GitHub Pull Request on your repo or a direct change to your Shopify theme. These guides cover conversion optimization, PostHog analysis, Core Web Vitals, and shipping growth fixes as code.\n\n` +
   clustersWithPosts
     .map((c) => {
       const items = published
