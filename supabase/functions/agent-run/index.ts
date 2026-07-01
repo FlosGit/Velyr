@@ -9,6 +9,7 @@ import { rankComponentsForConversion, type RankerResult } from './component-rank
 import { readDeepContext, type DeepContext, type DeepComponent } from './deep-reader.ts'
 import { buildReceipt } from './receipt-builder.ts'
 import { fileToRoutePath } from './route-map.ts'
+import { decidePostHogInjection, buildMarkerBlock } from './posthog-inject.mjs'
 
 // Stage 5.D: Octokit with automatic rate-limit + secondary-rate-limit
 // handling. Honors GitHub's Retry-After header and retries a bounded number
@@ -3225,25 +3226,35 @@ async function maybeProposeShopifyPostHogSetup(
   }
 
   const snippetToken = Deno.env.get('POSTHOG_PROJECT_TOKEN') || VELYR_POSTHOG_TOKEN
-  // Self-heal: the loader (or our marker) is already present → record + proceed; never double-inject.
-  if (read.content.includes(snippetToken) || read.content.includes(VELYR_POSTHOG_MARKER_OPEN)) {
+  // Marker-block-aware self-heal (PURE decision in posthog-inject.mjs, unit-tested):
+  //   skip      — our exact block is already present (installed) → stamp the gate + proceed
+  //   inject    — no block → insert the loader before </head> (fallback </body>)
+  //   reinject  — a broken/edited/stale block is present → REPLACE it (never double-inject,
+  //               never leave a merchant-broken loader in place)
+  //   no_anchor — nowhere to inject → skip setup, run the conversion analysis anyway
+  // The CDN loader is the twin of index.html — no npm/bundler path, so a <script> tag
+  // can't break a build.
+  const loaderJs      = buildPostHogLoaderJS(snippetToken, hostFilter)
+  const expectedBlock = buildMarkerBlock(VELYR_POSTHOG_MARKER_OPEN, VELYR_POSTHOG_MARKER_CLOSE, `<script>\n${loaderJs}\n</script>`)
+  const decision = decidePostHogInjection(
+    read.content, expectedBlock,
+    { open: VELYR_POSTHOG_MARKER_OPEN, close: VELYR_POSTHOG_MARKER_CLOSE }, snippetToken,
+  )
+
+  if (decision.action === 'skip') {
     await dbWrite(
       supabase.from('agent_connections').update({ posthog_snippet_installed_at: new Date().toISOString() }).eq('id', conn.id),
       DB_TIMEOUT_MS, 'shopify_posthog_selfheal_update',
     ).catch(() => ({ error: null }))
     return 'continue'
   }
-
-  // Build the injected content: the CDN loader (twin of index.html) before </head>
-  // (fallback </body>). No npm/bundler path — a <script> tag can't break a build.
-  const loaderJs = buildPostHogLoaderJS(snippetToken, hostFilter)
-  const snippet  = `${VELYR_POSTHOG_MARKER_OPEN}\n<script>\n${loaderJs}\n</script>\n${VELYR_POSTHOG_MARKER_CLOSE}\n`
-  const m = read.content.match(/<\/head>/i) || read.content.match(/<\/body>/i)
-  if (!m || m.index == null) {
+  if (decision.action === 'no_anchor') {
     slog('warn', 'shopify_posthog_no_anchor', { subscriptionId: conn.subscription_id })
     return 'continue'   // no </head>/</body> to anchor → can't inject safely; skip (analysis still runs)
   }
-  const newContent = read.content.slice(0, m.index) + snippet + read.content.slice(m.index)
+  // 'inject' (fresh) or 'reinject' (replace a broken/stale block) — both stay op:'modified'
+  // and route through the SAME approval + concurrency machinery below (no new write path).
+  const newContent = decision.newContent
 
   // Send the YES/NO approval first (capture message_id so the reply resolves this run),
   // then stage the pending write under the shared shopify_awaiting_approval status. The
