@@ -5,19 +5,23 @@
 export const FAQS = [
   {
     q: 'What does Velyr do?',
-    a: 'Every Monday, Velyr analyzes your repo and your analytics, identifies the #1 conversion problem, writes the code fix, and opens a GitHub Pull Request. You approve via Telegram (YES/NO).'
+    a: 'Every Monday, Velyr analyzes your site (a GitHub repo or a Shopify theme) and your analytics, identifies the #1 conversion problem, and writes the code fix. On GitHub the fix arrives as a Pull Request; on Shopify it is staged for your live theme. You approve via Telegram (YES/NO).'
   },
   {
     q: 'How is Velyr different from a CRO agency or an A/B testing tool?',
-    a: 'A CRO agency hands you a slide deck of recommendations; an A/B testing tool gives you a dashboard and leaves the implementation to you. Velyr writes the actual code change and opens it as a Pull Request in your repo — you just approve it. It runs every week automatically, and reverts itself if a change hurts your numbers.'
+    a: 'A CRO agency hands you a slide deck of recommendations; an A/B testing tool gives you a dashboard and leaves the implementation to you. Velyr writes the actual code change and stages it for your approval. It runs every week automatically, and if a shipped change hurts your numbers, it proposes a rollback.'
   },
   {
     q: 'Do I have to approve every change?',
-    a: 'Yes. Nothing merges without your explicit YES reply. You see the exact code change in the PR before deciding.'
+    a: 'Yes. Nothing ships without your explicit YES reply. You see the exact code change before deciding.'
   },
   {
     q: 'How does Velyr connect to my code?',
-    a: 'You install the Velyr GitHub App on the repository you want optimized, through a standard GitHub OAuth flow. The browser never holds your GitHub token, and Velyr only ever proposes changes as Pull Requests — it cannot merge anything itself.'
+    a: 'For a GitHub repo, you install the Velyr GitHub App through a standard GitHub OAuth flow; the browser never holds your GitHub token, and nothing merges without your YES. For a Shopify store, you authorize Velyr on your store through Shopify\'s standard authorization screen and pick the theme it should work on; nothing is written to your theme without your YES.'
+  },
+  {
+    q: 'Does it work with Shopify?',
+    a: 'Yes, two ways. Connect your store directly during onboarding: Velyr reads your live theme through Shopify and writes approved fixes straight to it, no GitHub needed. Or, if your theme is already synced to a GitHub repo via Shopify\'s official GitHub integration, connect that repo instead and every fix arrives as a pull request.'
   },
   {
     q: 'Does it work with the Next.js App Router?',
@@ -25,7 +29,7 @@ export const FAQS = [
   },
   {
     q: 'What analytics does it need?',
-    a: 'Velyr reads your traffic, bounce rate, scroll depth, and click behavior from PostHog. During onboarding you paste a one-line analytics snippet into your site so the agent can ground its fixes in how visitors actually behave, not just how the code is laid out.'
+    a: 'Velyr reads your traffic, bounce rate, scroll depth, and click behavior from PostHog. During onboarding you add a one-line analytics snippet to your site — on Shopify the agent offers to add it to your theme for you, gated on your approval — so its fixes are grounded in how visitors actually behave, not just how the code is laid out.'
   },
   {
     q: 'Can it track my competitors?',
@@ -33,7 +37,7 @@ export const FAQS = [
   },
   {
     q: 'What happens if a change makes things worse?',
-    a: 'Velyr checks your bounce rate 48 hours after each merged fix. If site-wide bounce rate jumps +15pp or more, the agent automatically opens a revert PR.'
+    a: 'Velyr checks your bounce rate 48 hours after each shipped fix. If site-wide bounce jumps 15 percentage points or more, it proposes a rollback: a revert PR on GitHub, or restoring the previous theme files on Shopify. You approve it like any other change.'
   },
   {
     q: 'What are Brand Guardrails?',
@@ -41,7 +45,7 @@ export const FAQS = [
   },
   {
     q: 'Does it analyze my whole funnel or just the homepage?',
-    a: 'Your whole funnel. Velyr maps every page in your repo and cross-references them with your PostHog analytics — including how far visitors scroll on each page and what they actually click — to find where users drop off, then prioritizes the highest-impact fix.'
+    a: 'Your whole funnel. Velyr maps every page of your site and cross-references them with your PostHog analytics — including how far visitors scroll on each page and what they actually click — to find where users drop off, then prioritizes the highest-impact fix.'
   },
   {
     q: 'Is there a free trial?',
@@ -53,6 +57,6 @@ export const FAQS = [
   },
   {
     q: 'Which sites are supported?',
-    a: 'React, Next.js, or Vite projects in a GitHub repo that auto-deploys — Vercel, Netlify, Render, Railway or Cloudflare Pages. Not supported: Shopify, Wix, Squarespace, Webflow.'
+    a: 'React, Next.js, or Vite projects in a GitHub repo that auto-deploys — Vercel, Netlify, Render, Railway or Cloudflare Pages — and Shopify stores, connected directly or via GitHub theme sync. Not supported: Wix, Squarespace, Webflow.'
   },
 ]

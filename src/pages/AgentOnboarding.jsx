@@ -148,7 +148,7 @@ function StepIndicator({ current, total }) {
 }
 
 // ─── STEP 0: Requirements ────────────────────────────────────────────────────
-function Step0({ onNext }) {
+function Step0({ onNext, onBack }) {
   const [checks, setChecks] = useState({ github: null, hosting: null, react: null, admin: null, telegram: null })
 
   const requirements = [
@@ -164,8 +164,8 @@ function Step0({ onNext }) {
     },
     {
       key: 'react', icon: '🧩', title: 'A supported project type',
-      desc: 'React, Next.js, or Vite — or a Shopify theme connected to GitHub. The agent proposes fixes as pull requests against that repo.',
-      fixText: null, notSupportedText: 'No-code stores without GitHub sync (plain Shopify, Wix, Squarespace, Webflow) aren’t supported — on Shopify? See the note below.',
+      desc: 'React, Next.js or Vite, or a Shopify theme synced to GitHub. The agent proposes fixes as pull requests against that repo.',
+      fixText: null, notSupportedText: 'Wix, Squarespace and Webflow aren’t supported. On Shopify without GitHub? Go back and pick "Connect a Shopify store directly" instead.',
     },
     {
       key: 'admin', icon: '🔑', title: 'Admin access to the repo',
@@ -241,20 +241,20 @@ function Step0({ onNext }) {
       <details className="ob-shopify-note">
         <summary>
           <span style={{ fontSize: 15 }}>🛍️</span>
-          <span style={{ flex: 1 }}>On Shopify? You can still use Velyr if your theme is connected to GitHub.</span>
+          <span style={{ flex: 1 }}>On Shopify? You don’t need GitHub. You can connect your store directly.</span>
           <span className="ob-chev">▶</span>
         </summary>
         <div className="ob-shopify-body">
-          Velyr ships its conversion fixes as GitHub pull requests. If your Shopify theme is synced to a GitHub repo, those fixes flow straight back into your connected theme once you approve them — live as soon as you approve if that’s your published theme, or you publish when you’re ready if you connected a staging theme. No plugins, no editing theme code by hand.
+          The simplest way to run Velyr on Shopify is the direct connection: go back and pick <strong style={{ color: C.text, fontWeight: 400 }}>Connect a Shopify store directly</strong>. Velyr reads your live theme through Shopify and writes approved fixes straight to it. No GitHub account, no plugins, no editing theme code by hand.
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
-            <p style={{ fontWeight: 400, color: C.text, marginBottom: 8 }}>Connect your theme to GitHub (one time):</p>
+            <p style={{ fontWeight: 400, color: C.text, marginBottom: 8 }}>Prefer pull requests? Sync your theme to GitHub instead (one time):</p>
             <ol>
               <li>Shopify admin → <strong style={{ color: C.text, fontWeight: 400 }}>Online Store → Themes</strong></li>
               <li><strong style={{ color: C.text, fontWeight: 400 }}>Add theme → Connect from GitHub</strong></li>
               <li>Authorize GitHub and choose the repo &amp; branch Shopify should sync</li>
             </ol>
             <p style={{ marginTop: 10 }}>
-              Once it’s synced, check “Yes” above and continue — you’ll pick that repo in the GitHub step.
+              Once it’s synced, check “Yes” above and continue. You’ll pick that repo in the GitHub step.
             </p>
           </div>
         </div>
@@ -275,9 +275,14 @@ function Step0({ onNext }) {
         </div>
       )}
 
-      <button className="ob-btn" onClick={onNext} disabled={!allChecked}>
-        {allChecked ? 'Continue — set up the agent' : 'Check all requirements to continue'}
-      </button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {onBack && (
+          <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
+        )}
+        <button className="ob-btn" onClick={onNext} disabled={!allChecked}>
+          {allChecked ? 'Continue — set up the agent' : 'Check all requirements to continue'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -661,7 +666,7 @@ function StepPlatform({ onNext, onBack, subscriptionId }) {
           Shopify theme detected
         </h2>
         <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 24 }}>
-          No hosting setup needed — Shopify hosts your store. When you approve a fix, Velyr merges it to your connected branch and Shopify syncs it to your connected theme — live as soon as you approve if that’s your published theme, or you publish when you’re ready if it’s a staging theme.
+          No hosting setup needed, Shopify hosts your store. When you approve a fix, Velyr merges it to your connected branch and Shopify syncs it to your connected theme: live right away if that’s your published theme, or you publish when you’re ready if it’s a staging theme.
         </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid rgba(42,92,69,0.25)', background: 'rgba(42,92,69,0.05)', borderRadius: 12, padding: '14px 16px', marginBottom: 24 }}>
           <span style={{ fontSize: 18, flexShrink: 0 }}>🛍️</span>
@@ -1082,13 +1087,13 @@ function ConnectionTypeChoice({ onPick }) {
         <Card
           icon={<GitHubIcon size={20} />}
           title="Connect a GitHub repo"
-          desc="React, Next.js, or Vite — or a Shopify theme synced to GitHub. Fixes ship as pull requests against your repo."
+          desc="React, Next.js or Vite, or a Shopify theme synced to GitHub. Fixes ship as pull requests against your repo."
           onClick={() => onPick('github')}
         />
         <Card
           icon="🛍️"
           title="Connect a Shopify store directly"
-          desc="No GitHub needed. Velyr reads and updates your live theme through Shopify — you approve every change in Telegram first."
+          desc="No GitHub needed. Velyr reads and updates your live theme through Shopify. You approve every change in Telegram first."
           onClick={() => onPick('shopify_direct')}
         />
       </div>
@@ -1654,7 +1659,7 @@ export default function AgentOnboarding({ navigate }) {
             {connectionType === 'github' && (
               <>
                 <StepIndicator current={step} total={6} />
-                {step === 0 && <Step0 onNext={handleStep0} />}
+                {step === 0 && <Step0 onNext={handleStep0} onBack={() => setConnectionType(null)} />}
                 {step === 1 && <Step1 onNext={handleStep1} onBack={() => setStep(0)} navigate={navigate} />}
                 {step === 2 && <Step2 onNext={handleStep2} onBack={() => setStep(1)} user={user} subscriptionId={subscriptionId} formData={formData} />}
                 {step === 3 && <StepPlatform onNext={handlePlatform} onBack={() => setStep(2)} subscriptionId={subscriptionId} />}
