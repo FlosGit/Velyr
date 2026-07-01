@@ -6,11 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm run dev       # Start Vite dev server at http://localhost:5173
-npm run build     # Production build
+npm run build     # Production build: vite build + prerender + blog-parity/HogQL asserts
 npm run preview   # Preview production build locally
+npx vite build    # Build WITHOUT the prerender step — use this for local verification
 ```
 
-Deployment is via Vercel. API endpoints in `/api/` are Vercel Serverless Functions. There is no test suite, no linter, and no type checker — `npm run build` is the only correctness gate for the frontend. The Supabase Edge Function (`supabase/functions/agent-run/`) is Deno/TypeScript and is type-checked at `supabase functions deploy` time (there is no local Deno toolchain in this repo).
+**`npm run build` pings production**: `scripts/prerender.mjs` POSTs an IndexNow recrawl request for velyr.io at the end of every full build. For local verification use `npx vite build` only; the full chain belongs to the Vercel deploy.
+
+Deployment is via Vercel. API endpoints in `/api/` are Vercel Serverless Functions. There is no test suite, no linter, and no type checker — `npm run build` is the only correctness gate for the frontend. The Supabase Edge Functions (`supabase/functions/agent-run/` and `supabase/functions/shopify-oauth/`) are Deno/TypeScript and are type-checked at `supabase functions deploy` time (there is no local Deno toolchain in this repo); each deploys individually via `npx supabase functions deploy <name>`, **not** via git push.
 
 ## Architecture
 
@@ -21,16 +24,23 @@ Deployment is via Vercel. API endpoints in `/api/` are Vercel Serverless Functio
 Single-page React 18 app with **manual client-side routing — no React Router** (despite `react-router-dom` being in `package.json`, it is unused). `App.jsx` owns all routing and global state. Path matching is done against `window.location.pathname`; navigation calls a local `navigate()` that does `window.history.pushState` + `setPath`. A `popstate` listener keeps state in sync with browser back/forward.
 
 Routes (matched in `App.jsx`):
-- `/` → `Home.jsx`
+- `/` → `Home.jsx` (note: lives at `src/Home.jsx`, not `src/pages/`)
 - `/pricing` → `Home.jsx` with `scrollToPricing`
 - `/faq`, `/agb`, `/impressum`, `/privacy` → static legal/info pages
+- `/blog`, `/blog/category/{cluster}`, `/blog/{slug}` → blog (order matters: index → category → article; see "Blog / SEO surfaces")
 - `/agent/login`, `/agent/register`, `/agent/reset-password`, `/agent/post-signup`, `/agent/onboarding` → auth + onboarding
 - `/agent` and `/agent/dashboard` → `AgentDashboard.jsx`
 - `/agent/{slug}` (slug not in the reserved set) → `pages/AgentPublic.jsx` (public agent timeline)
 
 **Auth hash interception**: `App.jsx` reads `window.location.hash` on mount and redirects Supabase magic-link / recovery flows: `type=recovery` → `/agent/reset-password`, `access_token`/`type=signup` → `/agent/dashboard`. Don't strip this `useEffect` — it's how Supabase email links land.
 
-**No shared component library**: `src/components/` is empty. Each page/screen is self-contained with inline styles.
+**No component library, but a handful of shared components**: `src/components/` holds `SubscribeButton`, `SiteNetwork`, `MiniNetwork`, `networkGlass`, `HeroWorkspace`, and `CheckoutConfirmModal`; shared animation helpers live in `src/lib/motion.jsx`, demo/mock data in `src/data/`. Everything else is self-contained pages with inline styles.
+
+### Blog / SEO surfaces
+
+Articles are markdown in `content/blog/*.md`; `scripts/lib/blog.mjs` is the single source of truth (`loadArticles`), consumed by `scripts/vite-plugin-blog.mjs` (serves `/blog-index.json` + `/blog/<slug>.json` in dev, emits them into `dist/` at build) and by `scripts/prerender.mjs` (static per-route HTML with route-specific meta/JSON-LD, `sitemap.xml`, `llms-full.txt`, then the IndexNow ping). `npm run build` asserts parity via `scripts/assert-blog-parity.mjs` + `scripts/assert-hogql-safe.mjs`.
+
+**Marketing claims live in five places that must stay in sync**: `src/Home.jsx` (landing), `index.html` (title/meta/OG/JSON-LD + the crawler-visible `<noscript>` block), `public/llms.txt`, `src/data/faqs.js` (FAQ page + FAQPage JSON-LD + prerendered /faq), and the `ROUTES` descriptions in `scripts/prerender.mjs`. When product framing changes (e.g. Shopify support), sweep all five. `og-image.png` is a rendered image and needs a manual re-render when the headline changes. Keep `faqs.js` dependency-free (no JSX/imports) — `prerender.mjs` imports it directly in Node.
 
 ### Agent System
 
@@ -59,7 +69,7 @@ Auth: cron requests must carry either Vercel's `x-vercel-cron` header or `x-cron
 
 **App Router support (Stage 2)**: `repo-mapper.ts` classifies `nextjs-app` only when a **root `app/layout.*`** exists (a bare `app/` dir is not enough — guards stray folders). App Router routes are filesystem-based, not import-reachable, so entry points are **discovered dynamically from `repoTree`** (`app/**/{page,layout}.{tsx,jsx,ts,js}`, skipping `route.*`, `_private`, and `@slot`), shallow-first and capped (`AGENT_APP_ROUTER_MAX_ENTRIES`, default 25). **Hybrid `pages/` + `app/`** repos index both trees; on a route-path collision **`app/` wins** (matches Next.js precedence). File→URL mapping uses the shared `fileToRoutePath` (see "Cross-runtime twin pattern").
 
-**Approval flow**: the agent posts to Telegram via `@octokit/rest` + bot token; the user replies `YES` or `NO`. The `YES`/`NO` flow finds the most recent `waiting_approval` run for the chat's subscription via `findPendingRunForChat()`. `/api/webhooks/telegram` ingests replies and merges or closes the PR.
+**Approval flow**: the agent posts to Telegram via the Bot API (`fetch` to `api.telegram.org` + bot token; `@octokit/rest` is GitHub-only); the user replies `YES` or `NO`. The `YES`/`NO` flow finds the most recent `waiting_approval` run for the chat's subscription via `findPendingRunForChat()`. `/api/webhooks/telegram` ingests replies and merges or closes the PR.
 
 **Email notifications removed — Telegram is the sole customer notification channel.** The former Mailjet weekly-summary + monthly-roast emails were deleted; the weekly run notifies only via the Telegram approval message, and the monthly roast goes to Telegram only. (Supabase Auth's own SMTP for signup/reset/magic-link emails is separate, configured in the Supabase dashboard, and untouched.)
 
@@ -115,15 +125,20 @@ GitHub is connected via the Velyr GitHub App through a server-driven OAuth flow 
 2. `api/github/oauth-callback.js` — verifies the state HMAC + consumes the nonce, exchanges the code, lists `GET /user/installations`, and mints an HMAC-signed, HttpOnly handoff cookie holding the verified installation/repo snapshot. **Org installations are supported (Stage 3B)**: GitHub already scopes `/user/installations` to installations the user can access, so the list itself is the permission boundary — we accept the user's own personal install (`account.id === githubUserId`) **and** any `account.type === 'Organization'` install (member-level trust; no extra org-admin call).
 3. `api/onboarding.js` — action-routed (to fit the 12-function budget):
    - `?action=snapshot` (GET) — reads back the handoff cookie for the repo picker.
+   - `?action=init_subscription` (POST) — idempotently creates the caller's bare `agent_subscriptions` row at onboarding mount (`status='active'` but `subscription_status=NULL`, so the agent can't run until `start_trial` fills it in).
    - `?action=complete` (POST) — verifies and calls the `complete_onboarding` RPC.
-   - `?action=finalize` (POST) — service-role write of the remaining connection fields + atomic consume of the Telegram verification code.
+   - `?action=finalize` (POST) — service-role write of the remaining connection fields + atomic consume of the Telegram verification code (B3: the code's stamped `auth_user_id` must match the caller; NULL legacy codes pass once).
+   - `?action=telegram_start_token` (POST) — mints the single-use bot deep-link token (`t.me/...?start=<token>`); the bot's `/start` consumes it and stamps `auth_user_id` onto the verification code, making a leaked code non-transferable across accounts.
+   - `?action=discover_structure` (POST) — fires the edge function's RA1-only structure preview after the repo pick (seeds `site_structure_preview` as `'mapping'`, non-blocking).
    - `?action=verify_telegram_code` (POST) — validity check for a pasted `VELYR-XXXXXX` code (rate-limited; see "Rate limiting").
+   - `?action=list_branches` (POST) — branch picker for GitHub-synced Shopify theme repos (→ `shopify_connected_branch`).
+   - `?action=list_themes` / `?action=set_theme` (POST) — Shopify-direct theme picker (MAIN + unpublished themes → `shopify_main_theme_id`).
 
 **Cross-tenant defense (layers that must all pass before any write):** state HMAC + expiry → single-use nonce → cookie HMAC + expiry → `cookie.authUserId === JWT user.id` → `installationId ∈ cookie.installations` → `repoFullName ∈ that installation's verified repos` → the `complete_onboarding` RPC's own `auth.uid() == subscription.auth_user_id` check (SECURITY DEFINER). Ownership is keyed on the **Velyr subscription**, never the GitHub account — so org support changes nothing here. `complete_onboarding` also stores the installation account identity (`installation_account_type` / `installation_account_login` / `installation_account_id`); the subscription:user model stays 1:1 (multi-user org dashboards are not modeled yet).
 
 ### Rate limiting (Stage 3C)
 
-`verify_telegram_code` is a code-validity oracle, so it is throttled **per `auth_user_id`, 10 requests / 60s**, via the `rate_limit_hits` table + the atomic `rate_limit_hit(bucket_key, limit, window_seconds)` SECURITY DEFINER RPC (service-role only, mirrors the `agent_run_locks` / `telegram_webhook_dedupe` pattern). On exceed it returns **429** with `Retry-After`. The limiter **fails closed**: an RPC error returns **503** (not 429), because it's a security control, not a cost gate — silently disabling it would defeat the purpose. Buckets are GC'd by the daily `enforce_subscriptions` cron. (Known parked issue: `finalize` binds a `verificationCodeId` without verifying the requesting user originated the code — the throttle mitigates brute-force discovery but a full fix, binding the code to `auth_user` at `/start` time, is a separate stage.)
+`verify_telegram_code` is a code-validity oracle, so it is throttled **per `auth_user_id`, 10 requests / 60s**, via the `rate_limit_hits` table + the atomic `rate_limit_hit(bucket_key, limit, window_seconds)` SECURITY DEFINER RPC (service-role only, mirrors the `agent_run_locks` / `telegram_webhook_dedupe` pattern). On exceed it returns **429** with `Retry-After`. The limiter **fails closed**: an RPC error returns **503** (not 429), because it's a security control, not a cost gate — silently disabling it would defeat the purpose. Buckets are GC'd by the daily `enforce_subscriptions` cron. (The formerly parked B3 issue is **fixed**: `telegram_start_token` binds the code to `auth_user_id` at `/start` time and `finalize` rejects a non-matching caller. Remaining parked follow-up: `finalize` still lets a legacy `auth_user_id IS NULL` code pass once — codes minted before `/start` started stamping; removing the null-allow was deferred as a 24h follow-up.)
 
 ### Cross-runtime twin pattern (Stages 1–3)
 
@@ -144,6 +159,7 @@ Key tables used by the backend (all accessed via the service-role key, which byp
 - `agent_business_dna` — persistent outcome log (`pending` → `success` after 7d, or `rollback`).
 - `agent_competitor_urls` / `agent_competitor_snapshots` — competitor tracking.
 - `agent_funnel_pages` — per-run funnel page snapshot.
+- `site_structure_preview` — first-connect RA1 structure preview per subscription (`status: mapping → ready|partial|error`, `framework`); seeded by `discover_structure`, polled by the onboarding finale and the dashboard's pre-first-run preview, and by `StepPlatform` to detect GitHub-synced Shopify theme repos.
 - `agent_brand_guardrails` — per-subscription brand/tone constraints (browser-upsertable).
 - `agent_llm_usage` — monthly LLM spend accounting per subscription (wallet cap).
 - `impact_metrics` — site-wide bounce rate before/after per run.
@@ -173,7 +189,7 @@ ES modules (`"type": "module"`). Database access is `@supabase/supabase-js` with
 
 ### Analytics
 
-PostHog is loaded inline in `index.html` (US host). Server-side, the agent reads PostHog via the project API for its `midweek` / `weekly_summary` / `rollback_check` analytics.
+PostHog is loaded inline in `index.html` (US host), **consent-gated**: init is deferred until the visitor accepts the vanilla cookie banner (decision persisted in `localStorage` under `velyr_consent`). Server-side, the agent reads PostHog via the project API for its `midweek` / `weekly_summary` / `rollback_check` analytics.
 
 **Shared-project architecture (single PostHog project for all customers).** Velyr does **not** create a per-customer PostHog project — the PostHog Free plan caps an org at one project, so the old per-customer `POST /api/organizations/{ORG_ID}/projects/` provisioning always failed with "maximum limit of allowed projects". Instead there is **one shared project** (`POSTHOG_PROJECT_ID`, currently `412701`), and every customer's site emits to it using the shared public write token (`POSTHOG_PROJECT_TOKEN`, the same `phc_…` token `index.html` uses). The **partition key is the customer's domain**, carried on each event as `properties.$host`:
 
