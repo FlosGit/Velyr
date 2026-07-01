@@ -14,7 +14,7 @@ Deployment is via Vercel. API endpoints in `/api/` are Vercel Serverless Functio
 
 ## Architecture
 
-**Velyr** is an autonomous **Growth Agent** SaaS. A single product: **€29/mo** (Stripe price `STRIPE_PRICE_GROWTH`) subscribers connect their GitHub repo, and every week the agent opens a GitHub PR for the single highest-impact conversion fix it can find, gated by a Telegram approval flow. (The earlier free-scan / €9-report product was removed in S0a — no scan, report, or `/premium` surface remains.)
+**Velyr** is an autonomous **Growth Agent** SaaS. A single product: **€29/mo** (Stripe price `STRIPE_PRICE_GROWTH`) subscribers connect their GitHub repo **or their Shopify store (direct Admin-API path)**, and every week the agent ships the single highest-impact conversion fix it can find — a GitHub PR on the repo path, a staged live-theme write on the Shopify-direct path — gated by a Telegram approval flow. (The earlier free-scan / €9-report product was removed in S0a — no scan, report, or `/premium` surface remains.)
 
 ### Frontend (`src/`)
 
@@ -81,7 +81,7 @@ Telegram bot commands (handled in `api/webhooks/telegram.js`):
 
 ### Shopify-via-GitHub theme path (SG1–SG4)
 
-A Shopify merchant who connected their store to GitHub via **Shopify's official GitHub theme integration** has their theme code (Liquid/JSON under `templates/ sections/ snippets/ layout/ config/`) in a GitHub repo Shopify auto-syncs both ways. To Velyr that's a **normal GitHub connection** (`github_repo_name` set, `shopify_shop_domain` NULL) — so Velyr opens a conversion-fix PR against the theme repo via the existing flow; the merchant merges; Shopify syncs it live. **No `write_themes`, no Shopify Asset API, no exemption** (this is distinct from the pure-Shopify Admin-API path `processShopifyConnection`, which dead-ends at `shopify_preview` because the `write_themes` exemption was denied — ticket 68049335).
+A Shopify merchant who connected their store to GitHub via **Shopify's official GitHub theme integration** has their theme code (Liquid/JSON under `templates/ sections/ snippets/ layout/ config/`) in a GitHub repo Shopify auto-syncs both ways. To Velyr that's a **normal GitHub connection** (`github_repo_name` set, `shopify_shop_domain` NULL) — so Velyr opens a conversion-fix PR against the theme repo via the existing flow; the merchant merges; Shopify syncs it live. **No `write_themes`, no Shopify Admin API needed on this path.** (The separate **Shopify-direct** Admin-API path is now live too — see the next section. Historical note: it was once dead at `shopify_preview` while the `write_themes` exemption was pending, ticket 68049335; the exemption was granted.)
 
 What the staged build shipped:
 - **Detection + fork (SG1)**: `isShopifyThemeRepo(repoTree)` in `repo-mapper.ts` keys on a strong marker (`layout/theme.liquid` **or** `config/settings_schema.json`) **plus** the `templates/`+`sections/`+`snippets/` dir shape. `processConnection` forks into `processGithubThemeConnection` **after** RA1's `getTree` but **before** the `unsupported` skip (a theme repo has no `package.json`/root `index.html`, so RA1 would otherwise classify it `unsupported`). The theme path reuses the existing two-pass LLM pipeline unchanged via the `shopifyGraph` / `shopifyDeepContext` adapters (the conversion surface is `SHOPIFY_KEEP_RE = templates|sections|snippets`, read as GitHub blobs by `readThemeFilesFromGithub`).
@@ -93,7 +93,19 @@ What the staged build shipped:
 **Deliberately deferred (not built, by decision):**
 - `liquidDelimitersBalanced` `{% raw %}` / inline-`<script>`-brace edge-case hardening — the validator is intentionally conservative (flags only dropped opens, never stray closes) and the merchant reviews every PR.
 - `subscription_id` text-vs-uuid schema unification (the Stripe webhook keys on `user_id`, the agent on `auth_user_id`; a pre-existing inconsistency, not Shopify-specific).
-- Full Shopify onboarding + landing-page use-case (a dedicated connect flow + "Shopify (GitHub sync)" hosting-provider option, which would touch the `hosting_provider` CHECK + frontend) — **gated on a product decision** about whether to market the GitHub-connected-Shopify path, which reaches only ~2–5% of Shopify stores.
+
+### Shopify-direct path (`shopify_direct`, Stages 1–4)
+
+The pure-Shopify Admin-API path is **live**: a merchant with no GitHub connects their store directly, and Velyr reads/writes the live theme over the Admin GraphQL API, gated by the same Telegram YES/NO. Landing + onboarding market both paths as equals (updated 2026-07-01).
+
+- **Discriminator (Stage 1)**: `agent_connections.connection_source` — `'github'` (default) | `'shopify_direct'`, CHECK-constrained. The weekly run routes on it: `shopify_direct` → `processShopifyConnection` (edge fn); everything else stays on the GitHub path. Theme reads carry a per-file `checksumMd5` (the concurrency token).
+- **Onboarding (Stage 2)**: the wizard forks at `ConnectionTypeChoice` (`src/pages/AgentOnboarding.jsx`) into the GitHub flow (6 steps) or the Shopify-direct flow (4 steps: storefront URL → OAuth via `supabase/functions/shopify-oauth` → theme picker via `/api/onboarding?action=list_themes` / `set_theme` → Telegram). OAuth scopes `read_themes,write_themes`; token exchange uses `expiring=1` (**literal string "1"** — a non-expiring token 403s on every call post-2026-04-01), yielding ~1h access + 90d refresh tokens, both encrypted `enc:v1:` at rest. One merchant per shop via the unique `shopify_shop_domain` index. `hosting_provider` allows `'shopify'` (migration `20260630_hosting_provider_shopify.sql`).
+- **Write + approval (Stage 3)**: the run stages the fix as `analysis_result.pending_write` (per file: `newContent`, `priorContent`, `checksumMd5`) and lands in `shopify_awaiting_approval` — **nothing is written before YES**. On YES, `applyShopifyDirectWrite` (`api/webhooks/telegram.js`) re-queries checksums first (optimistic concurrency: merchant edited the theme between analysis and YES → `shopify_concurrency_abort`, nothing overwritten), then upserts via `themeFilesUpsert` (`api/_lib/shopify-theme-io.js`) and records `applied_write` (the rollback basis) → `shopify_deployed`. **Gotcha:** `themeFilesUpsert` returns a job **only for async** operations; small upserts complete synchronously with `job = null` and `upsertedThemeFiles` populated — never assume a job exists (dev-store-verified 2026-07-01; harness `scripts/shopify-dv-verify.mjs`).
+- **Rollback (Stage 3)**: the 48h bounce check proposes a rollback (`shopify_rollback_pending`); on YES `executeShopifyDirectRollback` executes the pure `planRollbackOps` (`api/_lib/shopify-rollback.js`, unit-tested in `shopify-rollback.test.mjs`): modified file → re-upsert `priorContent`, created file → delete → `shopify_rolled_back`.
+- **PostHog (Stage 4)**: the first run proposes injecting the analytics loader into `layout/theme.liquid` (`supabase/functions/agent-run/posthog-inject.mjs`), approval-gated, with marker-block-aware self-heal (re-proposes on a broken loader). Known debt: `posthog_snippet_installed_at` is also stamped on **decline** (to avoid weekly re-nagging) — never read it as "analytics active".
+- **Token refresh**: `refreshShopifyToken` rotates both tokens and re-encrypts them (`encryptSecret` exists in the edge functions again for this). A dead refresh token (90d) → `shopify_needs_reconsent`. Known issue: only HTTP 400 maps to `needs_reconsent`; a 401-dead token is misclassified as transient.
+
+Status lifecycle: `shopify_awaiting_approval` → `shopify_deployed` → (`shopify_rollback_pending` → `shopify_rolled_back`) | `shopify_rejected`; concurrency abort: `shopify_concurrency_abort`. All values live in the `agent_runs_status_check` CHECK (migrations `20260624_shopify_approval_statuses.sql`, `20260630_shopify_rollback_statuses.sql`).
 
 ### Onboarding / OAuth
 
@@ -117,7 +129,7 @@ GitHub is connected via the Velyr GitHub App through a server-driven OAuth flow 
 
 Vercel Node functions (`api/`) and the Supabase Deno Edge Function (`supabase/functions/agent-run/`) are separate deploy bundles and **cannot import a shared module** (`node:crypto` vs Web Crypto, different resolvers). Where logic must match across the boundary, we keep **format-locked twins** — each carries a "keep in sync with the other declaration" comment:
 - `fileToRoutePath` — `supabase/functions/agent-run/route-map.ts` ↔ `api/agent/run.js`
-- `decryptSecret` (the `enc:v1:` AES-256-GCM wire format) — `api/_lib/secret-crypto.js` ↔ `supabase/functions/agent-run/index.ts`. Only the **read side** is twinned: the edge function decrypts legacy PostHog credentials but no longer encrypts (the matching `encryptSecret` was deleted there after the shared-project PostHog switch), so encryption is Node-only and needs no cross-runtime parity.
+- `decryptSecret` / `encryptSecret` (the `enc:v1:` AES-256-GCM wire format) — `api/_lib/secret-crypto.js` ↔ `supabase/functions/agent-run/index.ts` ↔ `supabase/functions/shopify-oauth/index.ts`. Both sides are twinned again: the edge functions encrypt Shopify access/refresh tokens (OAuth callback + token rotation) and decrypt them for theme I/O, and the Vercel side does the same in `applyShopifyDirectWrite`. All three declarations must stay format-locked.
 - `ROLLBACK_BOUNCE_PP_THRESHOLD` — `api/agent/run.js` ↔ `supabase/functions/agent-run/receipt-builder.ts`
 
 Within a single runtime, do share: the two Node onboarding/agent files import `encryptSecret`/`decryptSecret` from `api/_lib/secret-crypto.js` (underscore prefix ⇒ not a Vercel route, doesn't count toward the 12-function cap).
@@ -126,8 +138,8 @@ Within a single runtime, do share: the two Node onboarding/agent files import `e
 
 Key tables used by the backend (all accessed via the service-role key, which bypasses RLS; RLS only constrains the browser client):
 - `agent_subscriptions` — one row per subscriber; holds `status`, `telegram_chat_id`, `public_slug`, `is_public`, `competitors[]`; billing columns `user_id`, `auth_user_id`, `subscription_status`, `stripe_customer_id`, `subscription_id`, `current_period_end`, `cancel_at_period_end`, `canceled_at`; onboarding/identity columns `github_oauth_user_id`, `github_oauth_login`, `github_installation_verified_at`, `onboarding_completed_at`, and the installation account identity `installation_account_type` / `installation_account_login` / `installation_account_id`. Note the column split: the Stripe webhook keys on `user_id`, the agent system keys on `auth_user_id`; both hold a Supabase auth UUID.
-- `agent_connections` — GitHub + PostHog credentials per subscription (PostHog key encrypted at rest); `posthog_project_id` (the shared project id), `posthog_host_filter` (the customer's domain — the `$host` partition key, set on first run), `posthog_snippet_token`; also `verification_code_id` + `verified_at` for the Telegram binding.
-- `agent_runs` — one row per agent run; status lifecycle (`running` → `waiting_approval` → `deployed` / `rejected` / `rolled_back`, plus honest skip statuses).
+- `agent_connections` — GitHub/Shopify + PostHog credentials per subscription (secrets encrypted at rest); `connection_source` (`'github'` | `'shopify_direct'` — the run-path discriminator); Shopify-direct columns `shopify_shop_domain` (unique), `shopify_access_token` / `shopify_refresh_token` (encrypted) + their `*_expires_at`, `shopify_main_theme_id`, `shopify_scope`, `shopify_connected_at`, plus `shopify_connected_branch` (GitHub-synced themes only); `posthog_project_id` (the shared project id), `posthog_host_filter` (the customer's domain — the `$host` partition key, set on first run), `posthog_snippet_token`; also `verification_code_id` + `verified_at` for the Telegram binding.
+- `agent_runs` — one row per agent run; status lifecycle (`running` → `waiting_approval` → `deployed` / `rejected` / `rolled_back`, plus honest skip statuses and the `shopify_*` lifecycle — see "Shopify-direct path").
 - `agent_learnings` — per-run outcome records used to guide future analysis.
 - `agent_business_dna` — persistent outcome log (`pending` → `success` after 7d, or `rollback`).
 - `agent_competitor_urls` / `agent_competitor_snapshots` — competitor tracking.
@@ -180,6 +192,7 @@ Required:
 - `OPENROUTER_API_KEY` — Claude AI for the agent's analysis passes (model: `anthropic/claude-sonnet-4-5`)
 - `GOOGLE_PAGESPEED_API_KEY` — PageSpeed/Core Web Vitals signal for the agent run
 - `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY_BASE64` / `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` / `GITHUB_OAUTH_STATE_SECRET` — GitHub App + OAuth onboarding
+- `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` / `SHOPIFY_OAUTH_STATE_SECRET` — Shopify-direct OAuth (Supabase Edge Function secrets, read by `supabase/functions/shopify-oauth`; app config in `shopify.app.toml`)
 - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` / `TELEGRAM_CHAT_ID` — default chat for notifications
 - `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` / `STRIPE_PRICE_GROWTH` (€29/mo subscription)
 - `AGENT_TOKEN_ENCRYPTION_KEY` (AES-256, 64 hex), `AGENT_APPROVAL_TOKEN_SECRET` (HMAC, 32 hex), `AGENT_CRON_SECRET` (32 hex)
