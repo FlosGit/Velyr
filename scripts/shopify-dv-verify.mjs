@@ -9,7 +9,11 @@
 //     node scripts/shopify-dv-verify.mjs
 //
 // Verifies the four unexercised shapes:
-//   (1) themeFilesUpsert  → job { id done }
+//   (1) themeFilesUpsert  → write EFFECT (upserted + reads back). NOTE: `job` is
+//       OPTIONAL — Shopify returns a job only for ASYNC ops; a small single-file upsert
+//       completes SYNCHRONOUSLY with job=null + upsertedThemeFiles populated. Production
+//       confirmApplied (option a) checks upsertedThemeFiles, not job.id, so a null job is
+//       a valid success — we report the job id for info but never fail on its absence.
 //   (2) checksumMd5 re-query (queryThemeChecksums)
 //   (3) readShopifyThemeFile's OnlineStoreThemeFileBodyText body union (read content)
 //   (4) themeFilesDelete
@@ -51,9 +55,10 @@ async function readBodyUnion() {
 }
 
 try {
-  // (1) upsert + job { id done }
+  // (1) upsert — assert the write EFFECT (call ok + file upserted), NOT job presence.
+  // job=null is a valid synchronous completion (proven by the readback in step 3).
   const up = await upsertThemeFiles(shop, token, themeId, [{ filename, content: bodyText }], API)
-  check('(1) themeFilesUpsert job{id done}', up.ok && up.jobId != null, up.ok ? `jobId=${up.jobId}` : up.message)
+  check('(1) themeFilesUpsert succeeded (job optional)', up.ok, up.ok ? `job=${up.jobId ?? 'null (synchronous)'}` : up.message)
   check('(1b) upsertedThemeFiles contains file', up.ok && up.upsertedFilenames.includes(filename), up.ok ? '' : (up.userErrors || []).map(e => e.message).join('; '))
 
   // (3) body-union read + (2) checksumMd5 field on the same read
