@@ -1526,24 +1526,9 @@ function GuardrailsPage({subscriptionId}) {
 
 // ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
 // ─── BUSINESS DNA PAGE (Part 5) ──────────────────────────────────────────────
-// Rotating status lines shown while the playbook is being written.
-const PLAYBOOK_STEPS = [
-  'Reading your Business DNA…',
-  'Finding what works for your site…',
-  'Learning from past rollbacks…',
-  'Drafting your 90-day plan…',
-  'Polishing the recommendations…',
-]
-
 function DNAPage({ subscriptionId }) {
   const [dna, setDna]               = useState([])
   const [loading, setLoading]       = useState(true)
-  const [showPlaybook, setShowPlaybook] = useState(false)
-  const [playbook, setPlaybook]     = useState(null)
-  const [generating, setGenerating] = useState(false)
-  const [genError, setGenError]     = useState(null)
-  const [copied, setCopied]         = useState(false)
-  const [genStep, setGenStep]       = useState(0)
 
   useEffect(() => {
     if (!subscriptionId) return
@@ -1555,13 +1540,6 @@ function DNAPage({ subscriptionId }) {
       .then(({ data }) => { setDna(data || []); setLoading(false) })
   }, [subscriptionId])
 
-  // Cycle the "what's happening" status line every ~2.2s while generating.
-  useEffect(() => {
-    if (!generating) { setGenStep(0); return }
-    const id = setInterval(() => setGenStep(s => (s + 1) % PLAYBOOK_STEPS.length), 2200)
-    return () => clearInterval(id)
-  }, [generating])
-
   const grouped = useMemo(() => {
     const out = { success: {}, rollback: {}, pending: {} }
     for (const d of dna) {
@@ -1571,28 +1549,6 @@ function DNAPage({ subscriptionId }) {
     }
     return out
   }, [dna])
-
-  async function generatePlaybook() {
-    setGenerating(true); setGenError(null); setShowPlaybook(true)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await fetch('/api/agent/run?action=export-dna', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
-      })
-      const data = await res.json()
-      if (data.playbook) setPlaybook(data.playbook)
-      else               setGenError(data.error || 'Failed to generate playbook')
-    } catch (e) { setGenError(e.message || 'Network error') }
-    finally       { setGenerating(false) }
-  }
-
-  function copyPlaybook() {
-    if (!playbook) return
-    navigator.clipboard.writeText(playbook).then(() => {
-      setCopied(true); setTimeout(() => setCopied(false), 2000)
-    })
-  }
 
   if (loading) return <p style={{ fontSize: 12, color: C.textMuted, fontWeight: 300 }}>Loading DNA…</p>
 
@@ -1627,17 +1583,6 @@ function DNAPage({ subscriptionId }) {
         Your site's accumulated learnings. Successes are doubled down on; rollbacks are avoided. The agent reads this on every run.
       </p>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
-        <button className="v-press" onClick={generatePlaybook} disabled={dna.length === 0} style={{
-          background: C.accent, color: '#fff', border: 'none', borderRadius: 8,
-          padding: '10px 18px', fontSize: 13, fontFamily: 'DM Sans,sans-serif', fontWeight: 500,
-          cursor: dna.length === 0 ? 'not-allowed' : 'pointer', opacity: dna.length === 0 ? 0.5 : 1,
-          boxShadow: dna.length === 0 ? 'none' : '0 3px 14px rgba(42,92,69,0.22)',
-        }}>
-          📖 Generate Website Playbook
-        </button>
-      </div>
-
       {dna.length === 0 && (
         <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
           <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300 }}>
@@ -1668,61 +1613,6 @@ function DNAPage({ subscriptionId }) {
               </div>
             )
           })}
-        </div>
-      )}
-
-      {/* Playbook modal */}
-      {showPlaybook && (
-        <div onClick={() => setShowPlaybook(false)} style={{
-          position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(26,25,22,0.4)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-        }}>
-          <div onClick={e => e.stopPropagation()} className="pop-in" style={{
-            background: '#fff', borderRadius: 16, padding: '28px 30px', maxWidth: 640, width: '100%',
-            maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(26,25,22,0.15)', position: 'relative',
-          }}>
-            <button onClick={() => setShowPlaybook(false)} style={{ position: 'absolute', top: 14, right: 16, background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: C.textLight }}>×</button>
-            <p style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: C.accent, fontWeight: 500, marginBottom: 8 }}>Website Playbook</p>
-            <p style={{ fontFamily: 'Instrument Serif,serif', fontSize: 26, fontWeight: 400, color: C.text, marginBottom: 18, letterSpacing: '-.01em' }}>
-              90-day strategic recommendations
-            </p>
-            {generating && (
-              <div>
-                {/* "Writing" skeleton — shimmering placeholder lines. */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginBottom: 18 }}>
-                  {['94%','100%','82%','97%','68%','90%'].map((w, i) => (
-                    <div key={i} className="v-shimmer" style={{ height: 11, width: w, borderRadius: 6 }} />
-                  ))}
-                </div>
-                {/* Rotating status line — re-keyed so it fades in on each change. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                  <Spinner size={13} />
-                  <p key={genStep} className="v-rise" style={{ fontSize: 13, color: C.textMuted, fontWeight: 400 }}>
-                    {PLAYBOOK_STEPS[genStep]}
-                  </p>
-                </div>
-              </div>
-            )}
-            {genError   && <p style={{ fontSize: 13, color: C.red }}>{genError}</p>}
-            {playbook && (
-              <>
-                <div style={{ background: 'rgba(26,25,22,0.02)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '20px 22px', fontSize: 13, color: C.text, lineHeight: 1.75, marginBottom: 14 }}>
-                  {/* Reveal line-by-line (staggered fade-up) instead of one block. */}
-                  {playbook.split('\n').map((line, i) => (
-                    <div key={i} className="v-rise" style={{ whiteSpace: 'pre-wrap', animationDelay: `${Math.min(i * 0.045, 1.4)}s` }}>
-                      {line === '' ? ' ' : line}
-                    </div>
-                  ))}
-                </div>
-                <button className="v-press" onClick={copyPlaybook} style={{
-                  background: copied ? C.green : C.text, color: '#fff', border: 'none', borderRadius: 7,
-                  padding: '8px 16px', fontSize: 12, fontFamily: 'DM Sans,sans-serif', fontWeight: 400, cursor: 'pointer',
-                }}>
-                  {copied ? '✓ Copied' : 'Copy to clipboard'}
-                </button>
-              </>
-            )}
-          </div>
         </div>
       )}
     </>

@@ -65,42 +65,6 @@ function isValidHostFilter(host) {
   return typeof host === 'string' && /^[a-z0-9.-]+(:\d{1,5})?$/i.test(host)
 }
 
-// ─── LLM COST GUARDRAILS (mirrored from Edge Function) ───────────────────────
-// Keep these in sync with supabase/functions/agent-run/index.ts. We duplicate
-// rather than share because Vercel (Node) and Supabase (Deno) don't share a
-// module graph and this is a single-purpose helper. Override via env vars.
-const LLM_MAX_TOKENS_PLAYBOOK   = Number(process.env.LLM_MAX_TOKENS_PLAYBOOK   || '1500')
-const LLM_INPUT_EUR_PER_M       = Number(process.env.LLM_INPUT_EUR_PER_M      || '3.0')
-const LLM_OUTPUT_EUR_PER_M      = Number(process.env.LLM_OUTPUT_EUR_PER_M     || '15.0')
-const LLM_MAX_PROMPT_BYTES      = Number(process.env.LLM_MAX_PROMPT_BYTES     || String(500 * 1024))
-const MONTHLY_SPEND_CAP_EUR     = Number(process.env.AGENT_MONTHLY_SPEND_CAP_EUR || '20.0')
-
-async function getMonthlySpend(subscriptionId) {
-  const period = new Date().toISOString().slice(0, 7)
-  const { data, error } = await supabase
-    .from('agent_llm_usage').select('cost_eur')
-    .eq('subscription_id', subscriptionId).eq('period', period).maybeSingle()
-  if (error) {
-    console.warn('[llm-cap] agent_llm_usage read failed (migration not applied?):', error.message)
-    return { spent: 0, period, capAvailable: false }
-  }
-  return { spent: Number(data?.cost_eur ?? 0), period, capAvailable: true }
-}
-
-async function recordLLMUsage(subscriptionId, inputTokens, outputTokens, callerLabel) {
-  const costEur = (inputTokens / 1_000_000) * LLM_INPUT_EUR_PER_M
-                + (outputTokens / 1_000_000) * LLM_OUTPUT_EUR_PER_M
-  const period = new Date().toISOString().slice(0, 7)
-  const { error } = await supabase.rpc('agent_llm_usage_increment', {
-    p_subscription_id: subscriptionId,
-    p_period:          period,
-    p_input_tokens:    inputTokens,
-    p_output_tokens:   outputTokens,
-    p_cost_eur:        costEur,
-  })
-  if (error) console.warn(`[llm-cap] failed to record usage for ${callerLabel}:`, error.message)
-}
-
 // ─── SECRET ENCRYPTION (Stage 4.1; Stage 1D: extracted) ──────────────────────
 // decryptSecret is imported from ../_lib/secret-crypto.js (shared with
 // onboarding.js's encryptSecret writer). The local encryptSecret was dead here
@@ -300,7 +264,7 @@ export default async function handler(req, res) {
   }
 
   // ── Authenticated user actions (Supabase JWT) ─────────────────────────────
-  if (action === 'update-settings' || action === 'export-dna' || action === 'reenable_snippet' || action === 'trigger_run') {
+  if (action === 'update-settings' || action === 'reenable_snippet' || action === 'trigger_run') {
     const authHeader = req.headers.authorization
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' })
     const token = authHeader.replace('Bearer ', '')
@@ -308,7 +272,6 @@ export default async function handler(req, res) {
     if (authError || !user) return res.status(401).json({ error: 'Unauthorized' })
 
     if (action === 'update-settings')  return handleUpdateSettings(req, res, user)
-    if (action === 'export-dna')       return handleExportDNA(req, res, user)
     if (action === 'reenable_snippet') return handleReenableSnippet(req, res, user)
     if (action === 'trigger_run')      return handleTriggerRun(req, res, user)
   }
@@ -1587,102 +1550,4 @@ async function handleTriggerRun(req, res, user) {
     .eq('id', sub.id)
 
   return res.status(200).json({ success: true, triggered: true, nextManualRunAt })
-}
-
-// ─── Export DNA Playbook (Supabase JWT) ───────────────────────────────────────
-async function handleExportDNA(req, res, user) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
-  const { data: sub } = await supabase
-    .from('agent_subscriptions').select('id').eq('auth_user_id', user.id).single()
-  if (!sub) return res.status(404).json({ error: 'No subscription found' })
-
-  // website_url lives on agent_connections, not agent_subscriptions.
-  const { data: conn } = await supabase
-    .from('agent_connections')
-    .select('website_url')
-    .eq('subscription_id', sub.id)
-    .maybeSingle()
-
-  const [dnaRes, snapsRes] = await Promise.all([
-    supabase.from('agent_business_dna')
-      .select('fix_type, outcome, notes, created_at')
-      .eq('subscription_id', sub.id).order('created_at', { ascending: false }).limit(100),
-    supabase.from('agent_competitor_snapshots')
-      .select('competitor_url, snapshot_data, captured_at')
-      .eq('subscription_id', sub.id).order('captured_at', { ascending: false }).limit(20),
-  ])
-  const dna   = dnaRes.data   || []
-  const snaps = snapsRes.data || []
-
-  // Keep only most recent snapshot per competitor (max 4)
-  const latestByCompetitor = {}
-  for (const s of snaps) if (!latestByCompetitor[s.competitor_url]) latestByCompetitor[s.competitor_url] = s
-  const competitorBlock = Object.values(latestByCompetitor).slice(0, 4)
-    .map(s => `${s.competitor_url}: ${JSON.stringify(s.snapshot_data)}`).join('\n') || 'no competitors tracked'
-
-  const wins     = dna.filter(d => d.outcome === 'success')
-  const losses   = dna.filter(d => d.outcome === 'rollback')
-  const pending  = dna.filter(d => d.outcome === 'pending')
-
-  const prompt = `You are a senior conversion strategist. Based on this website's 90-day agent history, write a Website Playbook.
-
-WEBSITE: ${conn?.website_url || ''}
-
-WHAT HAS WORKED (${wins.length} successes):
-${wins.map(d => `- ${d.fix_type}: ${d.notes || ''}`).join('\n') || 'none yet'}
-
-WHAT WAS ROLLED BACK (${losses.length} failures):
-${losses.map(d => `- ${d.fix_type}: ${d.notes || ''}`).join('\n') || 'none yet'}
-
-CURRENTLY PENDING (${pending.length}):
-${pending.map(d => `- ${d.fix_type}: ${d.notes || ''}`).join('\n') || 'none'}
-
-COMPETITOR CONTEXT:
-${competitorBlock}
-
-Write the Playbook in 4 sections, no fluff:
-1. What has worked — proven fix patterns for THIS specific site (be concrete with the data above).
-2. What to avoid — patterns that were rolled back and why.
-3. Top 3 recommendations for the next 90 days based on what hasn't been tried yet.
-4. Competitor context — what the tracked competitors are doing differently.
-Max 600 words. Clear, direct language. Use short headers for each section.`
-
-  // Monthly spend pre-flight — share the same per-subscription ceiling as
-  // the Edge Function's weekly run. User-initiated, so respond with 429 and
-  // a clear message rather than silently failing.
-  const spend = await getMonthlySpend(sub.id)
-  if (spend.capAvailable && spend.spent >= MONTHLY_SPEND_CAP_EUR) {
-    return res.status(429).json({
-      error: 'monthly_llm_cap_reached',
-      message: `Monthly AI usage cap reached for this subscription (€${spend.spent.toFixed(2)} / €${MONTHLY_SPEND_CAP_EUR.toFixed(2)} in ${spend.period}). Resets on the 1st of next month.`,
-    })
-  }
-
-  try {
-    const requestBody = JSON.stringify({
-      model: 'anthropic/claude-sonnet-4.6',
-      max_tokens: LLM_MAX_TOKENS_PLAYBOOK,
-      messages: [{ role: 'user', content: prompt }],
-    })
-    if (Buffer.byteLength(requestBody, 'utf8') > LLM_MAX_PROMPT_BYTES) {
-      console.error(`[llm-cap] export-dna prompt size exceeds ceiling — aborting`)
-      return res.status(413).json({ error: 'Prompt too large' })
-    }
-
-    const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-      body: requestBody,
-    })
-    const data = await aiRes.json()
-    if (data?.usage) {
-      await recordLLMUsage(sub.id, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0, 'export-dna')
-    }
-    const playbook = data.choices?.[0]?.message?.content?.trim()
-    if (!playbook) return res.status(502).json({ error: 'Empty response from AI' })
-    return res.status(200).json({ playbook })
-  } catch (err) {
-    console.error('export-dna AI error:', err)
-    return res.status(500).json({ error: 'AI request failed' })
-  }
 }

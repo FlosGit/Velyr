@@ -615,8 +615,8 @@ async function handleVerifyTelegramCode(req, res) {
   // cost gate — fail-open would silently disable the exact protection this stage
   // adds. The only realistic error is a not-yet-applied migration (a deploy →
   // `supabase db push` window of seconds-to-minutes); a brief 503 there beats a
-  // silently-off limiter. (Contrast getMonthlySpend, which fails open because
-  // it's cost tracking with availability priority.)
+  // silently-off limiter. (Contrast the edge function's getMonthlySpend, which
+  // fails open because it's cost tracking with availability priority.)
   const { data: rl, error: rlErr } = await serviceClient.rpc('rate_limit_hit', {
     p_bucket_key:     `verify_telegram_code:${auth.user.id}`,
     p_limit:          10,
