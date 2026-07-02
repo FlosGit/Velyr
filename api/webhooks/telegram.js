@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
 import { getOctokit } from '../_lib/github-app.js'
 import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
+import { dispatchAgentRun, startFollowupRun } from '../_lib/edge-dispatch.js'
 import { decryptSecret } from '../_lib/secret-crypto.js'
 import { normalizePendingWrite, classifyConcurrency, confirmApplied, resolveAppliedFiles, planRollbackOps } from '../_lib/shopify-rollback.js'
 import { queryThemeChecksums, upsertThemeFiles, deleteThemeFiles } from '../_lib/shopify-theme-io.js'
@@ -431,11 +432,16 @@ async function applyShopifyDirectWrite(run, conn, chatId) {
   }).eq('id', run.id)
 
   // Stage 4: a PostHog-setup apply also stamps the install-once gate + gets its own copy.
+  // The setup proposal consumed the run the user actually asked for — resolving it
+  // starts the real analysis immediately instead of stranding them behind the cooldown.
   if (run.analysis_result?.setup_kind === 'posthog') {
     await supabase.from('agent_connections')
       .update({ posthog_snippet_installed_at: new Date().toISOString() })
       .eq('subscription_id', run.subscription_id)
-    return sendMessage(chatId, `✅ Analytics installed on your live theme — Velyr can now measure your conversions. Your first conversion fix lands on the next run.`)
+    const started = await startFollowupRun(supabase, run.subscription_id)
+    return sendMessage(chatId, started
+      ? `✅ Analytics installed on your live theme — Velyr can now measure your conversions. Starting your first analysis run now — I'll message you when it's ready.`
+      : `✅ Analytics installed on your live theme — but I couldn't start your analysis run automatically. Tap <b>Run now</b> in your dashboard to start it.`)
   }
   return sendMessage(chatId, `✅ Applied <code>${escapeHtml(appliedFiles.map(f => f.filename).join(', '))}</code> to your live theme.`)
 }
@@ -523,33 +529,10 @@ async function handleApprove(runId, chatId) {
   // createForeignSetupPR and converts this row to a normal setup_posthog run.
   if (run.run_type === 'setup_posthog_foreign_choice') {
     await supabase.from('agent_runs').update({ status: 'running' }).eq('id', runId)
-    const edgeUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agent-run`
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 2000)
-    let dispatched = true
-    try {
-      await fetch(edgeUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ intent: 'foreign_setup_pr', subscriptionId: run.subscription_id }),
-        signal: controller.signal,
-      })
-    } catch (err) {
-      // AbortError = our 2s timeout fired → the request WAS sent and the Edge
-      // function is building the PR. Any other error means the dispatch never
-      // landed: without this guard the run is stuck in 'running' (the stale sweep
-      // silently fails it ~1h later) while the user was promised a PR that never
-      // comes. Track it so we can roll the run back and ask them to retry.
-      if (err?.name !== 'AbortError') {
-        dispatched = false
-        console.error('[telegram] foreign_setup_pr Edge trigger failed:', err?.message)
-      }
-    } finally {
-      clearTimeout(timeoutId)
-    }
+    // A failed dispatch would leave the run stuck in 'running' (the stale sweep
+    // silently fails it ~1h later) while the user was promised a PR that never
+    // comes — roll the run back and ask them to retry.
+    const dispatched = await dispatchAgentRun({ intent: 'foreign_setup_pr', subscriptionId: run.subscription_id })
     if (!dispatched) {
       await supabase.from('agent_runs').update({ status: 'waiting_approval' }).eq('id', runId)
       return sendMessage(chatId, `⚠️ I couldn't start preparing the analytics PR just now. Please reply <b>YES</b> again in a moment.`)
@@ -604,7 +587,13 @@ async function handleApprove(runId, chatId) {
   if (prInfo.merged) {
     // Already merged — reconcile the DB to 'deployed' and tell the user. Same
     // reconcile path the GitHub pull_request webhook uses for a manual merge.
-    await reconcileDeployed(supabase, run, prInfo.merge_commit_sha, { approvalLabel: 'YES, already merged' })
+    const reconciled = await reconcileDeployed(supabase, run, prInfo.merge_commit_sha, { approvalLabel: 'YES, already merged' })
+    if (reconciled.kind === 'setup_installed') {
+      const started = await startFollowupRun(supabase, run.subscription_id)
+      return sendMessage(chatId, started
+        ? `✅ <b>Already merged — analytics installed.</b> Starting your first analysis run now.`
+        : `✅ <b>Already merged — analytics installed.</b> I couldn't start your analysis run automatically — tap <b>Run now</b> in your dashboard.`)
+    }
     return sendMessage(chatId, `✅ <b>Already merged.</b> (Reconciled — the PR was merged out-of-band, status updated.)`)
   }
   if (prInfo.state === 'closed') {
@@ -656,9 +645,13 @@ async function handleApprove(runId, chatId) {
   // helper the GitHub pull_request webhook calls for a manual merge.
   const result = await reconcileDeployed(supabase, run, mergeSha, { approvalLabel: 'YES' })
 
-  // Setup-PR YES → "analytics installed"; conversion fix → "deploying" message.
+  // Setup-PR YES → "analytics installed" + start the analysis run the setup consumed;
+  // conversion fix → "deploying" message.
   if (result.kind === 'setup_installed') {
-    return sendMessage(chatId, `✅ <b>Analytics installed.</b> Your next run will use real visitor data.`)
+    const started = await startFollowupRun(supabase, run.subscription_id)
+    return sendMessage(chatId, started
+      ? `✅ <b>Analytics installed.</b> Starting your first analysis run with real visitor data now — I'll message you when it's ready.`
+      : `✅ <b>Analytics installed.</b> I couldn't start your analysis run automatically — tap <b>Run now</b> in your dashboard to start it.`)
   }
 
   // SG4b item 4: a Shopify-via-GitHub theme fix goes live when Shopify syncs the
@@ -711,7 +704,12 @@ async function handleReject(runId, chatId) {
       await supabase.from('agent_connections')
         .update({ posthog_snippet_installed_at: new Date().toISOString() })
         .eq('subscription_id', run.subscription_id)
-      return sendMessage(chatId, `👍 No problem — I won't add analytics. I'll keep working from your funnel structure. You can enable analytics later from your dashboard.`)
+      // The decline is permanent (install-once gate stamped), so analysis is
+      // unblocked — start the run the setup proposal consumed.
+      const started = await startFollowupRun(supabase, run.subscription_id)
+      return sendMessage(chatId, started
+        ? `👍 No problem — I won't add analytics. Starting your analysis run from your funnel structure now. You can enable analytics later from your dashboard.`
+        : `👍 No problem — I won't add analytics. I couldn't start your analysis run automatically — tap <b>Run now</b> in your dashboard. You can enable analytics later from there too.`)
     }
     return sendMessage(chatId, `❌ <b>Skipped.</b> Nothing was changed in your theme — the agent will analyze again on the next run.`)
   }
@@ -743,11 +741,18 @@ async function handleReject(runId, chatId) {
   const result = await reconcileRejected(supabase, run, { rejectLabel: 'NO' })
 
   switch (result.kind) {
+    // setup_retry deliberately does NOT dispatch a follow-up run: the next run
+    // re-offers the setup once more, so an immediate run would just re-ask.
     case 'setup_retry':
       return sendMessage(chatId, `⏭️ Skipped for now — I'll offer it once more next run.`)
     case 'foreign_declined':
-    case 'setup_declined':
-      return sendMessage(chatId, `Understood — I won't ask again. Re-enable tracking from your dashboard anytime.`)
+    case 'setup_declined': {
+      // Permanent decline unblocks analysis — start the run the setup consumed.
+      const started = await startFollowupRun(supabase, run.subscription_id)
+      return sendMessage(chatId, started
+        ? `Understood — I won't ask again. Starting your analysis run now; re-enable tracking from your dashboard anytime.`
+        : `Understood — I won't ask again. Re-enable tracking from your dashboard anytime.`)
+    }
     default: // 'fix_rejected'
       return sendMessage(
         chatId,

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
 import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
+import { startFollowupRun } from '../_lib/edge-dispatch.js'
 
 // ─── GitHub App `pull_request` webhook ───────────────────────────────────────
 // Keeps the agent_runs row in sync when a customer acts on the agent's PR
@@ -121,19 +122,38 @@ export default async function handler(req, res) {
     if (!run) return res.status(200).json({ ok: true, ignored: 'no_pending_run' })
 
     if (pr.merged) {
-      await reconcileDeployed(supabase, run, pr.merge_commit_sha, { approvalLabel: 'merged on GitHub' })
-      await notifyTelegram(
-        conn.telegram_chat_id,
-        `🔁 PR #${prNumber} was merged on GitHub — the run is now marked <b>deployed</b>. I'll check impact after 48h.`
-      )
+      const reconciled = await reconcileDeployed(supabase, run, pr.merge_commit_sha, { approvalLabel: 'merged on GitHub' })
+      // A merged Setup-PR consumed the analysis run — resolving it out-of-band
+      // starts the real run now, same as the Telegram YES path.
+      if (reconciled.kind === 'setup_installed') {
+        const started = await startFollowupRun(supabase, run.subscription_id)
+        await notifyTelegram(
+          conn.telegram_chat_id,
+          started
+            ? `🔁 PR #${prNumber} was merged on GitHub — analytics installed. Starting your first analysis run now.`
+            : `🔁 PR #${prNumber} was merged on GitHub — analytics installed. I couldn't start your analysis run automatically — tap <b>Run now</b> in your dashboard.`
+        )
+      } else {
+        await notifyTelegram(
+          conn.telegram_chat_id,
+          `🔁 PR #${prNumber} was merged on GitHub — the run is now marked <b>deployed</b>. I'll check impact after 48h.`
+        )
+      }
     } else {
       // Closed without merging → same as a Telegram NO. The PR is already
       // closed, so don't re-close it; just clean up the branch + flip the DB.
       await closeRejectedPr(conn, run, { close: false })
-      await reconcileRejected(supabase, run, { rejectLabel: 'closed on GitHub' })
+      const rejected = await reconcileRejected(supabase, run, { rejectLabel: 'closed on GitHub' })
+      // Permanent setup decline unblocks analysis (setup_retry re-offers next
+      // run instead — no dispatch, it would just re-ask immediately).
+      let startedNote = ''
+      if (rejected.kind === 'setup_declined' || rejected.kind === 'foreign_declined') {
+        const started = await startFollowupRun(supabase, run.subscription_id)
+        startedNote = started ? ' Starting your analysis run now.' : ''
+      }
       await notifyTelegram(
         conn.telegram_chat_id,
-        `🔁 PR #${prNumber} was closed on GitHub — the run is now marked <b>rejected</b>.`
+        `🔁 PR #${prNumber} was closed on GitHub — the run is now marked <b>rejected</b>.${startedNote}`
       )
     }
 
