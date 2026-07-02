@@ -1029,6 +1029,7 @@ function escapeHtml(s: unknown): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 // Telegram failure-mode notification used when we cap a subscription out.
@@ -2941,7 +2942,12 @@ CONSTRAINTS:
   } catch {
     throw new Error(`Pass 2 returned invalid JSON: ${text.slice(0, 200)}`)
   }
-  if (!parsed.skip && (!parsed.problem || !parsed.file_to_edit || !parsed.code_change?.find)) {
+  // `replace` must be validated too: it is spliced verbatim into the customer's
+  // file (createPR) or the live theme (applyCodeChangeToContent), so a missing
+  // `replace` would coerce to the literal string "undefined" and be written out
+  // (it can even pass the Babel/Liquid check). Use typeof===string, NOT
+  // truthiness — replace:"" is a legitimate pure-deletion edit and must pass.
+  if (!parsed.skip && (!parsed.problem || !parsed.file_to_edit || !parsed.code_change?.find || typeof parsed.code_change?.replace !== 'string')) {
     throw new Error(`Pass 2 response missing required fields: ${JSON.stringify(parsed).slice(0, 200)}`)
   }
   return parsed
@@ -3256,24 +3262,12 @@ async function maybeProposeShopifyPostHogSetup(
   // and route through the SAME approval + concurrency machinery below (no new write path).
   const newContent = decision.newContent
 
-  // Send the YES/NO approval first (capture message_id so the reply resolves this run),
-  // then stage the pending write under the shared shopify_awaiting_approval status. The
-  // YES handler (applyShopifyDirectWrite) applies it and, seeing setup_kind:'posthog',
-  // stamps posthog_snippet_installed_at.
-  let messageId: number | null = null
-  if (chatId) {
-    const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `📊 <b>Velyr — turn on analytics</b>\n\nTo measure conversions and prove every change pays off, Velyr adds a tiny analytics snippet to your theme's <code>layout/theme.liquid</code> (the same loader velyr.io uses — no apps, no slowdown).\n\nReply <b>YES</b> to install it on your live theme / <b>NO</b> to skip.`,
-        parse_mode: 'HTML',
-      }),
-    })
-    const tgData = await tgRes.json().catch(() => ({}))
-    messageId = tgData?.result?.message_id || null
-  }
-
+  // Persist the pending write under shopify_awaiting_approval FIRST, THEN send the
+  // approval Telegram. If we sent first and the persist then failed, the merchant
+  // would hold a live "reply YES" prompt whose YES bounces off the status guard (the
+  // row never reached shopify_awaiting_approval). The message_id is attached as a
+  // best-effort follow-up AFTER the send — swallowed, NOT dbWrite: a failed follow-up
+  // must never roll the already-staged run back to failed via processConnection's catch.
   await dbWrite(
     supabase.from('agent_runs').update({
       status:              'shopify_awaiting_approval',
@@ -3282,7 +3276,6 @@ async function maybeProposeShopifyPostHogSetup(
       completed_at:        new Date().toISOString(),
       problem_description: 'Install Velyr analytics snippet',
       pages_fixed:         ['layout/theme.liquid'],
-      telegram_message_id: messageId,
       analysis_result: {
         setup_kind: 'posthog',
         pending_write: {
@@ -3299,6 +3292,22 @@ async function maybeProposeShopifyPostHogSetup(
     }).eq('id', run.id),
     DB_TIMEOUT_MS, 'shopify_posthog_propose_update',
   )
+
+  if (chatId) {
+    const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `📊 <b>Velyr — turn on analytics</b>\n\nTo measure conversions and prove every change pays off, Velyr adds a tiny analytics snippet to your theme's <code>layout/theme.liquid</code> (the same loader velyr.io uses — no apps, no slowdown).\n\nReply <b>YES</b> to install it on your live theme / <b>NO</b> to skip.`,
+        parse_mode: 'HTML',
+      }),
+    }).catch(() => null)
+    const tgData = tgRes ? await tgRes.json().catch(() => ({})) : {}
+    const messageId = tgData?.result?.message_id || null
+    if (messageId != null) {
+      await supabase.from('agent_runs').update({ telegram_message_id: messageId }).eq('id', run.id).then(() => {}, () => {})
+    }
+  }
   return 'proposed'
 }
 
@@ -3512,32 +3521,12 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     return
   }
 
-  // 6. APPROVAL — send a YES/NO message FIRST (so we capture its message_id), then
-  // persist the pending write under 'shopify_awaiting_approval'. On YES the Telegram
-  // webhook reads analysis_result.pending_write and applies it to the live theme via
-  // writeShopifyThemeFile; on NO the run is skipped. No live-theme change happens now.
+  // 6. APPROVAL — persist the pending write under 'shopify_awaiting_approval' FIRST,
+  // THEN send the YES/NO Telegram (mirrors the PostHog path). Sending first and then
+  // failing the persist would strand the merchant with a live YES prompt the status
+  // guard rejects. On YES the Telegram webhook reads analysis_result.pending_write and
+  // applies it to the live theme; on NO the run is skipped. No live-theme change now.
   if (!chatId) throw new Error(`No telegram_chat_id for subscription ${conn.subscription_id}`)
-
-  // Inline the sendMessage fetch here (mirrors sendTelegramNotification) INSTEAD of
-  // extending sendShopifyTelegram to return a message_id. sendShopifyTelegram is a
-  // shared fire-and-forget helper used by every other branch of THIS function (and the
-  // read-failure paths); the task is to replace only this tail without touching other
-  // functions, so changing that helper's signature is out of scope. We need the
-  // message_id so the YES reply can resolve THIS run — hence the inline fetch.
-  const approvalMsg =
-    `🤖 <b>Velyr — Shopify theme fix ready for approval</b>\n\n` +
-    `<b>Problem:</b> ${escapeHtml(fixResult.problem || '—')}\n` +
-    `<b>File:</b> <code>${escapeHtml(fixResult.file_to_edit || '—')}</code>` +
-    (fixResult.confidence ? `\n<b>Confidence:</b> ${escapeHtml(fixResult.confidence)}` : '') +
-    `\n\n<b>Find:</b>\n<pre>${escapeHtml(change.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(change.replace.slice(0, 600))}</pre>` +
-    `\n\nReply <b>YES</b> to apply this change to your live theme / <b>NO</b> to skip.`
-  const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: approvalMsg, parse_mode: 'HTML' }),
-  })
-  const tgData = await tgRes.json()
-  if (!tgData.ok) console.error('[shopify] approval telegram error:', tgData.description)
-  const messageId = tgData.result?.message_id || null
 
   await dbWrite(
     supabase.from('agent_runs').update({
@@ -3566,10 +3555,30 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
       },
       problem_description: fixResult.problem,
       pages_fixed:         [fixResult.file_to_edit],
-      telegram_message_id: messageId,
     }).eq('id', run.id),
     DB_TIMEOUT_MS, 'shopify_awaiting_approval_update',
   )
+
+  // Inline the sendMessage fetch here (mirrors sendTelegramNotification) so we can
+  // capture the message_id — attached best-effort AFTER the persist (swallowed, NOT
+  // dbWrite: a failed message_id follow-up must not roll the staged run back to failed).
+  const approvalMsg =
+    `🤖 <b>Velyr — Shopify theme fix ready for approval</b>\n\n` +
+    `<b>Problem:</b> ${escapeHtml(fixResult.problem || '—')}\n` +
+    `<b>File:</b> <code>${escapeHtml(fixResult.file_to_edit || '—')}</code>` +
+    (fixResult.confidence ? `\n<b>Confidence:</b> ${escapeHtml(fixResult.confidence)}` : '') +
+    `\n\n<b>Find:</b>\n<pre>${escapeHtml(change.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(change.replace.slice(0, 600))}</pre>` +
+    `\n\nReply <b>YES</b> to apply this change to your live theme / <b>NO</b> to skip.`
+  const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: approvalMsg, parse_mode: 'HTML' }),
+  }).catch(() => null)
+  const tgData = tgRes ? await tgRes.json().catch(() => ({})) : {}
+  if (!tgData.ok) console.error('[shopify] approval telegram error:', tgData.description)
+  const messageId = tgData.result?.message_id || null
+  if (messageId != null) {
+    await supabase.from('agent_runs').update({ telegram_message_id: messageId }).eq('id', run.id).then(() => {}, () => {})
+  }
 }
 
 // ─── SHOPIFY-VIA-GITHUB: READ THEME FILES FROM THE REPO TREE (SG1) ────────────
@@ -3784,9 +3793,6 @@ async function processGithubThemeConnection(
     supabase.from('agent_runs').update({ current_step: 'sending_notification' }).eq('id', run.id),
     DB_TIMEOUT_MS, 'shopify_github_step_notify_update',
   )
-  if (!chatId) throw new Error(`No telegram_chat_id for subscription ${conn.subscription_id}`)
-  const messageId = await sendTelegramNotification(fixResult, pr, run.id, chatId)
-
   const bounceBefore = analytics?.last7Days?.bounceRate ?? null
   await dbWrite(
     supabase.from('agent_runs').update({
@@ -3796,13 +3802,27 @@ async function processGithubThemeConnection(
       analysis_result:     { ...fixResult, analytics_snapshot: analytics?.last7Days, revenue: revenue || null },
       pr_number:           pr.number,
       pr_url:              pr.html_url,
-      telegram_message_id: messageId || null,
       bounce_rate_before:  bounceBefore,
       pages_fixed:         filesEdited,
       problem_description: fixResult.problem,
     }).eq('id', run.id),
     DB_TIMEOUT_MS, 'shopify_github_waiting_approval_update',
   )
+  // Send best-effort AFTER persisting: the PR already exists, so a send failure must
+  // not throw into the failed-catch and orphan the PR (the next weekly run would open
+  // a duplicate; the GitHub-merge webhook can still reconcile). Attach the message_id
+  // best-effort so the YES reply resolves this run.
+  if (!chatId) {
+    slog('warn', 'shopify_github_no_chat_for_notify', { runId: run.id, subscriptionId: conn.subscription_id })
+  } else {
+    const messageId = await sendTelegramNotification(fixResult, pr, run.id, chatId).catch((e: any) => {
+      slog('warn', 'shopify_github_approval_notify_failed', { runId: run.id, error: e?.message })
+      return null
+    })
+    if (messageId != null) {
+      await supabase.from('agent_runs').update({ telegram_message_id: messageId }).eq('id', run.id).then(() => {}, () => {})
+    }
+  }
 }
 
 async function processConnection(conn: any) {
@@ -4246,11 +4266,9 @@ async function processConnection(conn: any) {
       supabase.from('agent_runs').update({ current_step: 'sending_notification' }).eq('id', run.id),
       DB_TIMEOUT_MS, 'step_sending_notification_update'
     )
-    if (!chatId) throw new Error(`No telegram_chat_id for subscription ${conn.subscription_id}`)
-    const messageId = await sendTelegramNotification(fixResult, pr, run.id, chatId)
-
-    // Persist run. A/B-test variants, sprint, risk_score, and impact_prediction
-    // are gone — the new fixResult schema doesn't carry them (see RA5 flag).
+    // Persist run FIRST (the PR already exists on GitHub). A/B-test variants, sprint,
+    // risk_score, and impact_prediction are gone — the new fixResult schema doesn't
+    // carry them (see RA5 flag).
     const bounceBefore = analytics?.last7Days?.bounceRate ?? null
     await dbWrite(
       supabase.from('agent_runs').update({
@@ -4265,7 +4283,6 @@ async function processConnection(conn: any) {
         } : null,
         pr_number:                 pr.number,
         pr_url:                    pr.html_url,
-        telegram_message_id:       messageId || null,
         screenshot_before:         screenshotBefore,
         bounce_rate_before:        bounceBefore,
         revenue_per_visitor_before: revenue?.lowestRpv?.revenuePerVisitor ?? null,
@@ -4275,6 +4292,22 @@ async function processConnection(conn: any) {
       }).eq('id', run.id),
       DB_TIMEOUT_MS, 'final_waiting_approval_update'
     )
+
+    // Send the approval Telegram best-effort AFTER persisting: a send failure must not
+    // throw into the failed-catch and orphan the just-created PR (the next weekly run
+    // would open a duplicate; the GitHub-merge webhook can still reconcile). Attach the
+    // message_id best-effort so the YES reply resolves this run.
+    if (!chatId) {
+      slog('warn', 'no_chat_for_notify', { runId: run.id, subscriptionId: conn.subscription_id })
+    } else {
+      const messageId = await sendTelegramNotification(fixResult, pr, run.id, chatId).catch((e: any) => {
+        slog('warn', 'approval_notify_failed', { runId: run.id, error: e?.message })
+        return null
+      })
+      if (messageId != null) {
+        await supabase.from('agent_runs').update({ telegram_message_id: messageId }).eq('id', run.id).then(() => {}, () => {})
+      }
+    }
 
     await saveFunnelPages(conn.subscription_id, run.id, funnelAnalysis)
 
@@ -4310,6 +4343,8 @@ async function processConnection(conn: any) {
       await dbWrite(
         supabase.from('agent_runs').update({
           status:        'failed',
+          current_step:  'done',
+          completed_at:  new Date().toISOString(),
           error_message: err.message || 'Unknown error',
         }).eq('id', run.id),
         DB_TIMEOUT_MS, 'catch_failed_update'

@@ -123,6 +123,7 @@ export default async function handler(req, res) {
 
     if (pr.merged) {
       const reconciled = await reconcileDeployed(supabase, run, pr.merge_commit_sha, { approvalLabel: 'merged on GitHub' })
+      if (reconciled.kind === 'noop') return res.status(200).json({ ok: true, reconciled: 'already' })
       // A merged Setup-PR consumed the analysis run — resolving it out-of-band
       // starts the real run now, same as the Telegram YES path.
       if (reconciled.kind === 'setup_installed') {
@@ -144,6 +145,7 @@ export default async function handler(req, res) {
       // closed, so don't re-close it; just clean up the branch + flip the DB.
       await closeRejectedPr(conn, run, { close: false })
       const rejected = await reconcileRejected(supabase, run, { rejectLabel: 'closed on GitHub' })
+      if (rejected.kind === 'noop') return res.status(200).json({ ok: true, reconciled: 'already' })
       // Permanent setup decline unblocks analysis (setup_retry re-offers next
       // run instead — no dispatch, it would just re-ask immediately).
       let startedNote = ''

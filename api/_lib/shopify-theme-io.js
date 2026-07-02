@@ -40,6 +40,14 @@ async function post(shop, token, apiVersion, body) {
 // On any transport/GraphQL failure returns { ok: false, reason, message } so the caller
 // can ABORT the write rather than proceed blind.
 export async function queryThemeChecksums(shop, token, themeId, filenames, apiVersion) {
+  // `files(first: 50)` — if more than 50 filenames are requested the surplus are
+  // absent from the response and map to null, which the caller treats as a conflict
+  // (fail-safe abort, never a blind overwrite). Log it so the truncation is not
+  // silent. Single-file writes never hit this today; revisit with pagination if
+  // multi-file theme writes ship.
+  if (Array.isArray(filenames) && filenames.length > 50) {
+    console.warn(`[shopify-theme-io] queryThemeChecksums requested ${filenames.length} files but the query caps at 50 — surplus treated as conflicts (fail-safe).`)
+  }
   const query = `query VelyrThemeChecksums($themeId: ID!, $filenames: [String!]) {
     theme(id: $themeId) {
       files(first: 50, filenames: $filenames) {

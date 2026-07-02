@@ -37,7 +37,8 @@
 // file has vanished (current == null) — in both cases the live theme no longer matches
 // what we analyzed, so overwriting would clobber a merchant edit. A null STORED checksum
 // (created file, or a legacy pending_write) is unverifiable and is NOT treated as a
-// conflict here (created files get an existence guard at write time, Stage 4).
+// conflict here (created files get an existence guard at write time via
+// classifyCreatedCollisions).
 export function classifyConcurrency(files, currentChecksumByFilename) {
   const conflicts = []
   for (const f of files) {
@@ -47,6 +48,24 @@ export function classifyConcurrency(files, currentChecksumByFilename) {
     if (current == null || current !== f.checksumMd5) conflicts.push(f.filename)
   }
   return conflicts.length === 0 ? { ok: true } : { ok: false, conflicts }
+}
+
+// ── 1b. CREATED-FILE EXISTENCE GUARD ─────────────────────────────────────────
+// A staged op:'created' file asserts the file did NOT exist at analysis time, so
+// classifyConcurrency deliberately skips it (no prior checksum). Before writing it
+// we MUST re-confirm it is still absent: if it now exists live, an upsert would
+// silently OVERWRITE merchant content and a later rollback (planRollbackOps:
+// created → delete) would DELETE bytes we never owned. Returns the colliding
+// created filenames (those present live now).
+//   currentChecksumByFilename: { [filename]: string | null }   // null ⇒ absent (safe)
+export function classifyCreatedCollisions(files, currentChecksumByFilename) {
+  const collisions = []
+  for (const f of files) {
+    if (f.op !== 'created') continue
+    const current = currentChecksumByFilename ? currentChecksumByFilename[f.filename] : undefined
+    if (current != null) collisions.push(f.filename)
+  }
+  return collisions.length === 0 ? { ok: true } : { ok: false, collisions }
 }
 
 // ── 2. PARTIAL-BATCH RESOLUTION ──────────────────────────────────────────────

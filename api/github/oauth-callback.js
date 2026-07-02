@@ -11,7 +11,7 @@
 //
 // The GitHub access_token is used to identify the user + list installations,
 // then discarded. It is never logged or persisted. The long-lived credential we
-// keep is the installation_id (usable later via App auth, like validate-repo.js).
+// keep is the installation_id (usable later via installation App auth).
 //
 // Output is a browser-facing HTML/redirect, not JSON. On success we set a
 // signed, HttpOnly, short-lived handoff cookie and 302 to /agent/onboarding,

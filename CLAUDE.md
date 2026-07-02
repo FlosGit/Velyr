@@ -146,6 +146,7 @@ Vercel Node functions (`api/`) and the Supabase Deno Edge Function (`supabase/fu
 - `fileToRoutePath` — `supabase/functions/agent-run/route-map.ts` ↔ `api/agent/run.js`
 - `decryptSecret` / `encryptSecret` (the `enc:v1:` AES-256-GCM wire format) — `api/_lib/secret-crypto.js` ↔ `supabase/functions/agent-run/index.ts` ↔ `supabase/functions/shopify-oauth/index.ts`. Both sides are twinned again: the edge functions encrypt Shopify access/refresh tokens (OAuth callback + token rotation) and decrypt them for theme I/O, and the Vercel side does the same in `applyShopifyDirectWrite`. All three declarations must stay format-locked.
 - `ROLLBACK_BOUNCE_PP_THRESHOLD` — `api/agent/run.js` ↔ `supabase/functions/agent-run/receipt-builder.ts`
+- `refreshShopifyToken` — `supabase/functions/agent-run/index.ts` ↔ `api/_lib/shopify-token-refresh.js`. The edge fn refreshes eagerly at the weekly run; the Vercel copy refreshes at YES-approval time (`applyShopifyDirectWrite` / `executeShopifyDirectRollback`), where the ~1h access token is usually already expired. Keep the endpoint, form params, `shopify_token_expires_at` / `shopify_refresh_token_expires_at` column names, and single-use refresh-token rotation in sync.
 
 Within a single runtime, do share: the two Node onboarding/agent files import `encryptSecret`/`decryptSecret` from `api/_lib/secret-crypto.js` (underscore prefix ⇒ not a Vercel route, doesn't count toward the 12-function cap).
 
@@ -177,7 +178,6 @@ ES modules (`"type": "module"`). Database access is `@supabase/supabase-js` with
 - `api/agent/run.js` — cron modes + user actions (see Agent System).
 - `api/onboarding.js` — onboarding actions (see Onboarding / OAuth).
 - `api/github/oauth-initiate.js` / `oauth-callback.js` / `_oauth-state.js` — GitHub App OAuth.
-- `api/github/validate-repo.js` — validates GitHub repo access during onboarding.
 - `api/webhooks/stripe.js` — Stripe subscription webhook.
 - `api/webhooks/telegram.js` — Telegram bot webhook.
 - `api/stripe.js` — Stripe checkout/portal/session actions (subscription only).

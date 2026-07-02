@@ -670,7 +670,7 @@ async function handleVerifyTelegramCode(req, res) {
 // caller's OWN connection by subscriptionId (ownership re-checked exactly like
 // finalize) — the client never supplies a repo identity, so this can't enumerate
 // arbitrary repos, and it doesn't depend on the handoff cookie (already consumed at
-// ?action=complete). Uses the SAME installation app-auth as api/github/validate-repo.js.
+// ?action=complete). Uses the same installation app-auth pattern used elsewhere in onboarding.
 // Best-effort: every failure path returns a soft 200 with an empty list so the UI
 // silently falls back to "use the repo default branch" and onboarding never stalls.
 async function handleListBranches(req, res) {

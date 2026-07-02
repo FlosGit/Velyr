@@ -802,10 +802,24 @@ async function handleRollbackCheck(res) {
       }
       const hostWhere     = [`properties.$host = '${String(hostFilter).replace(/'/g, "''")}'`]
 
+      // Resolve the subscription OWNER's Telegram chat once per run so every
+      // notification below (rollback-recommended, rollback-failed, positive-impact)
+      // reaches the customer — never the global operator TELEGRAM_CHAT_ID, which
+      // would leak one tenant's change description to the operator and never reach
+      // the owner. If the owner has no chat bound, the sends are skipped.
+      const { data: ownerSub } = await supabase.from('agent_subscriptions')
+        .select('telegram_chat_id').eq('id', run.subscription_id).single()
+      const ownerChatId = ownerSub?.telegram_chat_id || null
+
       const deployedAt    = new Date(run.completed_at)
-      const twoDaysBefore = new Date(deployedAt - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-      const deployedDate  = deployedAt.toISOString().split('T')[0]
-      const twoDaysAfter  = new Date(deployedAt.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      // Split the before/after bounce windows at the exact deploy INSTANT, not the
+      // deploy calendar day. Date-granularity (.split('T')[0]) put the deploy day's
+      // pre-change hours (00:00 → completed_at) into the "after" bucket, biasing
+      // bounceDelta against the change at the ROLLBACK_BOUNCE_PP_THRESHOLD gate.
+      // PostHog EventsQuery after/before accept full ISO-8601 timestamps.
+      const twoDaysBefore = new Date(deployedAt.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString()
+      const deployedDate  = deployedAt.toISOString()
+      const twoDaysAfter  = new Date(deployedAt.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString()
       const headers       = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
 
       const [beforeRes, afterRes] = await Promise.all([
@@ -937,11 +951,20 @@ async function handleRollbackCheck(res) {
             }
           }
           if (!agentCommit) {
-            const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, per_page: 10 })
-            agentCommit = commits.find(c =>
-              c.commit.message.startsWith('fix:') &&
-              c.commit.message.includes(run.analysis_result?.problem?.slice(0, 30))
-            )
+            // Only match on the problem text when it is a real non-empty string.
+            // Previously `.includes(problem?.slice(0,30))` coerced a missing problem
+            // to `.includes("undefined")`, which could bind the rollback to an
+            // unrelated commit that happens to contain the literal "undefined".
+            const problemKey = typeof run.analysis_result?.problem === 'string'
+              ? run.analysis_result.problem.slice(0, 30)
+              : ''
+            if (problemKey) {
+              const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, per_page: 10 })
+              agentCommit = commits.find(c =>
+                c.commit.message.startsWith('fix:') &&
+                c.commit.message.includes(problemKey)
+              )
+            }
           }
 
           if (agentCommit) {
@@ -994,14 +1017,12 @@ async function handleRollbackCheck(res) {
                 pr_url:           pr.html_url,
               }).eq('id', run.id)
 
-              // Always notify the actual subscription owner, not env TELEGRAM_CHAT_ID
-              const { data: subRow } = await supabase.from('agent_subscriptions')
-                .select('telegram_chat_id').eq('id', run.subscription_id).single()
-              if (subRow?.telegram_chat_id) {
+              // Notify the subscription owner (resolved once at the top of the loop).
+              if (ownerChatId) {
                 await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    chat_id: subRow.telegram_chat_id,
+                    chat_id: ownerChatId,
                     text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Site-wide bounce rate: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\n🔍 Review PR: ${escapeHtml(pr.html_url)}\n\nReply <b>YES</b> to merge the rollback, or <b>NO</b> to keep the change live.`,
                     parse_mode: 'HTML',
                   }),
@@ -1011,24 +1032,28 @@ async function handleRollbackCheck(res) {
           }
         } catch (rollbackErr) {
           console.error('Rollback failed:', rollbackErr)
+          if (ownerChatId) {
+            await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: ownerChatId,
+                text: `⚠️ <b>Velyr Rollback Alert</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Bounce rate +${bounceDelta}% — ❌ auto-rollback failed, please revert manually.`,
+                parse_mode: 'HTML',
+              }),
+            })
+          }
+        }
+      } else if (bounceDelta <= -5) {
+        if (ownerChatId) {
           await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              chat_id: process.env.TELEGRAM_CHAT_ID,
-              text: `⚠️ <b>Velyr Rollback Alert</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Bounce rate +${bounceDelta}% — ❌ auto-rollback failed, please revert manually.`,
+              chat_id: ownerChatId,
+              text: `📈 <b>Velyr Impact Check — Positive</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n✅ Bounce rate: ${bounceBefore}% → ${bounceAfter}% (${bounceDelta}%)`,
               parse_mode: 'HTML',
             }),
           })
         }
-      } else if (bounceDelta <= -5) {
-        await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: process.env.TELEGRAM_CHAT_ID,
-            text: `📈 <b>Velyr Impact Check — Positive</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n✅ Bounce rate: ${bounceBefore}% → ${bounceAfter}% (${bounceDelta}%)`,
-            parse_mode: 'HTML',
-          }),
-        })
       }
     } catch (err) {
       console.error('Rollback check error for run', run.id, err)
@@ -1434,8 +1459,11 @@ async function handleUpdateSettings(req, res, user) {
 
   const { data, error } = await supabase
     .from('agent_subscriptions').update(updates)
-    .eq('auth_user_id', user.id).select().single()
+    .eq('auth_user_id', user.id).select().maybeSingle()
   if (error) return res.status(500).json({ error: error.message })
+  // maybeSingle (not single): a caller with no subscription row returns null here
+  // rather than throwing PGRST116 → a 500. Answer with a clean 404 instead.
+  if (!data) return res.status(404).json({ error: 'No subscription found' })
   return res.status(200).json({ success: true, subscription: data })
 }
 

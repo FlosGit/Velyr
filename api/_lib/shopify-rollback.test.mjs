@@ -5,6 +5,7 @@
 
 import {
   classifyConcurrency,
+  classifyCreatedCollisions,
   resolveAppliedFiles,
   planRollbackOps,
   confirmApplied,
@@ -112,6 +113,27 @@ eq('normalize: legacy single-file shape → one modified file, null prior/checks
 eq('normalize: garbage → empty files',
   normalizePendingWrite(null),
   { themeId: null, files: [] })
+
+// ── classifyCreatedCollisions (created-file existence guard) ──────────────────
+const cre = (filename) => ({ filename, op: 'created', checksumMd5: null, priorContent: null })
+
+eq('created-collision: file absent live → ok',
+  classifyCreatedCollisions([cre('snippets/velyr-analytics.liquid')], { 'snippets/velyr-analytics.liquid': null }),
+  { ok: true })
+
+eq('created-collision: file already exists live → collision (refuse to overwrite)',
+  classifyCreatedCollisions([cre('snippets/velyr-analytics.liquid')], { 'snippets/velyr-analytics.liquid': 'abc' }),
+  { ok: false, collisions: ['snippets/velyr-analytics.liquid'] })
+
+eq('created-collision: modified files are ignored (not created)',
+  classifyCreatedCollisions([mod('sections/hero.liquid', 'abc')], { 'sections/hero.liquid': 'abc' }),
+  { ok: true })
+
+eq('created-collision: mixed — only the present created file collides',
+  classifyCreatedCollisions(
+    [cre('snippets/a.liquid'), cre('snippets/b.liquid')],
+    { 'snippets/a.liquid': null, 'snippets/b.liquid': 'exists' }),
+  { ok: false, collisions: ['snippets/b.liquid'] })
 
 // ── report ───────────────────────────────────────────────────────────────────
 if (failures.length) {

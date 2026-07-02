@@ -15,19 +15,26 @@ import { getOctokit } from './github-app.js'
 // `mergeSha` is the squash/merge commit SHA (used by the 48h rollback check to
 // find the exact change); pass null if unknown. Returns { kind } so the caller
 // can pick the right confirmation message.
-export async function reconcileDeployed(supabase, run, mergeSha, { approvalLabel = 'YES' } = {}) {
-  await supabase.from('agent_runs').update({
+export async function reconcileDeployed(supabase, run, mergeSha, { approvalLabel = 'YES', expectedStatus = 'waiting_approval' } = {}) {
+  // Compare-and-swap the terminal transition: two concurrent approvals (two distinct
+  // Telegram messages — "yes" + "y" — or a Telegram YES racing the GitHub-merge
+  // webhook) must not both run the non-idempotent side effects below (a duplicate
+  // agent_business_dna row, a double setup-install stamp). Only the invocation that
+  // actually flips the row FROM expectedStatus proceeds; the loser returns
+  // { kind: 'noop' } and its caller stays silent.
+  const { data: claimed } = await supabase.from('agent_runs').update({
     status:           'deployed',
     completed_at:     new Date().toISOString(),
     merge_commit_sha: mergeSha ?? null,
-  }).eq('id', run.id)
+  }).eq('id', run.id).eq('status', expectedStatus).select('id')
+  if (!claimed || claimed.length === 0) return { kind: 'noop', claimed: false }
 
   // Setup-PR: record install time, skip DNA (no conversion logic to learn from).
   if (run.run_type === 'setup_posthog') {
     await supabase.from('agent_connections')
       .update({ posthog_snippet_installed_at: new Date().toISOString() })
       .eq('subscription_id', run.subscription_id)
-    return { kind: 'setup_installed' }
+    return { kind: 'setup_installed', claimed: true }
   }
 
   // Business DNA — record as 'pending'; the 48h rollback check promotes it to
@@ -38,33 +45,38 @@ export async function reconcileDeployed(supabase, run, mergeSha, { approvalLabel
     outcome: 'pending',
     notes: `Approved (${approvalLabel}): ${(run.analysis_result?.problem || '').slice(0, 400)}`,
   })
-  return { kind: 'fix_deployed' }
+  return { kind: 'fix_deployed', claimed: true }
 }
 
 // Flip a run to 'rejected' and replicate the NO-handler's effects. Does NOT
 // touch GitHub — call closeRejectedPr() for that. Returns { kind } so the
 // caller can pick the right message (and so setup-PR retry vs. permanent
 // decline is observable).
-export async function reconcileRejected(supabase, run, { rejectLabel = 'NO' } = {}) {
+export async function reconcileRejected(supabase, run, { rejectLabel = 'NO', expectedStatus = 'waiting_approval' } = {}) {
   // Foreign-choice rows never opened a PR — permanent decline, no completed_at
   // (matches the original handler; this branch predates the completed_at stamp).
   if (run.run_type === 'setup_posthog_foreign_choice') {
+    // CAS the terminal flip FIRST (see reconcileDeployed) so the connection decline
+    // runs exactly once under a double NO; the loser returns noop.
+    const { data: claimed } = await supabase.from('agent_runs')
+      .update({ status: 'rejected', rollback_reason: 'user_rejected' })
+      .eq('id', run.id).eq('status', expectedStatus).select('id')
+    if (!claimed || claimed.length === 0) return { kind: 'noop', claimed: false }
     await supabase.from('agent_connections')
       .update({ posthog_snippet_declined: true })
       .eq('subscription_id', run.subscription_id)
-    await supabase.from('agent_runs')
-      .update({ status: 'rejected', rollback_reason: 'user_rejected' })
-      .eq('id', run.id)
-    return { kind: 'foreign_declined' }
+    return { kind: 'foreign_declined', claimed: true }
   }
 
   // Stamp completed_at on rejection so the ID-less `note <reason>` flow can order
-  // rejected runs by when they were skipped (not just created_at).
-  await supabase.from('agent_runs').update({
+  // rejected runs by when they were skipped (not just created_at). CAS the flip so a
+  // double NO can't insert two DNA rows or lose the retry-count read-modify-write.
+  const { data: claimed } = await supabase.from('agent_runs').update({
     status: 'rejected',
     rollback_reason: 'user_rejected',
     completed_at: new Date().toISOString(),
-  }).eq('id', run.id)
+  }).eq('id', run.id).eq('status', expectedStatus).select('id')
+  if (!claimed || claimed.length === 0) return { kind: 'noop', claimed: false }
 
   // Setup-PR: offer once more, then permanently decline.
   if (run.run_type === 'setup_posthog') {
@@ -78,12 +90,12 @@ export async function reconcileRejected(supabase, run, { rejectLabel = 'NO' } = 
       await supabase.from('agent_connections')
         .update({ posthog_snippet_retry_count: retryCount + 1 })
         .eq('subscription_id', run.subscription_id)
-      return { kind: 'setup_retry' }
+      return { kind: 'setup_retry', claimed: true }
     }
     await supabase.from('agent_connections')
       .update({ posthog_snippet_declined: true })
       .eq('subscription_id', run.subscription_id)
-    return { kind: 'setup_declined' }
+    return { kind: 'setup_declined', claimed: true }
   }
 
   // Business DNA — record rollback so future runs avoid the pattern.
@@ -93,7 +105,7 @@ export async function reconcileRejected(supabase, run, { rejectLabel = 'NO' } = 
     outcome: 'rollback',
     notes: `User rejected (${rejectLabel}): ${(run.analysis_result?.problem || '').slice(0, 400)}`,
   })
-  return { kind: 'fix_rejected' }
+  return { kind: 'fix_rejected', claimed: true }
 }
 
 // Best-effort GitHub cleanup for a rejected run: close the PR (skip with

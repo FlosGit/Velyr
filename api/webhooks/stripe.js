@@ -197,6 +197,12 @@ export default async function handler(req, res) {
         // Handles trial→active transition: when Stripe ends the trial and the
         // first invoice is paid, s.status flips to 'active' and STATE_MAP carries
         // it through, clearing the trial banner.
+        // Scope to THIS subscription: one Stripe customer is reused across the
+        // lapsed trial sub and the paid conversion sub, so a late/retried event
+        // for the OLD sub must not clobber the row now holding the active one.
+        // Match only when the row is unclaimed (subscription_id IS NULL) or the
+        // event's sub id equals the stored one. The trial→active transition is
+        // the same sub id, so it still lands.
         await supabase.from('agent_subscriptions').update({
           subscription_status:  STATE_MAP[s.status] ?? s.status,
           subscription_id:      s.id,
@@ -207,6 +213,7 @@ export default async function handler(req, res) {
             ? new Date(s.canceled_at * 1000).toISOString()
             : null,
         }).eq('stripe_customer_id', s.customer)
+          .or(`subscription_id.is.null,subscription_id.eq.${s.id}`)
         break
       }
 
@@ -234,6 +241,8 @@ export default async function handler(req, res) {
 
       case 'customer.subscription.deleted': {
         const subscription = event.data.object
+        // Scope to THIS subscription (see customer.subscription.updated): a stale
+        // 'deleted' for the lapsed trial sub must not cancel the active paid row.
         await supabase
           .from('agent_subscriptions')
           .update({
@@ -243,26 +252,38 @@ export default async function handler(req, res) {
               : new Date().toISOString(),
           })
           .eq('stripe_customer_id', subscription.customer)
+          .or(`subscription_id.is.null,subscription_id.eq.${subscription.id}`)
         break
       }
 
       case 'invoice.payment_failed': {
         const invoice = event.data.object
-        await supabase
+        // Scope to the invoice's subscription when derivable (pinned dahlia API:
+        // top-level invoice.subscription is gone → read parent.subscription_details).
+        // If it can't be resolved, fall back to the old customer-only update rather
+        // than risk skipping a legitimate past_due flag.
+        const invSubId = invoice.parent?.subscription_details?.subscription ?? invoice.subscription ?? null
+        let q = supabase
           .from('agent_subscriptions')
           .update({ subscription_status: 'past_due' })
           .eq('stripe_customer_id', invoice.customer)
+        if (invSubId) q = q.or(`subscription_id.is.null,subscription_id.eq.${invSubId}`)
+        await q
         break
       }
 
       case 'invoice.payment_succeeded': {
         const inv = event.data.object
         if (['subscription_cycle', 'subscription_create'].includes(inv.billing_reason)) {
-          await supabase
+          // Scope to the invoice's subscription when derivable (see payment_failed).
+          const invSubId = inv.parent?.subscription_details?.subscription ?? inv.subscription ?? null
+          let q = supabase
             .from('agent_subscriptions')
             .update({ subscription_status: 'active' })
             .eq('stripe_customer_id', inv.customer)
             .neq('subscription_status', 'cancelled')
+          if (invSubId) q = q.or(`subscription_id.is.null,subscription_id.eq.${invSubId}`)
+          await q
         }
         break
       }
