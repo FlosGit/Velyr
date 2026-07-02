@@ -1460,7 +1460,13 @@ async function handleUpdateSettings(req, res, user) {
   const { data, error } = await supabase
     .from('agent_subscriptions').update(updates)
     .eq('auth_user_id', user.id).select().maybeSingle()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) {
+    // 23505 = the public_slug UNIQUE index rejected a slug another user already
+    // holds — the authoritative close to the check-then-write TOCTOU above (see
+    // migration 20260702_public_slug_unique.sql).
+    if (error.code === '23505') return res.status(409).json({ error: 'Slug already taken' })
+    return res.status(500).json({ error: error.message })
+  }
   // maybeSingle (not single): a caller with no subscription row returns null here
   // rather than throwing PGRST116 → a 500. Answer with a clean 404 instead.
   if (!data) return res.status(404).json({ error: 'No subscription found' })

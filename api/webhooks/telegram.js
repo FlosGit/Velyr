@@ -361,11 +361,23 @@ async function applyShopifyDirectWrite(run, conn, chatId) {
   if (!pending.themeId || pending.files.length === 0) {
     return sendMessage(chatId, `❌ I couldn't find the prepared change for this run (missing pending write). Nothing was applied — the agent will retry on the next run.`)
   }
+  // Atomically CLAIM the run before any write so two concurrent YES messages can't
+  // both apply (which would double-write and false-abort each other). The winner
+  // flips shopify_awaiting_approval → 'running'; the loser gets 0 rows and bails.
+  // 'running' is also the honest in-progress status: a crash mid-write leaves it
+  // 'running' (stale-swept to failed), never a dishonest shopify_awaiting_approval,
+  // and applied_write is persisted before the upsert so the change stays recoverable.
+  const { data: claimed } = await supabase.from('agent_runs')
+    .update({ status: 'running' }).eq('id', run.id).eq('status', 'shopify_awaiting_approval').select('id')
+  if (!claimed || claimed.length === 0) return  // another invocation already owns this approval
+
   // Refresh the Shopify access token if needed BEFORE any theme I/O. The merchant
   // typically approves far more than the ~60-min access-token life after the run, so
   // a stored token is usually expired here; without this every delayed YES 401'd.
   const tok = await refreshShopifyToken(supabase, conn)
   if (!tok.ok) {
+    // Un-claim so the merchant can retry after reconnecting / transient recovery.
+    await supabase.from('agent_runs').update({ status: 'shopify_awaiting_approval' }).eq('id', run.id)
     return sendMessage(chatId, tok.reason === 'needs_reconsent'
       ? `🔌 Your Shopify connection has expired — please reconnect your store, then I can apply changes again.`
       : `⚠️ I couldn't reach Shopify to refresh access just now, so I applied nothing. The agent will retry on the next run.`)
@@ -516,8 +528,16 @@ async function executeShopifyDirectRollback(run, conn, chatId) {
   if (!themeId || files.length === 0) {
     return sendMessage(chatId, `❌ I couldn't find what to roll back for this run. Nothing was changed.`)
   }
+  // Atomically CLAIM (see applyShopifyDirectWrite): flip shopify_rollback_pending →
+  // 'running' so two concurrent YES messages can't both roll back; loser bails.
+  const { data: claimed } = await supabase.from('agent_runs')
+    .update({ status: 'running' }).eq('id', run.id).eq('status', 'shopify_rollback_pending').select('id')
+  if (!claimed || claimed.length === 0) return  // another invocation already owns this rollback
+
   const tok = await refreshShopifyToken(supabase, conn)
   if (!tok.ok) {
+    // Un-claim so the merchant can retry after reconnecting / transient recovery.
+    await supabase.from('agent_runs').update({ status: 'shopify_rollback_pending' }).eq('id', run.id)
     return sendMessage(chatId, tok.reason === 'needs_reconsent'
       ? `🔌 Your Shopify connection has expired — please reconnect your store to roll back.`
       : `⚠️ I couldn't reach Shopify to refresh access just now, so I rolled back nothing. Please try again shortly.`)
