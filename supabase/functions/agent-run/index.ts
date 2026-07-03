@@ -2240,6 +2240,38 @@ async function discoverStructurePreview(subscriptionId: string): Promise<any> {
       .from('agent_connections').select('*').eq('subscription_id', subscriptionId).single()
     if (!conn) throw new Error(`No connection for subscription ${subscriptionId}`)
 
+    // Shopify-direct: there is no GitHub installation — the preview comes from the
+    // live theme's file list over the Admin API (the same conversion surface the
+    // weekly run analyzes). Reuses buildThemePreviewGraph on a pseudo-tree so the
+    // node/edge shape is byte-identical to the GitHub-synced theme preview (SO1b).
+    // MUST run before getOctokit below, which would throw on the missing install.
+    // Any failure here throws into the outer catch → honest status:'error' row.
+    if (conn.connection_source === 'shopify_direct') {
+      const tok = await refreshShopifyToken(conn)
+      if (!tok.ok) throw new Error(`Shopify token unavailable for preview: ${tok.message}`)
+      const read = await readShopifyTheme(conn.shopify_shop_domain, conn.shopify_main_theme_id, tok.accessToken)
+      if (!read.ok) throw new Error(`Shopify theme read failed for preview: ${read.message}`)
+      const pseudoTree: TreeEntry[] = read.files.map(f => ({ path: f.filename, type: 'blob' as const, sha: '', size: f.size }))
+      const { nodes, edges, truncated } = buildThemePreviewGraph(pseudoTree)
+      if (nodes.length === 0) {
+        await writeStructurePreview(subscriptionId, {
+          status: 'error', framework: 'shopify-liquid',
+          error_message: 'no templates/sections/snippets files found in the connected theme',
+          nodes: [], edges: [], truncated: false,
+        })
+        return { ok: true, status: 'error' }
+      }
+      await writeStructurePreview(subscriptionId, {
+        status:        truncated ? 'partial' : 'ready',
+        framework:     'shopify-liquid',
+        truncated,
+        error_message: null,
+        nodes,
+        edges,
+      })
+      return { ok: true, status: truncated ? 'partial' : 'ready' }
+    }
+
     // Identical installation-token path as the weekly run (getOctokit) — so
     // private repos work with no extra auth surface.
     const octokit = await getOctokit(conn.github_installation_id)
@@ -3311,6 +3343,47 @@ async function maybeProposeShopifyPostHogSetup(
   return 'proposed'
 }
 
+// ── Site network snapshot (best-effort, shared by all three run pipelines) ────
+// Written after RA3 so rankings are included, and after each pipeline's sparse-
+// graph gate so we never persist a graph too thin to be meaningful. The GitHub
+// React path passes the RA2 import graph; both Shopify pipelines pass
+// shopifyGraph(files) (flat — no edges), so the dashboard's Network surfaces
+// upgrade from the onboarding structure preview to the ranked run graph on every
+// path. unique(run_id) on the table makes this idempotent: a retry hits the
+// unique violation, caught + logged here — never reaches the run return.
+async function writeSiteNetworkSnapshot(
+  subscriptionId: string, runId: string, framework: string,
+  graph: ImportGraph, rankerResult: RankerResult,
+): Promise<void> {
+  try {
+    const rankedByPath = new Map(
+      rankerResult.ranked.map((r, i) => [r.path, { rank: i + 1, reason: r.reason }] as const)
+    )
+    const networkNodes = graph.nodes.map(n => ({
+      id:            n.path,
+      componentName: n.componentName,
+      depth:         n.depth,
+      size:          n.size,
+      rank:          rankedByPath.get(n.path)?.rank   ?? null,
+      rankReason:    rankedByPath.get(n.path)?.reason ?? null,
+    }))
+    const networkEdges = graph.edges.map(e => ({ source: e.from, target: e.to }))
+    const { error: snErr } = await dbWrite(
+      supabase.from('agent_site_network').insert({
+        subscription_id: subscriptionId,
+        run_id:          runId,
+        framework,
+        nodes:           networkNodes ?? [],
+        edges:           networkEdges ?? [],
+      }),
+      DB_TIMEOUT_MS, 'site_network_insert'
+    )
+    if (snErr) slog('warn', 'site_network_write_failed', { runId, error: snErr.message })
+  } catch (snEx) {
+    slog('warn', 'site_network_write_exception', { runId, error: String(snEx) })
+  }
+}
+
 async function processShopifyConnection(conn: any, run: any, subRow: any): Promise<void> {
   const chatId: string | null = subRow?.telegram_chat_id || null
 
@@ -3447,6 +3520,10 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     await notifyInsufficientData(chatId, `your theme had too few conversion-relevant files to analyze (${rankerResult.node_count})`)
     return
   }
+
+  // Site network snapshot — same position as the GitHub path (post-gate, so the
+  // dashboard's Network tab shows the ranked theme graph, not just the preview).
+  await writeSiteNetworkSnapshot(conn.subscription_id, run.id, shopMap.framework, graph, rankerResult)
 
   // Pass 2 — single highest-impact fix (SAME callAIForFix, SAME arg order;
   // shopifyDeepContext adapts the files → DeepContext, nulling React-only fields).
@@ -3717,6 +3794,10 @@ async function processGithubThemeConnection(
     await notifyInsufficientData(chatId, `your theme had too few conversion-relevant files to analyze (${rankerResult.node_count})`)
     return
   }
+
+  // Site network snapshot — same position as the GitHub path (post-gate, so the
+  // dashboard's Network tab shows the ranked theme graph, not just the preview).
+  await writeSiteNetworkSnapshot(conn.subscription_id, run.id, shopMap.framework, graph, rankerResult)
 
   // Pass 2 — single highest-impact fix (SAME callAIForFix, SAME arg order).
   await dbWrite(
@@ -4137,39 +4218,8 @@ async function processConnection(conn: any) {
       return
     }
 
-    // ── Site network snapshot (best-effort) ──────────────────────────────────
-    // Written after RA3 so rankings are included, and after the sparse-graph
-    // gate so we never persist a graph too thin to be meaningful.
-    // unique(run_id) on the table makes this idempotent: a retry hits the
-    // unique violation, caught here and logged — never reaches the run return.
-    try {
-      const rankedByPath = new Map(
-        rankerResult.ranked.map((r, i) => [r.path, { rank: i + 1, reason: r.reason }] as const)
-      )
-      const networkNodes = graph.nodes.map(n => ({
-        id:            n.path,
-        componentName: n.componentName,
-        depth:         n.depth,
-        size:          n.size,
-        rank:          rankedByPath.get(n.path)?.rank   ?? null,
-        rankReason:    rankedByPath.get(n.path)?.reason ?? null,
-      }))
-      const networkEdges = graph.edges.map(e => ({ source: e.from, target: e.to }))
-      const { error: snErr } = await dbWrite(
-        supabase.from('agent_site_network').insert({
-          subscription_id: conn.subscription_id,
-          run_id:          run.id,
-          framework:       mapResult.framework,
-          nodes:           networkNodes ?? [],
-          edges:           networkEdges ?? [],
-        }),
-        DB_TIMEOUT_MS, 'site_network_insert'
-      )
-      if (snErr) slog('warn', 'site_network_write_failed', { runId: run.id, error: snErr.message })
-    } catch (snEx) {
-      slog('warn', 'site_network_write_exception', { runId: run.id, error: String(snEx) })
-    }
-    // ── End site network snapshot ─────────────────────────────────────────────
+    // ── Site network snapshot (best-effort; shared writer) ───────────────────
+    await writeSiteNetworkSnapshot(conn.subscription_id, run.id, mapResult.framework, graph, rankerResult)
 
     // Stage RA4: deep-read the ranked components (+ supporting files) within a
     // byte budget. rankerResult + mapResult.repoTree are threaded in explicitly

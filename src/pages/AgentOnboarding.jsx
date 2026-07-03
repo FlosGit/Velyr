@@ -287,31 +287,53 @@ function Step0({ onNext, onBack }) {
   )
 }
 
-// ─── STEP 1: Website ─────────────────────────────────────────────────────────
-function Step1({ onNext, onBack, navigate }) {
+// ─── STEP: Website / Store URL (shared by both connection types) ──────────────
+// One component, connection-type copy via `variant` — the layout, consent box,
+// and validation are the same concept on both paths, so they must not drift.
+const WEBSITE_STEP_COPY = {
+  github: {
+    heading:     'Your website',
+    intro:       'The agent will analyze your website every week and find conversion improvements.',
+    consent:     'By connecting your GitHub repository, website, and analytics, you authorize Velyr to access and process this data to run the Growth Agent.',
+    label:       'Website URL',
+    placeholder: 'yourwebsite.com',
+    error:       'Please enter your website URL.',
+  },
+  shopify: {
+    heading:     'Your store',
+    intro:       'Your public storefront URL — the domain shoppers visit (your custom domain if you have one). The agent analyzes it every week and finds conversion improvements.',
+    consent:     'By connecting your Shopify store, storefront, and analytics, you authorize Velyr to access and process this data to run the Growth Agent.',
+    label:       'Storefront URL',
+    placeholder: 'yourstore.com',
+    error:       'Please enter your store URL.',
+  },
+}
+
+function WebsiteStep({ variant = 'github', stepLabel, onNext, onBack, navigate }) {
+  const copy = WEBSITE_STEP_COPY[variant] || WEBSITE_STEP_COPY.github
   const [url, setUrl] = useState('')
   const [error, setError] = useState('')
 
   const handleNext = () => {
-    if (!url.trim()) { setError('Please enter your website URL.'); return }
+    if (!url.trim()) { setError(copy.error); return }
     const clean = url.startsWith('http') ? url : `https://${url}`
     onNext({ websiteUrl: clean })
   }
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 6</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>{stepLabel}</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
-        Your website
+        {copy.heading}
       </h2>
       <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 16 }}>
-        The agent will analyze your website every week and find conversion improvements.
+        {copy.intro}
       </p>
 
       {/* Data-processing notice (GDPR Art. 13/14 informed consent) */}
       <div style={{ background: 'rgba(42,92,69,0.05)', border: '1px solid rgba(42,92,69,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 22 }}>
         <p style={{ fontSize: 12.5, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>
-          By connecting your GitHub repository, website, and analytics, you authorize Velyr to access and process this data to run the Growth Agent. See our{' '}
+          {copy.consent} See our{' '}
           {navigate ? (
             <button onClick={() => navigate('/privacy')} style={{ background: 'none', border: 'none', padding: 0, color: C.accent, fontSize: 12.5, fontFamily: 'Jost, sans-serif', fontWeight: 400, cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'rgba(42,92,69,0.35)' }}>
               Privacy Policy
@@ -325,8 +347,8 @@ function Step1({ onNext, onBack, navigate }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div>
-          <label style={{ fontSize: 12, color: C.textLight, display: 'block', marginBottom: 6, letterSpacing: '.03em' }}>Website URL</label>
-          <input className="ob-inp" placeholder="yourwebsite.com" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleNext()} />
+          <label style={{ fontSize: 12, color: C.textLight, display: 'block', marginBottom: 6, letterSpacing: '.03em' }}>{copy.label}</label>
+          <input className="ob-inp" placeholder={copy.placeholder} value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleNext()} />
         </div>
         {error && <p style={{ fontSize: 13, color: C.red }}>{error}</p>}
         <div style={{ height: 8 }} />
@@ -753,10 +775,12 @@ function StepPlatform({ onNext, onBack, subscriptionId }) {
 }
 
 // ─── STEP 5: Analytics (zero-setup) ───────────────────────────────────────────
-function Step3({ onNext, onBack }) {
+// Shared by both flows (Bug 2 parity): the concept — Velyr runs analytics for
+// you — is identical; only the snippet-delivery mechanics differ per variant.
+function Step3({ onNext, onBack, stepLabel = 'Step 5 of 6', variant = 'github' }) {
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 5 of 6</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>{stepLabel}</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Analytics — zero setup
       </h2>
@@ -775,7 +799,11 @@ function Step3({ onNext, onBack }) {
 
       <div style={{ background: 'rgba(28,25,23,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', marginBottom: 24 }}>
         <p style={{ fontSize: 12, color: C.textLight, fontWeight: 300, lineHeight: 1.7 }}>
-          After your first run, you'll receive a snippet via Telegram to paste into your app's entry file (<code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>main.jsx</code>, <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>_app.jsx</code>, or <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>app/layout.tsx</code>).
+          {variant === 'shopify' ? (
+            <>On your first run, the agent asks in Telegram to enable analytics — reply <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>YES</code> and Velyr adds the tracking snippet to your theme's <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>layout/theme.liquid</code> for you. Nothing to paste.</>
+          ) : (
+            <>After your first run, you'll receive a snippet via Telegram to paste into your app's entry file (<code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>main.jsx</code>, <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>_app.jsx</code>, or <code style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, background: 'rgba(28,25,23,0.06)', padding: '1px 5px', borderRadius: 4 }}>app/layout.tsx</code>).</>
+          )}
         </p>
       </div>
 
@@ -950,12 +978,11 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate, connectionType 
 
   // Poll the preview row until terminal. ready/partial with nodes → build;
   // error / timeout / empty → skip (never hang, never show a broken graph).
+  // Both connection types poll: the GitHub path's preview comes from the repo
+  // tree, Shopify-direct's from the live theme's file list (discover_structure
+  // fires after the theme pick), so the graph-reveal beat is shared.
   useEffect(() => {
     if (!subscriptionId) { setPhase('skip'); return }
-    // Shopify-direct has no repo structure preview (discover_structure is fired only
-    // on the GitHub path), so skip the poll and go straight to the outro — never sit
-    // on a spinner waiting for a row that will never exist.
-    if (isShopifyDirect) { setPhase('skip'); return }
     let cancelled = false
     let polls = 0
     const MAX_POLLS = 14   // ~21s at 1.5s
@@ -1016,7 +1043,7 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate, connectionType 
         {phase === 'polling' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '60px 0' }}>
             <div style={{ width: 26, height: 26, border: '2px solid rgba(42,92,69,0.15)', borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-            <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300 }}>Reading your repository structure…</p>
+            <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300 }}>{isShopifyDirect ? 'Reading your theme structure…' : 'Reading your repository structure…'}</p>
           </div>
         )}
 
@@ -1102,54 +1129,8 @@ function ConnectionTypeChoice({ onPick }) {
 }
 
 // ─── SHOPIFY STEP 1: Storefront URL ───────────────────────────────────────────
-// The PostHog $host partition + PageSpeed signal key on website_url, so we collect
-// the public storefront URL (often a custom domain, not *.myshopify.com). Dedicated
-// component (not the GitHub Step1) so the consent copy is Shopify-accurate.
-function ShopifyWebsite({ onNext, onBack, navigate }) {
-  const [url, setUrl] = useState('')
-  const [error, setError] = useState('')
-  const handleNext = () => {
-    if (!url.trim()) { setError('Please enter your store URL.'); return }
-    const clean = url.startsWith('http') ? url : `https://${url}`
-    onNext({ websiteUrl: clean })
-  }
-  return (
-    <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 1 of 4</p>
-      <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
-        Your store
-      </h2>
-      <p style={{ fontSize: 14, color: C.textMuted, fontWeight: 300, lineHeight: 1.7, marginBottom: 16 }}>
-        Your public storefront URL — the domain shoppers visit (your custom domain if you have one).
-      </p>
-      <div style={{ background: 'rgba(42,92,69,0.05)', border: '1px solid rgba(42,92,69,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 22 }}>
-        <p style={{ fontSize: 12.5, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>
-          By connecting your Shopify store, storefront, and analytics, you authorize Velyr to access and process this data to run the Growth Agent. See our{' '}
-          {navigate ? (
-            <button onClick={() => navigate('/privacy')} style={{ background: 'none', border: 'none', padding: 0, color: C.accent, fontSize: 12.5, fontFamily: 'Jost, sans-serif', fontWeight: 400, cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'rgba(42,92,69,0.35)' }}>
-              Privacy Policy
-            </button>
-          ) : (
-            <a href="/privacy" style={{ color: C.accent, fontWeight: 400, textDecoration: 'underline', textDecorationColor: 'rgba(42,92,69,0.35)' }}>Privacy Policy</a>
-          )}
-          {' '}for details.
-        </p>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div>
-          <label style={{ fontSize: 12, color: C.textLight, display: 'block', marginBottom: 6, letterSpacing: '.03em' }}>Storefront URL</label>
-          <input className="ob-inp" placeholder="yourstore.com" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleNext()} />
-        </div>
-        {error && <p style={{ fontSize: 13, color: C.red }}>{error}</p>}
-        <div style={{ height: 8 }} />
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="ob-btn-ghost" onClick={onBack} style={{ flex: '0 0 auto', width: 'auto', padding: '14px 20px' }}>← Back</button>
-          <button className="ob-btn" onClick={handleNext}>Continue →</button>
-        </div>
-      </div>
-    </div>
-  )
-}
+// (Merged into the shared WebsiteStep above — variant="shopify". The PostHog
+// $host partition + PageSpeed signal key on website_url on both paths.)
 
 // ─── SHOPIFY STEP 2: Connect store (Admin OAuth) ──────────────────────────────
 // Calls the shopify-oauth Edge Function ROUTE A (install) → { url }, then redirects
@@ -1206,7 +1187,7 @@ function ShopifyConnect({ onBack, user, subscriptionId, formData, initialError }
 
   return (
     <div>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 4</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 2 of 5</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Connect Shopify
       </h2>
@@ -1304,7 +1285,7 @@ function ShopifyThemePicker({ onNext, onBack, subscriptionId }) {
 
   const heading = (
     <>
-      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 3 of 4</p>
+      <p style={{ fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: C.accent, marginBottom: 12, fontWeight: 400 }}>Step 3 of 5</p>
       <h2 style={{ fontFamily: 'Cormorant Garamond, serif', fontWeight: 400, fontSize: 28, letterSpacing: '-.015em', marginBottom: 8, color: C.text }}>
         Which theme?
       </h2>
@@ -1329,7 +1310,7 @@ function ShopifyThemePicker({ onNext, onBack, subscriptionId }) {
       {themes.length === 0 ? (
         <div style={{ background: 'rgba(42,92,69,0.06)', border: '1px solid rgba(42,92,69,0.2)', borderRadius: 12, padding: '16px 18px', marginBottom: 20 }}>
           <p style={{ fontSize: 13, color: C.text, fontWeight: 400, marginBottom: 4 }}>✅ Connected.</p>
-          <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>Velyr will optimize your <strong style={{ fontWeight: 500 }}>live theme</strong>. You can change the target theme later in Settings.</p>
+          <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>Velyr will optimize your <strong style={{ fontWeight: 500 }}>live theme</strong>.</p>
         </div>
       ) : (
         <>
@@ -1482,22 +1463,15 @@ export default function AgentOnboarding({ navigate }) {
   }, [user])
 
   // Top-of-funnel fork: both branches start at their own step 0 (GitHub → Step0
-  // requirements; Shopify → ShopifyWebsite).
+  // requirements; Shopify → the shared WebsiteStep).
   const pickConnectionType = (type) => { setConnectionType(type); setStep(0) }
 
-  // Shopify branch handlers. ShopifyConnect redirects out and the resume effect lands
-  // the user back at the theme picker (step 2); Telegram reuses handleStep4/finalize.
-  const handleShopifyWebsite = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(1) }
-  const handleShopifyTheme   = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(3) }
-
-  const handleStep0 = ()     => setStep(1)
-  const handleStep1 = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(2) }
-  const handleStep2 = (data) => {
-    setFormData(prev => ({ ...prev, ...data }))
-    setStep(3)
-    // Stage 3: kick off the first-connect structure preview now (RA1, ~2s) so it's
-    // ready by the time the user reaches the build finale. Fire-and-forget; any
-    // failure is non-fatal (the finale times out → skips gracefully to Overview).
+  // Stage 3: kick off the first-connect structure preview (GitHub → RA1 repo tree;
+  // Shopify-direct → live-theme file list) so it's ready by the time the user
+  // reaches the build finale. Fire-and-forget; any failure is non-fatal (the
+  // finale times out → skips gracefully to Overview). Fired after the repo pick
+  // on the GitHub path and after the theme pick on the Shopify path.
+  const fireDiscoverStructure = () => {
     ;(async () => {
       try {
         if (!subscriptionId) return
@@ -1510,6 +1484,20 @@ export default function AgentOnboarding({ navigate }) {
         })
       } catch { /* non-fatal */ }
     })()
+  }
+
+  // Shopify branch handlers. ShopifyConnect redirects out and the resume effect lands
+  // the user back at the theme picker (step 2); Telegram reuses handleStep4/finalize.
+  const handleShopifyWebsite   = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(1) }
+  const handleShopifyTheme     = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(3); fireDiscoverStructure() }
+  const handleShopifyAnalytics = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(4) }
+
+  const handleStep0 = ()     => setStep(1)
+  const handleStep1 = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(2) }
+  const handleStep2 = (data) => {
+    setFormData(prev => ({ ...prev, ...data }))
+    setStep(3)
+    fireDiscoverStructure()
   }
   // Platform-selection step (records hosting_provider only; no run-path effect).
   const handlePlatform = (data) => { setFormData(prev => ({ ...prev, ...data })); setStep(4) }
@@ -1660,7 +1648,7 @@ export default function AgentOnboarding({ navigate }) {
               <>
                 <StepIndicator current={step} total={6} />
                 {step === 0 && <Step0 onNext={handleStep0} onBack={() => setConnectionType(null)} />}
-                {step === 1 && <Step1 onNext={handleStep1} onBack={() => setStep(0)} navigate={navigate} />}
+                {step === 1 && <WebsiteStep variant="github" stepLabel="Step 2 of 6" onNext={handleStep1} onBack={() => setStep(0)} navigate={navigate} />}
                 {step === 2 && <Step2 onNext={handleStep2} onBack={() => setStep(1)} user={user} subscriptionId={subscriptionId} formData={formData} />}
                 {step === 3 && <StepPlatform onNext={handlePlatform} onBack={() => setStep(2)} subscriptionId={subscriptionId} />}
                 {step === 4 && <Step3 onNext={handleStep3} onBack={() => setStep(3)} />}
@@ -1670,11 +1658,12 @@ export default function AgentOnboarding({ navigate }) {
 
             {connectionType === 'shopify_direct' && (
               <>
-                <StepIndicator current={step} total={4} />
-                {step === 0 && <ShopifyWebsite onNext={handleShopifyWebsite} onBack={() => { setConnectionType(null); setShopifyErr('') }} navigate={navigate} />}
+                <StepIndicator current={step} total={5} />
+                {step === 0 && <WebsiteStep variant="shopify" stepLabel="Step 1 of 5" onNext={handleShopifyWebsite} onBack={() => { setConnectionType(null); setShopifyErr('') }} navigate={navigate} />}
                 {step === 1 && <ShopifyConnect onBack={() => { setStep(0); setShopifyErr('') }} user={user} subscriptionId={subscriptionId} formData={formData} initialError={shopifyErr} />}
                 {step === 2 && <ShopifyThemePicker onNext={handleShopifyTheme} onBack={() => setStep(1)} subscriptionId={subscriptionId} />}
-                {step === 3 && <Step4 onNext={handleStep4} onBack={() => setStep(2)} loading={loading} stepLabel="Step 4 of 4" />}
+                {step === 3 && <Step3 onNext={handleShopifyAnalytics} onBack={() => setStep(2)} stepLabel="Step 4 of 5" variant="shopify" />}
+                {step === 4 && <Step4 onNext={handleStep4} onBack={() => setStep(3)} loading={loading} stepLabel="Step 5 of 5" />}
               </>
             )}
             {error && (

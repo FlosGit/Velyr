@@ -20,6 +20,28 @@ export function clusterFromPath(rawPath) {
   const seg = p.split('/')
   const f   = (seg[seg.length - 1] || '').replace(/\.[^.]+$/, '')  // filename w/o ext
 
+  // Shopify theme surfaces (both the direct path and GitHub-synced theme repos).
+  // Checked first: theme dir names are deterministic, and without this the
+  // generic filename rules misfire (layout/theme.liquid → 'utility') or dump
+  // nearly everything into 'other'. Existing clusters only — no new tints.
+  if (/^(layout|templates|sections|snippets)\//.test(p)) {
+    if (seg[0] === 'layout')    return 'core'
+    if (seg[0] === 'templates') {
+      if (seg[1] === 'customers' || /^customers[/.]/.test(seg.slice(1).join('/'))) return 'auth'
+      if (/^(page|blog|article)/.test(f))  return 'content'
+      if (/^(index|password)$/.test(f))    return 'marketing'
+      return 'product'   // product / collection / cart / search — the buying surface
+    }
+    if (seg[0] === 'sections') {
+      if (/header|footer|announcement|nav|menu|drawer/.test(f))                     return 'core'
+      if (/hero|slideshow|banner|promo|testimonial|newsletter|featured|rich-text/.test(f)) return 'marketing'
+      return 'product'
+    }
+    // snippets: shared partials; conversion-critical ones stay on the buying surface
+    if (/product|price|cart|buy|checkout|payment/.test(f)) return 'product'
+    return 'utility'
+  }
+
   if (seg.some(s => s === 'hooks'))                                           return 'utility'
   if (seg.some(s => ['utils','util','lib','helpers','services'].includes(s))) return 'utility'
   if (seg.some(s => ['store','context','state','redux','zustand'].includes(s)))return 'utility'

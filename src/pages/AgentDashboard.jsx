@@ -46,6 +46,33 @@ const STATUS = {
   pending:          { label: 'Pending',           color: C.textLight, bg: 'rgba(26,25,22,0.04)', border: C.border, dot: C.textLight },
   approved:         { label: 'Approved',          color: C.green,     bg: C.greenSoft,  border: 'rgba(30,122,60,0.2)', dot: C.green },
   rolled_back:      { label: 'Rolled Back',       color: C.textMuted, bg: 'rgba(107,100,96,0.07)', border: 'rgba(107,100,96,0.18)', dot: C.textMuted },
+  // Shopify-direct lifecycle — the same concepts as the GitHub statuses above
+  // (the fix is a staged live-theme write instead of a PR), so they share the
+  // same labels and visual language rather than falling through to "Pending".
+  shopify_awaiting_approval: { label: 'Awaiting Approval',   color: C.yellow,    bg: C.yellowSoft, border: C.yellowMid,  dot: C.yellow },
+  shopify_deployed:          { label: 'Deployed',            color: C.green,     bg: C.greenSoft,  border: 'rgba(30,122,60,0.2)', dot: C.green },
+  shopify_rejected:          { label: 'Rejected',            color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
+  shopify_rolled_back:       { label: 'Rolled Back',         color: C.textMuted, bg: 'rgba(107,100,96,0.07)', border: 'rgba(107,100,96,0.18)', dot: C.textMuted },
+  shopify_rollback_pending:  { label: 'Rollback Proposed',   color: C.yellow,    bg: C.yellowSoft, border: C.yellowMid,  dot: C.yellow },
+  shopify_concurrency_abort: { label: 'Aborted — Theme Edited', color: C.textMuted, bg: 'rgba(107,100,96,0.07)', border: 'rgba(107,100,96,0.18)', dot: C.textMuted },
+  shopify_needs_reconsent:   { label: 'Reconnect Shopify',   color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
+  shopify_token_failed:      { label: 'Failed',              color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
+  shopify_theme_read_failed: { label: 'Failed',              color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
+}
+
+// Cross-path status groups. The Shopify-direct lifecycle mirrors the GitHub one
+// (shopify_awaiting_approval ≙ waiting_approval, shopify_deployed ≙ deployed, …);
+// every "is it pending / is it live" check goes through these helpers so the two
+// paths can't drift apart again.
+const isAwaitingApproval = r => r.status === 'waiting_approval' || r.status === 'shopify_awaiting_approval'
+const isLive             = r => r.status === 'deployed' || r.status === 'approved' || r.status === 'shopify_deployed'
+// Runs-page filter chips → the statuses each one matches.
+const STATUS_GROUP = {
+  deployed:         ['deployed', 'approved', 'shopify_deployed'],
+  waiting_approval: ['waiting_approval', 'shopify_awaiting_approval', 'shopify_rollback_pending'],
+  rejected:         ['rejected', 'shopify_rejected'],
+  rolled_back:      ['rolled_back', 'shopify_rolled_back'],
+  failed:           ['failed', 'shopify_token_failed', 'shopify_theme_read_failed', 'shopify_needs_reconsent'],
 }
 
 const PAGE_TYPE_EMOJI = {
@@ -54,7 +81,7 @@ const PAGE_TYPE_EMOJI = {
 }
 
 const AGENT_STEPS = [
-  { id:'fetch_repo',  label:'Fetching repo',           desc:'Reading GitHub repository structure' },
+  { id:'fetch_repo',  label:'Fetching source',         desc:'Reading your repo or theme structure' },
   { id:'fetch_ph',    label:'Pulling analytics',       desc:'Loading PostHog pageview & session data' },
   { id:'scan_comp',   label:'Scanning competitors',    desc:'Checking tracked competitor sites for changes' },
   { id:'seasonal',    label:'Checking seasonal',       desc:'Picking the right priority for this month' },
@@ -63,7 +90,7 @@ const AGENT_STEPS = [
   { id:'analyze',     label:'Finding biggest issue',   desc:'Claude analyzing where visitors drop off' },
   { id:'screenshot',  label:'Taking before screenshot',desc:'Capturing the page before any changes' },
   { id:'write_fix',   label:'Writing fix',             desc:'Editing file and generating patch' },
-  { id:'open_pr',     label:'Opening pull request',    desc:'Pushing branch and creating PR on GitHub' },
+  { id:'open_pr',     label:'Preparing fix',           desc:'Opening a PR (GitHub) or staging the theme change (Shopify)' },
   { id:'notify',      label:'Sending notification',    desc:'Telegram message — reply YES or NO' },
 ]
 
@@ -259,6 +286,10 @@ function deriveAgentStep(run) {
     case 'approved':
     case 'rejected':
     case 'rolled_back':
+    case 'shopify_awaiting_approval':
+    case 'shopify_deployed':
+    case 'shopify_rejected':
+    case 'shopify_rolled_back':
       return lastIdx
     case 'failed':
       return midIdx
@@ -343,7 +374,7 @@ function RunHistoryBar({runs}) {
     <div style={{display:'flex',gap:3,alignItems:'flex-end',height:24}}>
       {last12.map((run,i) => {
         const s = STATUS[run.status]||STATUS.pending
-        const h = run.status==='deployed'||run.status==='approved'?24:run.status==='waiting_approval'?16:run.status==='failed'||run.status==='rejected'?8:14
+        const h = isLive(run)?24:isAwaitingApproval(run)?16:run.status==='failed'||run.status==='rejected'||run.status==='shopify_rejected'?8:14
         return <div key={run.id} title={`${run.status} · ${timeAgo(run.created_at)}`} style={{
           flex:1,height:h,background:s.dot,borderRadius:2,
           opacity:0.4+(i/12)*0.6,
@@ -362,9 +393,9 @@ function LiveActivityStream({runs, activeRun}) {
   // Fallback label is the status (not a repeated "Run completed") per the
   // real-timeline rule.
   runs.slice(0,8).forEach(run => {
-    // Pending PRs live in PRMissionControl + the header badge; this stream is
-    // "actions taken", so skip running + waiting_approval to avoid duplication.
-    if (run.status==='running' || run.status==='waiting_approval') return
+    // Pending fixes live in PRMissionControl + the header badge; this stream is
+    // "actions taken", so skip running + awaiting-approval to avoid duplication.
+    if (run.status==='running' || isAwaitingApproval(run)) return
     const analysis = run.analysis_result||{}
     streamItems.push({
       id: run.id,
@@ -429,8 +460,15 @@ function LiveActivityStream({runs, activeRun}) {
 }
 
 // ─── PR MISSION CONTROL ───────────────────────────────────────────────────────
+// One card for both delivery mechanisms: a GitHub run carries pr_number/pr_url
+// (fix = pull request), a Shopify-direct run carries neither (fix = staged
+// live-theme write, applied on the Telegram YES). Same layout, honest labels.
 function PRMissionControl({run}) {
   const analysis = run.analysis_result || {}
+  const isThemeWrite = run.status === 'shopify_awaiting_approval'
+  // Analytics Setup-PR / setup-write runs carry no analysis_result — label them
+  // honestly instead of defaulting to "Conversion issue detected" (both paths).
+  const isSetup = run.run_type === 'setup_posthog' || run.run_type === 'setup_posthog_foreign_choice'
   // Only show a confidence figure when the agent actually returned one — no
   // fabricated default (the old code hardcoded 88).
   const rawConf = analysis.confidence_score ?? analysis.confidence
@@ -453,14 +491,23 @@ function PRMissionControl({run}) {
       }}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <span className="pulse-dot" style={{width:7,height:7,borderRadius:'50%',background:C.yellow,display:'inline-block',flexShrink:0}}/>
-          <SectionLabel style={{color:C.yellow,marginBottom:0}}>Awaiting your approval · PR #{run.pr_number||'—'}</SectionLabel>
+          <SectionLabel style={{color:C.yellow,marginBottom:0}}>
+            {isThemeWrite ? 'Awaiting your approval · Theme fix' : `Awaiting your approval · PR #${run.pr_number||'—'}`}
+          </SectionLabel>
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-          <a href={run.pr_url} target="_blank" rel="noreferrer" className="v-press" style={{
-            fontSize:11,color:C.accent,background:C.accentSoft,
-            border:`1px solid ${C.accentMid}`,borderRadius:6,padding:'4px 10px',
-            textDecoration:'none',fontWeight:500,
-          }}>View on GitHub ↗</a>
+          {isThemeWrite ? (
+            <span style={{
+              fontSize:11,color:C.accent,background:C.accentSoft,
+              border:`1px solid ${C.accentMid}`,borderRadius:6,padding:'4px 10px',fontWeight:500,
+            }}>Applied to your live theme on approval</span>
+          ) : (
+            <a href={run.pr_url} target="_blank" rel="noreferrer" className="v-press" style={{
+              fontSize:11,color:C.accent,background:C.accentSoft,
+              border:`1px solid ${C.accentMid}`,borderRadius:6,padding:'4px 10px',
+              textDecoration:'none',fontWeight:500,
+            }}>View on GitHub ↗</a>
+          )}
           <span style={{fontSize:11,color:C.yellow,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:6,padding:'4px 10px'}}>
             Reply <code style={{fontFamily:'DM Mono,monospace',fontSize:10}}>YES</code> or <code style={{fontFamily:'DM Mono,monospace',fontSize:10}}>NO</code> on Telegram
           </span>
@@ -471,7 +518,7 @@ function PRMissionControl({run}) {
         <div>
           <SectionLabel style={{marginBottom:6}}>Problem identified</SectionLabel>
           <p style={{fontSize:13,fontWeight:500,color:C.text,lineHeight:1.5,marginBottom:6}}>
-            {analysis.problem || 'Conversion issue detected'}
+            {analysis.problem || (isSetup ? 'Analytics not installed yet' : 'Conversion issue detected')}
           </p>
           {analysis.data_insight && (
             <p style={{fontSize:11,color:C.textMuted,lineHeight:1.55}}>{analysis.data_insight}</p>
@@ -481,7 +528,7 @@ function PRMissionControl({run}) {
         <div>
           <SectionLabel style={{marginBottom:6}}>Fix applied</SectionLabel>
           <p style={{fontSize:12,color:C.text,lineHeight:1.5,marginBottom:8}}>
-            {analysis.solution || 'Code changes applied'}
+            {analysis.solution || (isSetup ? 'One-time install of the Velyr analytics snippet' : 'Code changes applied')}
           </p>
           {analysis.file_to_edit && (
             <code style={{fontSize:11,color:C.accent,background:C.accentSoft,padding:'3px 8px',borderRadius:5,border:`1px solid ${C.accentMid}`,display:'block',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
@@ -530,16 +577,16 @@ function PRMissionControl({run}) {
 // when their datum exists — never a hollow placeholder.
 function KPIBar({runs, learnings}) {
   const total    = runs.length
-  const deployed = runs.filter(r=>r.status==='deployed'||r.status==='approved').length
+  const deployed = runs.filter(isLive).length
 
   // FIX #12: proper Date object comparison instead of fragile ISO string comparison
   const oneWeekAgo = new Date(Date.now() - 7 * 86400000)
-  const thisWeek = runs.filter(r=>new Date(r.created_at)>oneWeekAgo&&(r.status==='deployed'||r.status==='approved')).length
+  const thisWeek = runs.filter(r=>new Date(r.created_at)>oneWeekAgo&&isLive(r)).length
 
   const wins    = (learnings||[]).filter(l=>l.outcome==='positive'&&l.delta)
   const avgLift = wins.length>0 ? Math.round(wins.reduce((s,l)=>s+(l.delta||0),0)/wins.length) : null
 
-  const sparkData = [...runs].slice(0,8).reverse().map(r=>r.status==='deployed'||r.status==='approved'?1:0)
+  const sparkData = [...runs].slice(0,8).reverse().map(r=>isLive(r)?1:0)
 
   const kpis = [
     {
@@ -587,8 +634,8 @@ function KPIBar({runs, learnings}) {
 // Pure builder so callers (OverviewPage) can ask "are there any insights?"
 // without duplicating the logic — used to hide the column cleanly when empty.
 function buildTopInsights({runs, funnelPages, learnings, impactMetrics}) {
-  const deployed = runs.filter(r=>r.status==='deployed'||r.status==='approved')
-  const pending  = runs.filter(r=>r.status==='waiting_approval')
+  const deployed = runs.filter(isLive)
+  const pending  = runs.filter(isAwaitingApproval)
 
   const topDropOff = [...funnelPages].filter(p=>p.drop_off_score>0).sort((a,b)=>b.drop_off_score-a.drop_off_score)[0]
 
@@ -683,7 +730,7 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
   const activeRun = runs.find(r=>r.status==='running')
   const isRunning = !!activeRun
   const lastRun   = runs[0]||null
-  const pending   = runs.filter(r=>r.status==='waiting_approval')
+  const pending   = runs.filter(isAwaitingApproval)
 
   // "Run now" gating: blocked while a run is running/awaiting approval (this is
   // also what stops a double-run right after the post-onboarding auto-run), or
@@ -707,7 +754,7 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
   const weekMs = 7*24*3600000
   const weekProgress = Math.min(100,Math.max(0,((now-(new Date(target.getTime()-weekMs)))/weekMs)*100))
 
-  const deployed = runs.filter(r=>r.status==='deployed'||r.status==='approved').length
+  const deployed = runs.filter(isLive).length
   const total    = runs.length
   const rate     = total>0?Math.round((deployed/total)*100):0
 
@@ -892,7 +939,7 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
 // ─── OVERVIEW PAGE ────────────────────────────────────────────────────────────
 function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, siteNetwork, structurePreview, websiteUrl, onOpenNetwork}) {
   const activeRun = runs.find(r=>r.status==='running')
-  const pendingRun = runs.find(r=>r.status==='waiting_approval')
+  const pendingRun = runs.find(isAwaitingApproval)
   // Hide the Top Insights column entirely when there's nothing to show (day-1),
   // letting the activity stream span full width — no onboarding-copy placeholder.
   const hasInsights = buildTopInsights({runs, funnelPages, learnings, impactMetrics}).length > 0
@@ -901,7 +948,7 @@ function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics
   // websiteUrl (no extra fetch); same transform the Network tab uses. Falls back to
   // site_structure_preview (onboarding's discover_structure) so the map appears
   // before the first run populates agent_site_network. Null only when neither exists.
-  const networkInflight = runs.find(r=>r.status==='running') || runs.find(r=>r.status==='waiting_approval') || null
+  const networkInflight = runs.find(r=>r.status==='running') || runs.find(isAwaitingApproval) || null
   const networkRow  = siteNetwork || structurePreview
   const isPreview   = !siteNetwork && !!structurePreview
   const networkData = buildNetworkData(networkRow, { domain: hubDomainFromUrl(websiteUrl), inflightRun: networkInflight })
@@ -1021,7 +1068,8 @@ function RunsPage({runs, loading, onSelect, learnings=[]}) {
   // Outcomes lead; error/rejection states trail (don't headline failure).
   const filters = ['all','deployed','waiting_approval','rejected','rolled_back','failed']
 
-  const filtered = filter==='all'?runs:runs.filter(r=>r.status===filter)
+  // Group-aware: each chip matches its GitHub status AND its Shopify-direct twin(s).
+  const filtered = filter==='all'?runs:runs.filter(r=>(STATUS_GROUP[filter]||[filter]).includes(r.status))
 
   function weekLabel(iso) {
     const d=new Date(iso),now=new Date(),diff=Math.floor((now-d)/86400000)
@@ -1305,9 +1353,9 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
   const lastRun   = runs[0] || null
 
   // Most-recent active run drives fix-in-flight + the panel's PR link.
-  // runs is created_at desc; running takes priority over waiting_approval.
+  // runs is created_at desc; running takes priority over awaiting-approval.
   const inflightRun = runs.find(r => r.status === 'running')
-                   || runs.find(r => r.status === 'waiting_approval')
+                   || runs.find(isAwaitingApproval)
                    || null
 
   // Fall back to the onboarding structure preview before the first run writes
@@ -1392,8 +1440,8 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
             </p>
             <p style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7, maxWidth: 340 }}>
               {isRunning
-                ? 'The agent is building an import graph of your repository. Check back in a few minutes.'
-                : "Your first network graph will appear after Monday's run. The agent maps every route, component, and relationship in your codebase."
+                ? "The agent is mapping your site's structure. Check back in a few minutes."
+                : "Your first network graph will appear after Monday's run. The agent maps every page, section, and component of your site and how they connect."
               }
             </p>
           </div>
@@ -2395,7 +2443,7 @@ export default function AgentDashboard({ navigate }) {
     navigate('/agent/login')
   }
 
-  const pending = runs.filter(r=>r.status==='waiting_approval').length
+  const pending = runs.filter(isAwaitingApproval).length
 
   if(authLoading) return (
     <>
