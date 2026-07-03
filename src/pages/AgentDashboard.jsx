@@ -155,6 +155,8 @@ const CSS = `
   .btn-primary:hover:not(:disabled) { background:${C.inkHover}; }
   .btn-ghost { background:none; border:1px solid ${C.borderMed}; color:#4A5248; }
   .btn-ghost:hover:not(:disabled) { background:#F7F5EC; }
+  .btn-danger-ghost { background:none; border:1px solid ${C.dangerBorder}; color:${C.redText}; }
+  .btn-danger-ghost:hover:not(:disabled) { background:#F6EBE8; }
   .link-green { color:${C.accent}; font-weight:500; cursor:pointer; text-decoration:none; }
   .link-green:hover { text-decoration: underline; }
   .card-hover { transition: box-shadow .22s ease, transform .18s ease, border-color .22s ease; }
@@ -1203,7 +1205,11 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
 // Real data only: agent_funnel_pages rows (page_path, views_7d, drop_off_score,
 // page_type, ai_insight). Leverage badges are derived from drop-off severity;
 // the dark "highest leverage" card is the top drop-off page with traffic.
-function FunnelPage({funnelPages, loading}) {
+function FunnelPage({funnelPages, loading, subscription, onSaveSettings}) {
+  // Hooks before the early returns below (hook order must never vary).
+  const [schedSaving, setSchedSaving] = useState(false)
+  const [schedError, setSchedError]   = useState(null)
+
   if(loading) return <div style={{padding:48,display:'flex',justifyContent:'center'}}><Spinner/></div>
 
   const banner = (
@@ -1245,6 +1251,22 @@ function FunnelPage({funnelPages, loading}) {
     ...[...withTraffic].sort((a,b)=>(b.drop_off_score||0)-(a.drop_off_score||0)||b.views_7d-a.views_7d),
     ...[...noTraffic].sort((a,b)=>a.page_path.localeCompare(b.page_path)),
   ]
+
+  // "Fix in next run" — pins biggestOpp.page_path on agent_subscriptions.
+  // focus_page_path (via update-settings); the next weekly run biases toward
+  // it, then consumes the pin. Toggling off un-schedules.
+  const pinnedPath = subscription?.focus_page_path || null
+  const scheduled  = !!biggestOpp && pinnedPath === biggestOpp.page_path
+
+  async function toggleSchedule() {
+    if (!biggestOpp || schedSaving) return
+    setSchedSaving(true); setSchedError(null)
+    try {
+      const result = await onSaveSettings({ focus_page_path: scheduled ? null : biggestOpp.page_path })
+      if (result?.error) setSchedError(result.error)
+    } catch (e) { setSchedError(e.message || 'Could not save') }
+    finally { setSchedSaving(false) }
+  }
 
   return (
     <div>
@@ -1291,13 +1313,37 @@ function FunnelPage({funnelPages, loading}) {
                 {biggestOpp.ai_insight?` ${biggestOpp.ai_insight}`:''}
               </p>
               <p style={{fontSize:11.5,color:C.sideFaint,marginTop:12,paddingTop:12,borderTop:'1px solid rgba(255,255,255,.12)'}}>
-                The agent prioritizes this page in its next run.
+                {scheduled
+                  ? 'Pinned — the agent focuses here on its next run, then the pin clears.'
+                  : 'The agent prioritizes high-leverage pages first.'}
               </p>
+              <button className="btn v-press" onClick={toggleSchedule} disabled={schedSaving} style={{
+                fontSize:12.5,fontWeight:500,border:'none',borderRadius:9,padding:'10px 18px',
+                marginTop:16,width:'100%',
+                background:scheduled?'#C9E3D2':C.bgChip,color:C.ink,
+                opacity:schedSaving?.7:1,cursor:schedSaving?'wait':'pointer',
+                transition:'background .25s ease',
+              }}>
+                {schedSaving?'…':scheduled?'Scheduled for next run ✓':'Fix in next run'}
+              </button>
+              {pinnedPath && !scheduled && (
+                <p className="reveal-in" style={{fontSize:11,color:C.sideFaint,marginTop:8,lineHeight:1.5}}>
+                  Currently pinned: <span style={{fontFamily:FONT.mono}}>{pinnedPath}</span> — scheduling this page replaces it.
+                </p>
+              )}
+              {schedError && <p className="reveal-in" style={{fontSize:11,color:'#E8B4A6',marginTop:8,lineHeight:1.5}}>{schedError}</p>}
             </>
           ) : (
-            <p style={{fontSize:12.5,lineHeight:1.6,color:'#C7CFC4'}}>
-              No drop-off hotspot detected yet. Once your pages collect traffic, the biggest leak shows up here.
-            </p>
+            <>
+              <p style={{fontSize:12.5,lineHeight:1.6,color:'#C7CFC4'}}>
+                No drop-off hotspot detected yet. Once your pages collect traffic, the biggest leak shows up here.
+              </p>
+              {pinnedPath && (
+                <p style={{fontSize:11.5,color:C.sideFaint,marginTop:12,paddingTop:12,borderTop:'1px solid rgba(255,255,255,.12)'}}>
+                  Pinned for the next run: <span style={{fontFamily:FONT.mono}}>{pinnedPath}</span>
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1344,12 +1390,41 @@ function DNAPage({ subscriptionId }) {
   useEffect(() => {
     if (!subscriptionId) return
     setLoading(true)
+    // select('*') (not an explicit column list) so a deployment that predates
+    // the user_verdict migration still loads — the property is just undefined.
     supabase.from('agent_business_dna')
-      .select('id, fix_type, outcome, notes, created_at, run_id')
+      .select('*')
       .eq('subscription_id', subscriptionId)
       .order('created_at', { ascending: false }).limit(100)
       .then(({ data }) => { setDna(data || []); setLoading(false) })
   }, [subscriptionId])
+
+  // Confirm / Wrong verdicts: optimistic local update, reverted on API failure.
+  // 'rejected' entries are excluded from the agent's prompt on future runs.
+  const [verdictBusy, setVerdictBusy]   = useState(null)  // dna id in flight
+  const [verdictError, setVerdictError] = useState(null)
+
+  async function setVerdict(entry, verdict) {
+    if (verdictBusy) return
+    setVerdictBusy(entry.id); setVerdictError(null)
+    const prev = dna
+    setDna(d => d.map(x => x.id === entry.id ? { ...x, user_verdict: verdict } : x))
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/agent/run?action=dna_verdict', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dna_id: entry.id, verdict }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.success) throw new Error(data.error || 'Could not save')
+    } catch (e) {
+      setDna(prev)
+      setVerdictError(e.message || 'Could not save — try again.')
+    } finally {
+      setVerdictBusy(null)
+    }
+  }
 
   const grouped = useMemo(() => {
     const out = { success: [], rollback: [], pending: [] }
@@ -1359,7 +1434,7 @@ function DNAPage({ subscriptionId }) {
 
   const banner = (
     <InfoBanner iconPath="M6 3c0 6 12 6 12 12M18 3c0 6-12 6-12 12M6 15c0 3 2 6 6 6M18 15c0 3-2 6-6 6">
-      What the agent has learned about your business — every fix is checked against these facts.
+      What the agent has learned — confirm a learning to reinforce it, or mark it wrong and the agent ignores it from the next run on.
     </InfoBanner>
   )
 
@@ -1380,6 +1455,12 @@ function DNAPage({ subscriptionId }) {
     <div style={{maxWidth:800}}>
       {banner}
 
+      {verdictError && (
+        <p className="reveal-in" style={{fontSize:12,color:C.redText,background:C.redBg,border:`1px solid ${C.dangerBorder}`,borderRadius:8,padding:'8px 14px',marginBottom:14}}>
+          {verdictError}
+        </p>
+      )}
+
       {dna.length === 0 && (
         <Card className="fade-up" style={{padding:'40px 24px',textAlign:'center'}}>
           <p style={{fontSize:13,color:C.textMuted}}>
@@ -1395,12 +1476,15 @@ function DNAPage({ subscriptionId }) {
           <Card key={g.key} className="fade-up" style={{padding:'20px 26px',marginBottom:14,animationDelay:`${gi*0.06}s`}}>
             <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>{g.title}</p>
             <p style={{fontSize:11.5,color:C.label,margin:'3px 0 4px'}}>{g.sub}</p>
-            {entries.map((e,i)=>(
+            {entries.map((e,i)=>{
+              const busy = verdictBusy === e.id
+              const rejected = e.user_verdict === 'rejected'
+              return (
               <div key={e.id} style={{
                 display:'grid',gridTemplateColumns:'1fr auto',gap:16,alignItems:'center',
                 padding:'13px 0',borderBottom:i<entries.length-1?`1px solid ${C.borderSoft}`:'none',
               }}>
-                <div style={{minWidth:0}}>
+                <div style={{minWidth:0,opacity:rejected?.55:1,transition:'opacity .2s ease'}}>
                   <p style={{fontSize:13,lineHeight:1.5,color:C.text}}>
                     {e.notes || e.fix_type.replace(/_/g,' ')}
                   </p>
@@ -1409,11 +1493,40 @@ function DNAPage({ subscriptionId }) {
                     <span style={{marginLeft:8}}>{new Date(e.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>
                   </div>
                 </div>
-                <span style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:11,color:g.mark.color,fontWeight:500,whiteSpace:'nowrap'}}>
-                  <span style={{fontWeight:600}}>{g.mark.sym}</span>{g.mark.label}
-                </span>
+                <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:8}}>
+                  <span style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:11,color:g.mark.color,fontWeight:500,whiteSpace:'nowrap',opacity:rejected?.55:1}}>
+                    <span style={{fontWeight:600}}>{g.mark.sym}</span>{g.mark.label}
+                  </span>
+                  {e.user_verdict === 'confirmed' ? (
+                    <span className="reveal-in" style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:11,color:C.greenText,fontWeight:500,whiteSpace:'nowrap'}}>
+                      ✓ Confirmed by you
+                      <button className="btn" onClick={()=>setVerdict(e,null)} disabled={busy} style={{
+                        background:'none',border:'none',padding:0,fontSize:10.5,color:C.textLight,
+                        textDecoration:'underline',opacity:busy?.5:1,fontFamily:FONT.sans,
+                      }}>Undo</button>
+                    </span>
+                  ) : rejected ? (
+                    <span className="reveal-in" style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:11,color:C.textMuted,whiteSpace:'nowrap'}}>
+                      Ignored by agent
+                      <button className="btn" onClick={()=>setVerdict(e,null)} disabled={busy} style={{
+                        background:'none',border:'none',padding:0,fontSize:10.5,color:C.textLight,
+                        textDecoration:'underline',opacity:busy?.5:1,fontFamily:FONT.sans,
+                      }}>Undo</button>
+                    </span>
+                  ) : (
+                    <div style={{display:'flex',gap:6}}>
+                      <button className="btn btn-primary v-press" onClick={()=>setVerdict(e,'confirmed')} disabled={busy} style={{
+                        fontSize:11,fontWeight:500,borderRadius:7,padding:'6px 13px',opacity:busy?.6:1,
+                      }}>{busy?'…':'Confirm'}</button>
+                      <button className="btn btn-danger-ghost" onClick={()=>setVerdict(e,'rejected')} disabled={busy} style={{
+                        fontSize:11,borderRadius:7,padding:'6px 13px',opacity:busy?.6:1,
+                      }}>Wrong</button>
+                    </div>
+                  )}
+                </div>
               </div>
-            ))}
+              )
+            })}
           </Card>
         )
       })}
@@ -2271,7 +2384,9 @@ export default function AgentDashboard({ navigate }) {
       headers:{ 'Authorization':`Bearer ${token}`, 'Content-Type':'application/json' },
       body: JSON.stringify(payload),
     })
-    const data = await res.json()
+    // Non-JSON response (proxy/HTML error page, dev server without /api) must
+    // surface as a clean "Save failed", not an unhandled parse throw.
+    const data = await res.json().catch(() => ({}))
     if (data?.success && data.subscription) {
       setSubscription(prev => ({ ...prev, ...data.subscription }))
       return { success: true }
@@ -2564,7 +2679,8 @@ export default function AgentDashboard({ navigate }) {
                   )}
 
                   {activePage==='funnel'&&(
-                    <FunnelPage funnelPages={funnelPages} loading={loading}/>
+                    <FunnelPage funnelPages={funnelPages} loading={loading}
+                      subscription={subscription} onSaveSettings={handleSaveSettings}/>
                   )}
 
                   {activePage==='dna'&&(

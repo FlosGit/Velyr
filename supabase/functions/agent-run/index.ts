@@ -2681,16 +2681,24 @@ async function loadBusinessDNA(subscriptionId: string) {
     .order('created_at', { ascending: false }).limit(50)
   if (!data || data.length === 0) return null
 
+  // Owner verdicts (dashboard DNA tab): entries the owner marked wrong are
+  // excluded from the agent's context entirely; confirmed ones are labelled so
+  // the model can weight them. Rows written before the user_verdict migration
+  // simply lack the property (undefined ≠ 'rejected') and stay included.
+  const active = data.filter((d: any) => d.user_verdict !== 'rejected')
+  if (active.length === 0) return null
+
   const grouped: Record<string, { success: number; rollback: number; pending: number }> = {}
-  for (const d of data) {
+  for (const d of active) {
     if (!grouped[d.fix_type]) grouped[d.fix_type] = { success: 0, rollback: 0, pending: 0 }
     grouped[d.fix_type][d.outcome as 'success'|'rollback'|'pending']++
   }
-  const neverDoAgain = data.filter((d: any) => d.outcome === 'rollback').slice(0, 8)
-    .map((d: any) => `- ${d.fix_type}: ${d.notes || 'no note'}`).join('\n')
-  const whatWorks = data.filter((d: any) => d.outcome === 'success').slice(0, 8)
-    .map((d: any) => `- ${d.fix_type}: ${d.notes || 'no note'}`).join('\n')
-  return { grouped, neverDoAgain, whatWorks, entries: data }
+  const dnaLine = (d: any) => `- ${d.fix_type}: ${d.notes || 'no note'}${d.user_verdict === 'confirmed' ? ' (owner-confirmed)' : ''}`
+  const neverDoAgain = active.filter((d: any) => d.outcome === 'rollback').slice(0, 8)
+    .map(dnaLine).join('\n')
+  const whatWorks = active.filter((d: any) => d.outcome === 'success').slice(0, 8)
+    .map(dnaLine).join('\n')
+  return { grouped, neverDoAgain, whatWorks, entries: active }
 }
 
 async function recordDNA(subscriptionId: string, runId: string | null, fixType: string, outcome: 'success'|'rollback'|'pending', notes: string) {
@@ -2702,6 +2710,34 @@ async function recordDNA(subscriptionId: string, runId: string | null, fixType: 
     }),
     DB_TIMEOUT_MS, 'business_dna_insert'
   ).catch((e: any) => console.warn(`[dna] record failed for ${subscriptionId}:`, e?.message))
+}
+
+// ─── OWNER FOCUS PAGE ("Fix in next run", Funnel tab) ─────────────────────────
+// The owner pins one page via the dashboard (agent_subscriptions.focus_page_path,
+// written by api/agent/run.js handleUpdateSettings). The next run biases the
+// Pass-1 ranker context + the Pass-2 prompt toward it, then consumes (clears)
+// the pin after Pass 2 so it can't dominate every following week. On a
+// deployment where the migration hasn't been applied yet, the column select
+// errors → treated as "no focus" (never fatal to the run).
+async function loadFocusPage(subscriptionId: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.from('agent_subscriptions')
+      .select('focus_page_path').eq('id', subscriptionId).single()
+    if (error) return null
+    const p = (data?.focus_page_path || '').trim()
+    return p.startsWith('/') && p.length <= 200 ? p : null
+  } catch {
+    return null
+  }
+}
+
+async function clearFocusPage(subscriptionId: string) {
+  // Best-effort + bounded, mirroring recordDNA — a clear-hang must not zombie
+  // the run; worst case the pin survives one extra week.
+  await dbWrite(
+    supabase.from('agent_subscriptions').update({ focus_page_path: null }).eq('id', subscriptionId),
+    DB_TIMEOUT_MS, 'focus_page_clear'
+  ).catch((e: any) => console.warn(`[focus] clear failed for ${subscriptionId}:`, e?.message))
 }
 
 // Email notifications removed — Telegram is the sole customer notification
@@ -2857,6 +2893,7 @@ async function callAIForFix(
   revenue: any,
   previousFixes: string[],
   guardrails: any,
+  focusPagePath: string | null = null,
 ): Promise<FixResult> {
   const a = analytics?.last7Days
 
@@ -2900,6 +2937,14 @@ ${funnelAnalysis.funnelPages.filter((p: any) => p.views > 0).map((p: any) => `- 
   // dropping brand-safety would be a regression — see RA5 flag).
   const guardrailsContext = guardrails ? `BRAND GUARDRAILS — FOLLOW THESE:\n${guardrails.tone ? `- Tone: ${guardrails.tone}\n` : ''}${guardrails.forbidden_patterns?.length ? `- NEVER: ${guardrails.forbidden_patterns.join(', ')}\n` : ''}${guardrails.protected_elements?.length ? `- NEVER change: ${guardrails.protected_elements.join(', ')}\n` : ''}${guardrails.custom_rules || ''}` : ''
 
+  // Owner priority ("Fix in next run", Funnel tab) — OUR user's explicit,
+  // server-validated instruction, so like the brand guardrails it sits OUTSIDE
+  // the untrusted-data sentinels. It biases, never forces: Pass 2 may still
+  // pick elsewhere (or skip) if nothing credible exists on the pinned page.
+  const ownerFocusContext = focusPagePath
+    ? `OWNER PRIORITY: the site owner explicitly asked THIS run to focus on the page "${focusPagePath}". If a credible conversion problem exists on that page (or in a component that renders it), choose it as the #1 problem. Only pick a different area if nothing plausible can be improved there — and say so in ranked_higher_than.`
+    : ''
+
   // Per-BLOCK sentinels: each untrusted block gets its OWN fresh uuid, generated
   // per Pass-2 call. A shared id would let an injection in any one block close
   // the single outer sentinel and have everything after it read as instructions
@@ -2937,7 +2982,7 @@ ${sealed(`[10] ${revenueContext || 'REVENUE: not connected'}`)}
 
 ${sealed(`[11] ${previousFixesContext || 'PREVIOUS FIXES: none'}`)}
 
-${guardrailsContext ? `${guardrailsContext}\n` : ''}
+${guardrailsContext ? `${guardrailsContext}\n` : ''}${ownerFocusContext ? `${ownerFocusContext}\n` : ''}
 Identify the single highest-impact conversion problem visible in this material. Return JSON only (no markdown) with this EXACT schema:
 {
   "problem": "1-2 sentence description of what's broken",
@@ -2958,6 +3003,12 @@ CONSTRAINTS:
 - If you cannot find a confident #1 problem, return { "skip": true, "reason": "..." } and we will not open a PR this week.`
 
   const text = await callLLMCapped(subscriptionId, system, user, LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix')
+
+  // Consume the one-shot focus pin now that Pass 2 has run with it — even a
+  // skip outcome counts as consideration; the owner can re-pin from the Funnel
+  // tab. Consuming AFTER the LLM call (not at load) means a run that dies
+  // before Pass 2 (cost cap, sparse graph) keeps the pin for the next attempt.
+  if (focusPagePath) await clearFocusPage(subscriptionId)
 
   let parsed: FixResult
   try {
@@ -3497,12 +3548,16 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     DB_TIMEOUT_MS, 'shopify_step_ranking_update',
   )
   const graph = shopifyGraph(files)
+  // Owner focus pin ("Fix in next run") — biases the ranker toward files
+  // serving the pinned page, then rides into Pass 2 (consumed there).
+  const focusPagePath = await loadFocusPage(conn.subscription_id)
+  const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank files serving that page higher.` : ''
   const rankerAnalyticsContext = (() => {
     const a = analytics?.last7Days
     if (!a) return 'No analytics data available.'
     const top = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
     return `Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate. Top pages: ${top || '—'}.`
-  })()
+  })() + focusHint
   const rankerCallAI = (args: { system: string; user: string }) =>
     callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
   const rankerResult: RankerResult = await rankComponentsForConversion(
@@ -3535,6 +3590,7 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   const fixResult = await callAIForFix(
     conn.subscription_id, shopMap, deepContext, rankerResult,
     analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
+    focusPagePath,
   )
   if (fixResult.skip) {
     await dbWrite(
@@ -3771,12 +3827,15 @@ async function processGithubThemeConnection(
     DB_TIMEOUT_MS, 'shopify_github_step_ranking_update',
   )
   const graph = shopifyGraph(files)
+  // Owner focus pin ("Fix in next run") — same threading as the other paths.
+  const focusPagePath = await loadFocusPage(conn.subscription_id)
+  const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank files serving that page higher.` : ''
   const rankerAnalyticsContext = (() => {
     const a = analytics?.last7Days
     if (!a) return 'No analytics data available.'
     const top = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
     return `Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate. Top pages: ${top || '—'}.`
-  })()
+  })() + focusHint
   const rankerCallAI = (args: { system: string; user: string }) =>
     callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
   const rankerResult: RankerResult = await rankComponentsForConversion(
@@ -3808,6 +3867,7 @@ async function processGithubThemeConnection(
   const fixResult = await callAIForFix(
     conn.subscription_id, shopMap, deepContext, rankerResult,
     analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
+    focusPagePath,
   )
   if (fixResult.skip) {
     await dbWrite(
@@ -4181,6 +4241,10 @@ async function processConnection(conn: any) {
       supabase.from('agent_runs').update({ current_step: 'ranking_components' }).eq('id', run.id),
       DB_TIMEOUT_MS, 'step_ranking_components_update'
     )
+    // Owner focus pin ("Fix in next run") — biases the ranker toward components
+    // serving the pinned page, then rides into Pass 2 (consumed there).
+    const focusPagePath = await loadFocusPage(conn.subscription_id)
+    const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank components serving that page higher.` : ''
     const rankerAnalyticsContext = (() => {
       const a = analytics?.last7Days
       if (!a) return 'No analytics data available.'
@@ -4188,7 +4252,7 @@ async function processConnection(conn: any) {
       const drop = funnelAnalysis?.biggestDropOff
         ? ` Biggest funnel drop-off: ${funnelAnalysis.biggestDropOff.filePath} (${funnelAnalysis.biggestDropOff.dropOffScore}%).` : ''
       return `Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate. Top pages: ${top || '—'}.${drop}`
-    })()
+    })() + focusHint
     const rankerCallAI = (args: { system: string; user: string }) =>
       callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
 
@@ -4248,6 +4312,7 @@ async function processConnection(conn: any) {
     const fixResult = await callAIForFix(
       conn.subscription_id, mapResult, deepContext, rankerResult,
       analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
+      focusPagePath,
     )
 
     // Honest skip — model couldn't find a confident #1 problem. New status.

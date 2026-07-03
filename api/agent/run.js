@@ -264,7 +264,7 @@ export default async function handler(req, res) {
   }
 
   // ── Authenticated user actions (Supabase JWT) ─────────────────────────────
-  if (action === 'update-settings' || action === 'reenable_snippet' || action === 'trigger_run') {
+  if (action === 'update-settings' || action === 'reenable_snippet' || action === 'trigger_run' || action === 'dna_verdict') {
     const authHeader = req.headers.authorization
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' })
     const token = authHeader.replace('Bearer ', '')
@@ -274,6 +274,7 @@ export default async function handler(req, res) {
     if (action === 'update-settings')  return handleUpdateSettings(req, res, user)
     if (action === 'reenable_snippet') return handleReenableSnippet(req, res, user)
     if (action === 'trigger_run')      return handleTriggerRun(req, res, user)
+    if (action === 'dna_verdict')      return handleDnaVerdict(req, res, user)
   }
 
   // ── Account actions (quick — stay in Vercel) ──────────────────────────────
@@ -1455,6 +1456,21 @@ async function handleUpdateSettings(req, res, user) {
     updates.competitors = cleaned
   }
 
+  // "Fix in next run" (Funnel tab): pin one page for the next weekly run. The
+  // edge function biases the ranker + Pass-2 prompt toward it, then clears the
+  // pin once consumed (loadFocusPage/clearFocusPage). null/'' = un-schedule.
+  if (body.focus_page_path !== undefined) {
+    if (body.focus_page_path === null || body.focus_page_path === '') {
+      updates.focus_page_path = null
+    } else {
+      const p = String(body.focus_page_path).trim()
+      if (!/^\/[^\s<>"'`]{0,199}$/.test(p)) {
+        return res.status(400).json({ error: 'focus_page_path must be a site-relative path like /pricing' })
+      }
+      updates.focus_page_path = p
+    }
+  }
+
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No valid fields provided' })
 
   const { data, error } = await supabase
@@ -1487,6 +1503,36 @@ async function handleReenableSnippet(req, res, user) {
     .eq('subscription_id', sub.id)
   if (error) return res.status(500).json({ error: error.message })
   return res.status(200).json({ success: true })
+}
+
+// ─── DNA verdict (Supabase JWT) ───────────────────────────────────────────────
+// The DNA tab's Confirm / Wrong buttons. 'rejected' entries are excluded from
+// the agent's prompt context on future runs (loadBusinessDNA in the edge fn);
+// verdict null clears a previous verdict (undo). Ownership is enforced by
+// scoping the update to the caller's own subscription — a dna_id alone is
+// never trusted (no IDOR).
+async function handleDnaVerdict(req, res, user) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const body = req.body || {}
+  const dnaId = body.dna_id
+  const verdict = body.verdict === undefined ? null : body.verdict
+  if (!dnaId || typeof dnaId !== 'string') return res.status(400).json({ error: 'dna_id required' })
+  if (verdict !== null && verdict !== 'confirmed' && verdict !== 'rejected') {
+    return res.status(400).json({ error: "verdict must be 'confirmed', 'rejected', or null" })
+  }
+  // limit(1)+maybeSingle mirrors the dashboard's duplicate-row-safe lookup.
+  const { data: sub } = await supabase
+    .from('agent_subscriptions').select('id').eq('auth_user_id', user.id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle()
+  if (!sub) return res.status(404).json({ error: 'No subscription found' })
+  const { data, error } = await supabase
+    .from('agent_business_dna')
+    .update({ user_verdict: verdict, user_verdict_at: verdict ? new Date().toISOString() : null })
+    .eq('id', dnaId).eq('subscription_id', sub.id)
+    .select('id, user_verdict').maybeSingle()
+  if (error) return res.status(500).json({ error: error.message })
+  if (!data) return res.status(404).json({ error: 'DNA entry not found' })
+  return res.status(200).json({ success: true, entry: data })
 }
 
 // ─── Trigger a manual run ("Run now", Supabase JWT) ───────────────────────────
