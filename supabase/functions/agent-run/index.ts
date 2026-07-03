@@ -2586,6 +2586,23 @@ async function captureScreenshot(url: string): Promise<string | null> {
   }
 }
 
+// Best-effort before-screenshot for the two Shopify paths (parity with the
+// GitHub path's inline screenshot_before). Deliberately runs AFTER the
+// approval-status persist + Telegram send — the fix only goes live on the
+// later YES, so this is still a true "before", and a slow/failed capture
+// (ScreenshotOne waits up to ~35s) can never strand a run in 'running' with a
+// PR/staged write already created, or delay the YES prompt. Every failure mode
+// degrades to "no screenshot in the dashboard" (exactly today's behavior).
+async function attachBeforeScreenshot(runId: string, websiteUrl: string | null) {
+  if (!websiteUrl) return
+  const url = await captureScreenshot(websiteUrl)
+  if (!url) return
+  await dbWrite(
+    supabase.from('agent_runs').update({ screenshot_before: url }).eq('id', runId),
+    DB_TIMEOUT_MS, 'screenshot_before_attach',
+  ).catch((e: any) => console.warn(`[screenshot] attach failed for run ${runId}:`, e?.message))
+}
+
 // ─── REVENUE ATTRIBUTION (3b) ─────────────────────────────────────────────────
 async function getStripeRevenuePerVisitor(stripeAccountId: string | null, analytics: any) {
   if (!stripeAccountId) return null
@@ -3712,6 +3729,10 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   if (messageId != null) {
     await supabase.from('agent_runs').update({ telegram_message_id: messageId }).eq('id', run.id).then(() => {}, () => {})
   }
+
+  // Before-screenshot of the storefront (the staged write only applies on YES,
+  // so this is still "before"). Last step by design — see attachBeforeScreenshot.
+  await attachBeforeScreenshot(run.id, conn.website_url)
 }
 
 // ─── SHOPIFY-VIA-GITHUB: READ THEME FILES FROM THE REPO TREE (SG1) ────────────
@@ -3964,6 +3985,11 @@ async function processGithubThemeConnection(
       await supabase.from('agent_runs').update({ telegram_message_id: messageId }).eq('id', run.id).then(() => {}, () => {})
     }
   }
+
+  // Before-screenshot of the storefront (Shopify only syncs the change after
+  // the YES → merge, so this is still "before"). Last step by design — see
+  // attachBeforeScreenshot.
+  await attachBeforeScreenshot(run.id, conn.website_url)
 }
 
 async function processConnection(conn: any) {
