@@ -1,63 +1,80 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { demoData } from '../data/demoData'
 import { startCheckout } from '../utils/startCheckout.js'
 import CheckoutConfirmModal from '../components/CheckoutConfirmModal.jsx'
 import { SiteNetwork } from '../components/SiteNetwork.jsx'
-import MiniNetwork from '../components/MiniNetwork.jsx'
 import { buildNetworkData, hubDomainFromUrl } from '../lib/siteNetworkData.js'
 import { MOTION_CSS, CountUp } from '../lib/motion.jsx'
 
-// ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
+// ─── DESIGN TOKENS (redesign 2026-07: warm cream canvas + deep-green sidebar) ──
 const C = {
-  bg:          '#f5f2ec',
-  bgCard:      '#ffffff',
-  bgPanel:     '#faf8f4',
-  bgDark:      '#1a1916',
-  text:        '#1a1916',
-  textMuted:   '#6b6460',
-  textLight:   '#a09890',
-  border:      'rgba(26,25,22,0.08)',
-  borderMed:   'rgba(26,25,22,0.13)',
-  borderStrong:'rgba(26,25,22,0.2)',
-  accent:      '#2a5c45',
-  accentDark:  '#1e4433',
-  accentSoft:  'rgba(42,92,69,0.07)',
-  accentMid:   'rgba(42,92,69,0.15)',
-  red:         '#b83232',
-  redSoft:     'rgba(184,50,50,0.07)',
-  redMid:      'rgba(184,50,50,0.15)',
-  yellow:      '#c47d0e',
-  yellowSoft:  'rgba(196,125,14,0.07)',
-  yellowMid:   'rgba(196,125,14,0.18)',  // FIX #1: was missing — caused undefined borders/backgrounds everywhere yellowMid was used
-  green:       '#1e7a3c',
-  greenSoft:   'rgba(30,122,60,0.07)',
-  blue:        '#1d5fa8',
-  blueSoft:    'rgba(29,95,168,0.07)',
-  blueMid:     'rgba(29,95,168,0.15)',
+  bg:           '#EFEDE4',
+  bgCard:       '#FFFFFF',
+  bgSoft:       '#FBFAF4',   // inputs at rest, row hover
+  bgChip:       '#F4F2E9',   // neutral chips
+  sidebar:      '#1E362B',
+  text:         '#1C2420',
+  textMuted:    '#6B7266',
+  textLight:    '#9A9E93',
+  textFaint:    '#A8AB9E',
+  label:        '#8B8F80',   // uppercase section labels
+  border:       '#E3E0D4',
+  borderSoft:   '#F0EEE3',   // inner row dividers
+  borderMed:    '#D8D5C8',
+  ink:          '#1E362B',   // primary buttons, big serif numbers
+  inkHover:     '#2C4A3B',
+  accent:       '#3E6B54',   // links, progress fills
+  accentBar:    '#7FA98F',   // soft green bars
+  chipBg:       '#EFF3EC',   // file-path chips
+  chipText:     '#4A6B58',
+  green:        '#3E7A56', greenBg: '#E4EEE4', greenText: '#2C5B3F',
+  yellow:       '#C9A227', yellowBg: '#F5EEDC', yellowText: '#8A6D1F',
+  red:          '#C0553F', redBg: '#F6E7E4',  redText: '#9C3B2E',
+  gray:         '#9A9E93', grayBg: '#ECEBE6',  grayText: '#6B7266',
+  banner:       '#E9EFE7', bannerBorder: '#D3DECF', bannerText: '#33463B',
+  dangerBorder: '#EBD9D4',
+  // dark sidebar foregrounds
+  sideText:     '#F4F2E9',
+  sideMuted:    '#9DB3A6',
+  sideFaint:    '#8FA697',
+  sideDim:      '#5F7A6B',
+}
+
+const FONT = {
+  sans:  "'Poppins', system-ui, sans-serif",
+  serif: "'Newsreader', Georgia, serif",
+  mono:  "ui-monospace, Menlo, Consolas, monospace",
+}
+// The Network graph keeps its pre-redesign look — these fonts are passed only
+// to <SiteNetwork/> and are imported solely for it (see CSS @import below).
+const NETWORK_FONTS = {
+  sans:  "'DM Sans', sans-serif",
+  serif: "'Instrument Serif', serif",
+  mono:  "'DM Mono', monospace",
 }
 
 const STATUS = {
-  running:          { label: 'Running',           color: C.blue,      bg: C.blueSoft,   border: C.blueMid,    dot: C.blue },
-  waiting_approval: { label: 'Awaiting Approval', color: C.yellow,    bg: C.yellowSoft, border: C.yellowMid,  dot: C.yellow },
-  deployed:         { label: 'Deployed',          color: C.green,     bg: C.greenSoft,  border: 'rgba(30,122,60,0.2)', dot: C.green },
-  rejected:         { label: 'Rejected',          color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
-  failed:           { label: 'Failed',            color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
-  pending:          { label: 'Pending',           color: C.textLight, bg: 'rgba(26,25,22,0.04)', border: C.border, dot: C.textLight },
-  approved:         { label: 'Approved',          color: C.green,     bg: C.greenSoft,  border: 'rgba(30,122,60,0.2)', dot: C.green },
-  rolled_back:      { label: 'Rolled Back',       color: C.textMuted, bg: 'rgba(107,100,96,0.07)', border: 'rgba(107,100,96,0.18)', dot: C.textMuted },
-  // Shopify-direct lifecycle — the same concepts as the GitHub statuses above
+  running:          { label: 'Running',           bg: C.chipBg,  color: C.accent,    dot: C.yellow },
+  waiting_approval: { label: 'Awaiting approval', bg: C.yellowBg, color: C.yellowText, dot: C.yellow },
+  deployed:         { label: 'Deployed',          bg: C.greenBg,  color: C.greenText,  dot: C.green },
+  approved:         { label: 'Deployed',          bg: C.greenBg,  color: C.greenText,  dot: C.green },
+  rejected:         { label: 'Rejected',          bg: C.redBg,    color: C.redText,    dot: C.red },
+  failed:           { label: 'Failed',            bg: C.redBg,    color: C.redText,    dot: C.red },
+  pending:          { label: 'Pending',           bg: C.grayBg,   color: C.grayText,   dot: C.gray },
+  rolled_back:      { label: 'Rolled back',       bg: C.grayBg,   color: C.grayText,   dot: C.gray },
+  // Shopify-direct lifecycle — same concepts as the GitHub statuses above
   // (the fix is a staged live-theme write instead of a PR), so they share the
   // same labels and visual language rather than falling through to "Pending".
-  shopify_awaiting_approval: { label: 'Awaiting Approval',   color: C.yellow,    bg: C.yellowSoft, border: C.yellowMid,  dot: C.yellow },
-  shopify_deployed:          { label: 'Deployed',            color: C.green,     bg: C.greenSoft,  border: 'rgba(30,122,60,0.2)', dot: C.green },
-  shopify_rejected:          { label: 'Rejected',            color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
-  shopify_rolled_back:       { label: 'Rolled Back',         color: C.textMuted, bg: 'rgba(107,100,96,0.07)', border: 'rgba(107,100,96,0.18)', dot: C.textMuted },
-  shopify_rollback_pending:  { label: 'Rollback Proposed',   color: C.yellow,    bg: C.yellowSoft, border: C.yellowMid,  dot: C.yellow },
-  shopify_concurrency_abort: { label: 'Aborted — Theme Edited', color: C.textMuted, bg: 'rgba(107,100,96,0.07)', border: 'rgba(107,100,96,0.18)', dot: C.textMuted },
-  shopify_needs_reconsent:   { label: 'Reconnect Shopify',   color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
-  shopify_token_failed:      { label: 'Failed',              color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
-  shopify_theme_read_failed: { label: 'Failed',              color: C.red,       bg: C.redSoft,    border: C.redMid,     dot: C.red },
+  shopify_awaiting_approval: { label: 'Awaiting approval',      bg: C.yellowBg, color: C.yellowText, dot: C.yellow },
+  shopify_deployed:          { label: 'Deployed',               bg: C.greenBg,  color: C.greenText,  dot: C.green },
+  shopify_rejected:          { label: 'Rejected',               bg: C.redBg,    color: C.redText,    dot: C.red },
+  shopify_rolled_back:       { label: 'Rolled back',            bg: C.grayBg,   color: C.grayText,   dot: C.gray },
+  shopify_rollback_pending:  { label: 'Rollback proposed',      bg: C.yellowBg, color: C.yellowText, dot: C.yellow },
+  shopify_concurrency_abort: { label: 'Aborted — theme edited', bg: C.grayBg,   color: C.grayText,   dot: C.gray },
+  shopify_needs_reconsent:   { label: 'Reconnect Shopify',      bg: C.redBg,    color: C.redText,    dot: C.red },
+  shopify_token_failed:      { label: 'Failed',                 bg: C.redBg,    color: C.redText,    dot: C.red },
+  shopify_theme_read_failed: { label: 'Failed',                 bg: C.redBg,    color: C.redText,    dot: C.red },
 }
 
 // Cross-path status groups. The Shopify-direct lifecycle mirrors the GitHub one
@@ -75,11 +92,6 @@ const STATUS_GROUP = {
   failed:           ['failed', 'shopify_token_failed', 'shopify_theme_read_failed', 'shopify_needs_reconsent'],
 }
 
-const PAGE_TYPE_EMOJI = {
-  landing:'🏠', pricing:'💰', checkout:'🛒', blog:'📝',
-  about:'ℹ️', lead_magnet:'🎁', auth:'🔐', dashboard:'📊', other:'📄'
-}
-
 const AGENT_STEPS = [
   { id:'fetch_repo',  label:'Fetching source',         desc:'Reading your repo or theme structure' },
   { id:'fetch_ph',    label:'Pulling analytics',       desc:'Loading PostHog pageview & session data' },
@@ -94,61 +106,82 @@ const AGENT_STEPS = [
   { id:'notify',      label:'Sending notification',    desc:'Telegram message — reply YES or NO' },
 ]
 
+// Sidebar nav — SVG stroke icons (24×24 paths, rendered at 15px).
 const NAV_ITEMS = [
-  { id:'overview',    label:'Overview',    icon:'⊙' },
-  { id:'runs',        label:'Runs',        icon:'↻' },
-  { id:'network',     label:'Network',     icon:'◎' },
-  { id:'funnel',      label:'Funnel',      icon:'⬦' },
-  { id:'dna',         label:'DNA',         icon:'◉' },
-  { id:'guardrails',  label:'Guardrails',  icon:'◻' },
-  { id:'settings',    label:'Settings',    icon:'⚙' },
+  { id:'overview',   label:'Overview',   icon:'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
+  { id:'runs',       label:'Runs',       icon:'M21 12a9 9 0 1 1-3-6.7M21 3v6h-6' },
+  { id:'network',    label:'Network',    icon:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2c3 3 3 17 0 20c-3-3-3-17 0-20' },
+  { id:'funnel',     label:'Funnel',     icon:'M3 4h18l-7 8v6l-4 2v-8L3 4z' },
+  { id:'dna',        label:'DNA',        icon:'M6 3c0 6 12 6 12 12M18 3c0 6-12 6-12 12M6 15c0 3 2 6 6 6M18 15c0 3-2 6-6 6' },
+  { id:'guardrails', label:'Guardrails', icon:'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' },
+  { id:'settings',   label:'Settings',   icon:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.07-.4.1-.8.1-1.2z' },
 ]
+const PAGE_TITLES = { overview:'Overview', runs:'Runs', network:'Network', funnel:'Funnel', dna:'DNA', guardrails:'Guardrails', settings:'Settings' }
 
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap');
+  /* Kept ONLY for the Network graph, which stays on its pre-redesign look. */
   @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
-  body { background: #f5f2ec; color: #1a1916; font-family: 'DM Sans', sans-serif; font-weight: 400; -webkit-font-smoothing: antialiased; }
+  body { background: ${C.bg}; color: ${C.text}; font-family: ${FONT.sans}; font-weight: 400; -webkit-font-smoothing: antialiased; }
   html, body { overflow-x: hidden; max-width: 100vw; }
   img, svg, video { max-width: 100%; }
   @keyframes spin    { to { transform: rotate(360deg); } }
-  @keyframes pulse   { 0%,100%{opacity:1}50%{opacity:0.25} }
-  @keyframes fadeUp  { from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none} }
-  @keyframes fadeIn  { from{opacity:0}to{opacity:1} }
-  @keyframes slideIn { from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none} }
-  @keyframes popIn   { from{opacity:0;transform:scale(0.97)}to{opacity:1;transform:scale(1)} }
-  @keyframes streamIn{ from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none} }
-  @keyframes barGrow { from{width:0}to{width:var(--w)} }
-  .fade-up   { animation: fadeUp .3s ease both; }
-  .pop-in    { animation: popIn .25s ease both; }
-  .stream-in { animation: streamIn .2s ease both; }
-  .slide-in  { animation: slideIn .25s ease both; }
-  .pulse-dot { animation: pulse 2s ease infinite; }
-  .spin      { animation: spin 0.7s linear infinite; }
-  .nav-item  { cursor:pointer; transition: all .15s; border:none; background:none; width:100%; text-align:left; }
-  .nav-item:hover { background: rgba(42,92,69,0.06); }
-  .run-row   { cursor:pointer; transition: background .12s; }
-  .run-row:hover { background: rgba(26,25,22,0.025) !important; }
-  .btn       { cursor:pointer; transition: all .15s; border:none; font-family:'DM Sans',sans-serif; }
-  .btn:hover { filter: brightness(0.92); }
-  .btn:active{ transform: scale(0.98); }
-  .card-hover{ transition: box-shadow .2s, transform .15s; }
-  .card-hover:hover{ box-shadow: 0 4px 20px rgba(26,25,22,0.07); transform: translateY(-1px); }
-  /* Overview Site Network mini-map: the bordered box IS the click target; hover +
-     keyboard focus lift the border to accent + a soft shadow so it reads clickable
-     (no text/link chrome). */
-  .dash-mini-net{ background:${C.bgCard}; border:1px solid ${C.border}; border-radius:12px; overflow:hidden; max-width:320px; transition: border-color .18s ease, box-shadow .18s ease; }
-  .dash-mini-net:hover{ border-color:${C.accent}; box-shadow: 0 4px 18px rgba(42,92,69,0.12); }
-  .dash-mini-net:focus-visible{ outline:none; border-color:${C.accent}; box-shadow: 0 0 0 3px rgba(42,92,69,0.18); }
-  .tag-remove{ cursor:pointer; color:#a09890; }
-  .tag-remove:hover{ color:#b83232; }
-  ::-webkit-scrollbar { width:3px; height:3px; }
-  ::-webkit-scrollbar-thumb { background:rgba(26,25,22,0.15); border-radius:3px; }
+  @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:.3} }
+  @keyframes fadeUp  { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+  @keyframes fadeIn  { from{opacity:0} to{opacity:1} }
+  @keyframes popIn   { from{opacity:0;transform:scale(.97)} to{opacity:1;transform:scale(1)} }
+  @keyframes streamIn{ from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
+  @keyframes reveal  { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
+  .fade-up   { animation: fadeUp .35s cubic-bezier(.22,.61,.36,1) both; }
+  .fade-in   { animation: fadeIn .3s ease both; }
+  .pop-in    { animation: popIn .28s cubic-bezier(.22,.61,.36,1) both; }
+  .stream-in { animation: streamIn .25s ease both; }
+  .reveal-in { animation: reveal .25s ease both; }
+  .pulse-dot { animation: pulse 2.4s ease-in-out infinite; }
+  .spin      { animation: spin .7s linear infinite; }
+  /* Page transition: re-triggered by keying the wrapper on the active tab. */
+  .page-in   { animation: fadeUp .35s cubic-bezier(.22,.61,.36,1) both; }
+
+  .nav-item  { cursor:pointer; transition: background .18s ease, color .18s ease; border:none; background:none; width:100%; text-align:left; }
+  .nav-item:hover { background: rgba(255,255,255,.07); }
+  .run-row   { cursor:pointer; transition: background .15s ease; }
+  .run-row:hover { background: ${C.bgSoft}; }
+  .btn       { cursor:pointer; transition: background .18s ease, color .18s ease, border-color .18s ease, opacity .18s ease; border:none; font-family:${FONT.sans}; }
+  .btn:active{ transform: scale(.985); }
+  .btn-primary { background:${C.ink}; color:${C.sideText}; }
+  .btn-primary:hover:not(:disabled) { background:${C.inkHover}; }
+  .btn-ghost { background:none; border:1px solid ${C.borderMed}; color:#4A5248; }
+  .btn-ghost:hover:not(:disabled) { background:#F7F5EC; }
+  .link-green { color:${C.accent}; font-weight:500; cursor:pointer; text-decoration:none; }
+  .link-green:hover { text-decoration: underline; }
+  .card-hover { transition: box-shadow .22s ease, transform .18s ease, border-color .22s ease; }
+  .card-hover:hover { box-shadow: 0 6px 24px rgba(30,54,43,.08); transform: translateY(-1px); }
+  .chip-x { cursor:pointer; border:none; width:17px; height:17px; border-radius:50%; font-size:11px; line-height:1; display:grid; place-items:center; font-family:${FONT.sans}; transition: background .15s ease; }
+  .table-scroll { overflow-x:auto; }
+  ::-webkit-scrollbar { width:4px; height:4px; }
+  ::-webkit-scrollbar-thumb { background:rgba(30,54,43,.18); border-radius:3px; }
   ::-webkit-scrollbar-track { background:transparent; }
-  input, textarea { font-family:'DM Sans',sans-serif; outline:none; }
-  input:focus, textarea:focus { border-color: rgba(42,92,69,0.4) !important; box-shadow: 0 0 0 3px rgba(42,92,69,0.08); }
-  a { color: ${C.accent}; }
+  input, textarea { font-family:${FONT.sans}; outline:none; }
+  input:focus, textarea:focus { border-color:${C.accent} !important; background:#FFFFFF !important; }
+  ::placeholder { color:${C.textFaint}; }
+  a { color:${C.accent}; }
+
+  /* Toggle switch (settings) */
+  .toggle { width:42px; height:24px; border-radius:12px; position:relative; cursor:pointer; flex:none; transition: background .22s ease; border:none; }
+  .toggle .knob { width:18px; height:18px; border-radius:50%; background:#FFFFFF; position:absolute; top:3px; transition: left .22s cubic-bezier(.22,.61,.36,1); box-shadow:0 1px 3px rgba(0,0,0,.25); }
+
+  /* Responsive grids (classes, not inline, so media queries can restyle) */
+  .dash-hero   { display:grid; grid-template-columns:1.3fr 1fr auto; }
+  .dash-kpis   { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  .dash-cols   { display:grid; grid-template-columns:2fr 1fr; gap:14px; align-items:start; }
+  .funnel-top  { display:grid; grid-template-columns:1.6fr 1fr; gap:14px; align-items:start; }
+  .approval-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; }
+  .strip-grid  { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .hero-cell   { padding:22px 26px; border-right:1px solid ${C.borderSoft}; }
+  .hero-cell:last-child { border-right:none; }
 
   /* Drawer affordances are hidden on desktop; the ≤900 block reveals them. */
   .dash-hamburger { display: none; }
@@ -156,67 +189,55 @@ const CSS = `
   .dash-drawer-close { display: none; }
   .dash-header-badge-m { display: none; } /* mobile-only stacked pending badge */
 
+  @media (max-width: 1100px) {
+    .dash-kpis { grid-template-columns:1fr 1fr; }
+    .dash-cols { grid-template-columns:1fr; }
+    .funnel-top { grid-template-columns:1fr; }
+  }
+  @media (max-width: 1000px) {
+    .dash-hero { grid-template-columns:1fr; }
+    .hero-cell { border-right:none; border-bottom:1px solid ${C.borderSoft}; }
+    .hero-cell:last-child { border-bottom:none; }
+    .approval-grid { grid-template-columns:1fr; }
+  }
+  @media (max-width: 700px) {
+    .strip-grid { grid-template-columns:1fr 1fr; }
+  }
   /* ── Mobile responsiveness ── */
   @media (max-width: 900px) {
-    /* Sidebar → off-canvas slide-in drawer with the full vertical nav (no
-       horizontal scroll). Hamburger in the header opens it; scrim + close
-       button + tab-select dismiss it. */
+    /* Sidebar → off-canvas slide-in drawer with the full vertical nav. */
     .dash-sidebar {
       position: fixed !important; top: 0 !important; left: 0 !important;
       height: 100vh !important; width: 270px !important; max-width: 84vw;
       transform: translateX(-100%);
       transition: transform .28s cubic-bezier(.4,0,.2,1);
       z-index: 80;
-      border-right: 1px solid rgba(26,25,22,0.08) !important;
     }
     .dash-shell.drawer-open .dash-sidebar {
       transform: translateX(0);
-      box-shadow: 0 12px 40px rgba(26,25,22,0.18);
+      box-shadow: 0 12px 40px rgba(20,32,26,.4);
     }
-    .dash-sidebar .nav-item { min-height: 44px !important; padding: 8px 12px !important; }
+    .dash-sidebar .nav-item { min-height: 44px !important; }
     .dash-scrim {
       display: block; position: fixed; inset: 0; z-index: 70;
-      background: rgba(26,25,22,0.42);
+      background: rgba(20,32,26,.45);
       opacity: 0; pointer-events: none;
       transition: opacity .28s ease;
     }
     .dash-shell.drawer-open .dash-scrim { opacity: 1; pointer-events: auto; }
     .dash-hamburger { display: inline-flex !important; }
     .dash-drawer-close { display: flex !important; }
-    .dash-header-badge-d { display: none !important; } /* desktop badge hidden on mobile */
-    .dash-header-badge-m { display: inline-flex !important; } /* stacked under page title */
-    .dash-header-email { display: none !important; } /* email is non-essential on mobile; freed space avoids badge/email collision */
+    .dash-header-badge-d { display: none !important; }
+    .dash-header-badge-m { display: inline-flex !important; }
     .dash-main { width: 100% !important; }
-    .dash-main > div:first-child { padding: 0 16px !important; }
-    .dash-content { padding: 16px !important; }
-    .dash-content [style*="grid-template-columns"] { grid-template-columns: 1fr 1fr !important; }
-    .dash-content [style*="grid-template-columns: 1fr auto auto"] { grid-template-columns: 1fr !important; gap: 6px !important; }
+    .dash-content-pad { padding: 18px 16px 40px !important; }
   }
-  /* Drawer slide + scrim fade are instant for reduced-motion users (landing rule). */
   @media (prefers-reduced-motion: reduce) {
     .dash-sidebar, .dash-scrim { transition: none !important; }
   }
   @media (max-width: 600px) {
-    .dash-content [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
-  }
-  /* Grid-blowout guard (ALL widths): grid tracks default to min-content, so a
-     child's min-content (nowrap text, file chips, insight cards) can force the
-     grid wider than its container and make .dash-content scroll sideways.
-     min-width:0 lets every track shrink to fit. */
-  .dash-content [style*="grid-template-columns"] > * { min-width: 0; }
-  /* Overview: below ~1100px the 2-col main grid + 272px sidebar no longer fit
-     side-by-side (it caused a horizontal scroll + clipped Top Insights), so
-     stack them — the sidebar (next-run / steps / performance) drops full-width
-     below the main column. */
-  @media (max-width: 1100px) {
-    .dash-overview-row { flex-direction: column !important; }
-    .dash-overview-row > * { width: 100% !important; min-width: 0 !important; }
-    .dash-ctx-sidebar { width: 100% !important; position: static !important; top: auto !important; }
-  }
-  /* KPI tiles stay 2×2 on phones (the generic ≤600 rule above would otherwise
-     collapse them to a 4-tall column). Placed after it to win on source order. */
-  @media (max-width: 600px) {
-    .dash-content .dash-kpi-grid { grid-template-columns: 1fr 1fr !important; }
+    .dash-kpis { grid-template-columns:1fr 1fr; }
+    .hero-cell { padding:18px 18px; }
   }
 `
 
@@ -298,7 +319,19 @@ function deriveAgentStep(run) {
   }
 }
 
+// Shared Stripe Billing Portal opener (subscription card + danger-zone cancel).
+async function openBillingPortal() {
+  const { data: { session } } = await supabase.auth.getSession()
+  const res = await fetch('/api/stripe?action=portal', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session?.access_token}` },
+  })
+  const data = await res.json()
+  if (data.url) window.location.href = data.url
+}
+
 // ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
+// The real Velyr mark (the mockup's simplified logo was explicitly not accurate).
 function VelyrLogo({ size=22, color=C.accent }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
@@ -313,36 +346,44 @@ function VelyrLogo({ size=22, color=C.accent }) {
   )
 }
 
+function NavIcon({ path, size=15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{opacity:.85, flexShrink:0}}>
+      <path d={path}/>
+    </svg>
+  )
+}
+
 function StatusBadge({ status, small }) {
   const s = STATUS[status] || STATUS.pending
   return (
     <span style={{
-      fontSize:small?10:11, fontWeight:500, letterSpacing:'.03em',
-      padding:small?'2px 7px':'3px 9px', borderRadius:5,
-      background:s.bg, color:s.color, border:`1px solid ${s.border}`,
+      fontSize:small?10:10.5, fontWeight:500,
+      padding:small?'3px 9px':'4px 11px', borderRadius:20,
+      background:s.bg, color:s.color,
       whiteSpace:'nowrap', display:'inline-flex', alignItems:'center', gap:5,
     }}>
-      <span style={{
-        width:small?4:5,height:small?4:5,borderRadius:'50%',background:s.dot,display:'inline-block',
-        animation:status==='running'?'pulse 2s ease infinite':'none'
-      }}/>
+      {status==='running'&&(
+        <span className="pulse-dot" style={{width:5,height:5,borderRadius:'50%',background:s.dot,display:'inline-block'}}/>
+      )}
       {s.label}
     </span>
   )
 }
 
 function Spinner({size=18}) {
-  return <div style={{width:size,height:size,border:`1.5px solid ${C.border}`,borderTopColor:C.accent,borderRadius:'50%',animation:'spin 0.7s linear infinite',flexShrink:0}}/>
+  return <div style={{width:size,height:size,border:`1.5px solid ${C.border}`,borderTopColor:C.accent,borderRadius:'50%',animation:'spin .7s linear infinite',flexShrink:0}}/>
 }
 
 function SectionLabel({children, style}) {
-  return <p style={{fontSize:10,letterSpacing:'.1em',textTransform:'uppercase',fontWeight:500,color:C.textLight,...style}}>{children}</p>
+  return <p style={{fontSize:10.5,letterSpacing:'.14em',textTransform:'uppercase',fontWeight:500,color:C.label,...style}}>{children}</p>
 }
 
-function Card({children,style,className}) {
+function Card({children,style,className,onClick}) {
   return (
-    <div className={className} style={{
-      background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:12,
+    <div className={className} onClick={onClick} style={{
+      background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:14,
       ...style
     }}>
       {children}
@@ -350,173 +391,99 @@ function Card({children,style,className}) {
   )
 }
 
-// ─── SPARKLINE ────────────────────────────────────────────────────────────────
-function Sparkline({data, color=C.accent, height=32, width=80}) {
-  if (!data || data.length < 2) return null
-  const max = Math.max(...data), min = Math.min(...data)
-  const range = max - min || 1
-  const pts = data.map((v,i) => {
-    const x = (i/(data.length-1))*width
-    const y = height - ((v-min)/range)*(height-4) - 2
-    return `${x},${y}`
-  }).join(' ')
+// Status-tinted 26px icon square used by activity + run rows.
+function StatusDotIcon({status}) {
+  const s = STATUS[status] || STATUS.pending
   return (
-    <svg width={width} height={height} style={{overflow:'visible'}}>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/>
-    </svg>
-  )
-}
-
-// ─── MINI SPARKLINE BAR ───────────────────────────────────────────────────────
-function RunHistoryBar({runs}) {
-  const last12 = [...runs].slice(0,12).reverse()
-  return (
-    <div style={{display:'flex',gap:3,alignItems:'flex-end',height:24}}>
-      {last12.map((run,i) => {
-        const s = STATUS[run.status]||STATUS.pending
-        const h = isLive(run)?24:isAwaitingApproval(run)?16:run.status==='failed'||run.status==='rejected'||run.status==='shopify_rejected'?8:14
-        return <div key={run.id} title={`${run.status} · ${timeAgo(run.created_at)}`} style={{
-          flex:1,height:h,background:s.dot,borderRadius:2,
-          opacity:0.4+(i/12)*0.6,
-        }}/>
-      })}
+    <div style={{width:26,height:26,borderRadius:8,background:s.bg,display:'grid',placeItems:'center',flexShrink:0}}>
+      <span className={status==='running'?'pulse-dot':''} style={{width:7,height:7,borderRadius:'50%',background:s.dot,display:'inline-block'}}/>
     </div>
   )
 }
 
-// ─── LIVE ACTIVITY STREAM ─────────────────────────────────────────────────────
-function LiveActivityStream({runs, activeRun}) {
-  const streamItems = []
-
-  // Activity stream = real run-outcome timeline rows only. The live step-by-step
-  // progress lives in the sidebar stepper, so it is no longer duplicated here.
-  // Fallback label is the status (not a repeated "Run completed") per the
-  // real-timeline rule.
-  runs.slice(0,8).forEach(run => {
-    // Pending fixes live in PRMissionControl + the header badge; this stream is
-    // "actions taken", so skip running + awaiting-approval to avoid duplication.
-    if (run.status==='running' || isAwaitingApproval(run)) return
-    const analysis = run.analysis_result||{}
-    streamItems.push({
-      id: run.id,
-      type: 'run',
-      status: run.status,
-      label: analysis.problem || (STATUS[run.status]?.label || 'Run'),
-      sub: analysis.expected_improvement ? `Expected: ${analysis.expected_improvement}` : null,
-      time: timeAgo(run.created_at),
-      file: analysis.file_to_edit?.split('/').pop(),
-    })
-  })
-
+function FileChip({children, style}) {
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:0}}>
-      {streamItems.map((item, i) => (
-        <div key={item.id} className="stream-in" style={{
-          animationDelay:`${i*0.04}s`,
-          display:'flex',gap:12,alignItems:'flex-start',
-          padding:'10px 0',
-          borderBottom:i<streamItems.length-1?`1px solid ${C.border}`:'none',
-        }}>
-          <div style={{width:20,flexShrink:0,display:'flex',justifyContent:'center',paddingTop:2}}>
-            {item.type==='step' ? (
-              <div style={{
-                width:item.current?10:8, height:item.current?10:8,
-                borderRadius:'50%',
-                background: item.done ? C.accent : item.current ? C.blue : 'rgba(26,25,22,0.1)',
-                border: item.current?`2px solid ${C.blue}`:`1px solid ${item.done?C.accent:C.border}`,
-                animation: item.current?'pulse 2s ease infinite':'none',
-              }}/>
-            ) : (
-              <div style={{width:8,height:8,borderRadius:'50%',background:(STATUS[item.status]||STATUS.pending).dot,marginTop:1}}/>
-            )}
-          </div>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:8}}>
-              <p style={{
-                fontSize:12,fontWeight:item.type==='step'&&item.current?500:400,
-                color:item.type==='step'?(item.done?C.textMuted:item.current?C.blue:C.textLight):C.text,
-                lineHeight:1.4,
-                overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,
-              }}>
-                {item.label}
-              </p>
-              {item.time && (
-                <span style={{fontSize:10,color:item.time==='now'?C.blue:item.time==='✓'?C.accent:C.textLight,fontWeight:item.time==='now'?500:300,flexShrink:0}}>
-                  {item.time}
-                </span>
-              )}
-            </div>
-            {item.desc && <p style={{fontSize:10,color:C.textMuted,marginTop:2}}>{item.desc}</p>}
-            {item.sub && <p style={{fontSize:10,color:C.green,marginTop:2}}>{item.sub}</p>}
-            {item.file && <code style={{fontSize:10,color:C.accent,background:C.accentSoft,padding:'1px 5px',borderRadius:3,marginTop:3,display:'inline-block'}}>{item.file}</code>}
-          </div>
-        </div>
-      ))}
-      {streamItems.length===0 && (
-        <p style={{fontSize:12,color:C.textLight,padding:'16px 0',textAlign:'center'}}>No runs yet. Kick one off with Run now, or wait for Monday morning.</p>
-      )}
+    <span style={{
+      fontFamily:FONT.mono,fontSize:10.5,color:C.chipText,background:C.chipBg,
+      borderRadius:5,padding:'2px 7px',maxWidth:220,overflow:'hidden',
+      textOverflow:'ellipsis',whiteSpace:'nowrap',display:'inline-block',...style,
+    }}>{children}</span>
+  )
+}
+
+// Green info banner used by Funnel / DNA / Guardrails headers.
+function InfoBanner({iconPath, children, right}) {
+  return (
+    <div className="fade-up" style={{
+      display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,
+      background:C.banner,border:`1px solid ${C.bannerBorder}`,borderRadius:10,
+      padding:'11px 16px',marginBottom:20,
+    }}>
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.accent} strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}><path d={iconPath}/></svg>
+        <span style={{fontSize:12,color:C.bannerText,lineHeight:1.5}}>{children}</span>
+      </div>
+      {right}
     </div>
   )
 }
 
-// ─── PR MISSION CONTROL ───────────────────────────────────────────────────────
+function Toggle({on, onClick, disabled, label}) {
+  return (
+    <button className="toggle" onClick={onClick} disabled={disabled} aria-label={label} aria-pressed={on}
+      style={{background:on?C.accent:'#C9C6B8',opacity:disabled?.55:1,cursor:disabled?'not-allowed':'pointer'}}>
+      <span className="knob" style={{left:on?21:3}}/>
+    </button>
+  )
+}
+
+// ─── PENDING APPROVAL CARD ────────────────────────────────────────────────────
 // One card for both delivery mechanisms: a GitHub run carries pr_number/pr_url
 // (fix = pull request), a Shopify-direct run carries neither (fix = staged
 // live-theme write, applied on the Telegram YES). Same layout, honest labels.
-function PRMissionControl({run}) {
+function PendingApprovalCard({run}) {
   const analysis = run.analysis_result || {}
   const isThemeWrite = run.status === 'shopify_awaiting_approval'
   // Analytics Setup-PR / setup-write runs carry no analysis_result — label them
   // honestly instead of defaulting to "Conversion issue detected" (both paths).
   const isSetup = run.run_type === 'setup_posthog' || run.run_type === 'setup_posthog_foreign_choice'
-  // Only show a confidence figure when the agent actually returned one — no
-  // fabricated default (the old code hardcoded 88).
+  // Only show a confidence figure when the agent actually returned one.
   const rawConf = analysis.confidence_score ?? analysis.confidence
   const confNum = typeof rawConf === 'number' ? rawConf : null
 
   return (
-    <div style={{
-      background:C.bgCard,
-      border:`1px solid ${C.yellowMid}`,
-      borderRadius:12,
-      overflow:'hidden',
-      boxShadow:`0 10px 34px rgba(196,125,14,0.13), 0 0 0 3px ${C.yellowSoft}`,
-    }}>
+    <Card className="fade-up" style={{overflow:'hidden',borderColor:'#EADFC2',boxShadow:'0 10px 34px rgba(201,162,39,.12)'}}>
       <div style={{
-        background:C.yellowSoft,
-        borderBottom:`1px solid ${C.yellowMid}`,
-        padding:'10px 18px',
-        display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,
-        flexWrap:'wrap',
+        background:C.yellowBg,borderBottom:'1px solid #EADFC2',padding:'11px 22px',
+        display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap',
       }}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <span className="pulse-dot" style={{width:7,height:7,borderRadius:'50%',background:C.yellow,display:'inline-block',flexShrink:0}}/>
-          <SectionLabel style={{color:C.yellow,marginBottom:0}}>
+          <span className="pulse-dot" style={{width:8,height:8,borderRadius:'50%',background:C.yellow,display:'inline-block',flexShrink:0}}/>
+          <SectionLabel style={{color:C.yellowText,marginBottom:0}}>
             {isThemeWrite ? 'Awaiting your approval · Theme fix' : `Awaiting your approval · PR #${run.pr_number||'—'}`}
           </SectionLabel>
         </div>
-        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
           {isThemeWrite ? (
-            <span style={{
-              fontSize:11,color:C.accent,background:C.accentSoft,
-              border:`1px solid ${C.accentMid}`,borderRadius:6,padding:'4px 10px',fontWeight:500,
-            }}>Applied to your live theme on approval</span>
+            <span style={{fontSize:11,color:C.chipText,background:C.chipBg,borderRadius:6,padding:'4px 10px',fontWeight:500}}>
+              Applied to your live theme on approval
+            </span>
           ) : (
             <a href={run.pr_url} target="_blank" rel="noreferrer" className="v-press" style={{
-              fontSize:11,color:C.accent,background:C.accentSoft,
-              border:`1px solid ${C.accentMid}`,borderRadius:6,padding:'4px 10px',
+              fontSize:11,color:C.chipText,background:C.chipBg,borderRadius:6,padding:'4px 10px',
               textDecoration:'none',fontWeight:500,
             }}>View on GitHub ↗</a>
           )}
-          <span style={{fontSize:11,color:C.yellow,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:6,padding:'4px 10px'}}>
-            Reply <code style={{fontFamily:'DM Mono,monospace',fontSize:10}}>YES</code> or <code style={{fontFamily:'DM Mono,monospace',fontSize:10}}>NO</code> on Telegram
+          <span style={{fontSize:11,color:C.yellowText}}>
+            Reply <code style={{fontFamily:FONT.mono,fontSize:10,fontWeight:600}}>YES</code> or <code style={{fontFamily:FONT.mono,fontSize:10,fontWeight:600}}>NO</code> on Telegram
           </span>
         </div>
       </div>
 
-      <div style={{padding:'16px 18px',display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
-        <div>
-          <SectionLabel style={{marginBottom:6}}>Problem identified</SectionLabel>
+      <div className="approval-grid" style={{padding:'18px 22px'}}>
+        <div style={{minWidth:0}}>
+          <SectionLabel style={{marginBottom:8}}>Problem identified</SectionLabel>
           <p style={{fontSize:13,fontWeight:500,color:C.text,lineHeight:1.5,marginBottom:6}}>
             {analysis.problem || (isSetup ? 'Analytics not installed yet' : 'Conversion issue detected')}
           </p>
@@ -525,23 +492,19 @@ function PRMissionControl({run}) {
           )}
         </div>
 
-        <div>
-          <SectionLabel style={{marginBottom:6}}>Fix applied</SectionLabel>
+        <div style={{minWidth:0}}>
+          <SectionLabel style={{marginBottom:8}}>Fix prepared</SectionLabel>
           <p style={{fontSize:12,color:C.text,lineHeight:1.5,marginBottom:8}}>
             {analysis.solution || (isSetup ? 'One-time install of the Velyr analytics snippet' : 'Code changes applied')}
           </p>
-          {analysis.file_to_edit && (
-            <code style={{fontSize:11,color:C.accent,background:C.accentSoft,padding:'3px 8px',borderRadius:5,border:`1px solid ${C.accentMid}`,display:'block',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-              {analysis.file_to_edit}
-            </code>
-          )}
+          {analysis.file_to_edit && <FileChip style={{maxWidth:'100%',display:'block'}}>{analysis.file_to_edit}</FileChip>}
         </div>
 
-        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        <div style={{display:'flex',flexDirection:'column',gap:10,minWidth:0}}>
           <SectionLabel style={{marginBottom:0}}>Expected impact</SectionLabel>
           {analysis.expected_improvement ? (
             <div style={{display:'flex',alignItems:'baseline',gap:6}}>
-              <span style={{fontFamily:'Instrument Serif,serif',fontSize:32,color:C.green,lineHeight:1}}>
+              <span style={{fontFamily:FONT.serif,fontSize:30,fontWeight:500,color:C.green,lineHeight:1}}>
                 {analysis.expected_improvement}
               </span>
               <span style={{fontSize:11,color:C.textMuted}}>conversion</span>
@@ -555,7 +518,7 @@ function PRMissionControl({run}) {
                 <span style={{fontSize:10,color:C.textLight}}>Confidence</span>
                 <span style={{fontSize:10,fontWeight:500,color:C.text}}>{confNum}%</span>
               </div>
-              <div style={{height:4,background:'rgba(26,25,22,0.08)',borderRadius:2}}>
+              <div style={{height:4,background:C.borderSoft,borderRadius:2,overflow:'hidden'}}>
                 <div className="v-bar-fill" style={{height:'100%',width:`${confNum}%`,'--v-w':`${confNum}%`,background:confNum>75?C.green:confNum>50?C.yellow:C.red,borderRadius:2}}/>
               </div>
             </div>
@@ -566,166 +529,12 @@ function PRMissionControl({run}) {
           </div>
         </div>
       </div>
-    </div>
+    </Card>
   )
 }
 
-// ─── KPI BAR ──────────────────────────────────────────────────────────────────
-// Outcomes only — leads with what shipped, not process/failure rates. Deploy-rate
-// and failed/rejected are demoted to the sidebar "Performance" detail panel; the
-// bounce-Δ tile (which showed "—" / "No data yet") was removed. Tiles render only
-// when their datum exists — never a hollow placeholder.
-function KPIBar({runs, learnings}) {
-  const total    = runs.length
-  const deployed = runs.filter(isLive).length
-
-  // FIX #12: proper Date object comparison instead of fragile ISO string comparison
-  const oneWeekAgo = new Date(Date.now() - 7 * 86400000)
-  const thisWeek = runs.filter(r=>new Date(r.created_at)>oneWeekAgo&&isLive(r)).length
-
-  const wins    = (learnings||[]).filter(l=>l.outcome==='positive'&&l.delta)
-  const avgLift = wins.length>0 ? Math.round(wins.reduce((s,l)=>s+(l.delta||0),0)/wins.length) : null
-
-  const sparkData = [...runs].slice(0,8).reverse().map(r=>isLive(r)?1:0)
-
-  const kpis = [
-    {
-      label:'Fixes Live', num:deployed, format:n=>Math.round(n),
-      sub: thisWeek>0?`+${thisWeek} this week`:'Shipped to production',
-      accent:true, sparkData,
-    },
-    avgLift!=null && {
-      label:'Avg Uplift on Wins', num:avgLift, format:n=>`+${Math.round(n)}%`,
-      sub:`across ${wins.length} winning fix${wins.length===1?'':'es'}`,
-      accent:false, sparkData:null,
-    },
-    {
-      label:'Runs', num:total, format:n=>Math.round(n),
-      sub:'Analyzed since launch',
-      accent:false, sparkData:null,
-    },
-  ].filter(Boolean)
-
-  return (
-    <div className="dash-kpi-grid" style={{display:'grid',gridTemplateColumns:`repeat(${kpis.length},1fr)`,gap:10}}>
-      {kpis.map((k,i)=>(
-        <div key={i} className="card-hover fade-up" style={{
-          animationDelay:`${i*0.06}s`,
-          background:k.accent?C.accentSoft:C.bgCard,
-          border:`1px solid ${k.accent?C.accentMid:C.border}`,
-          borderRadius:12, padding:'16px 18px',
-          boxShadow:k.accent?'0 4px 18px rgba(42,92,69,0.10)':'none',
-        }}>
-          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:8}}>
-            <SectionLabel style={{color:k.accent?C.accent:C.textLight,marginBottom:0}}>{k.label}</SectionLabel>
-            {k.sparkData && <Sparkline data={k.sparkData} color={k.accent?C.accent:C.textLight} height={24} width={50}/>}
-          </div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:36,fontWeight:400,color:k.accent?C.accent:C.text,lineHeight:1,marginBottom:4}}>
-            <CountUp value={k.num} format={k.format}/>
-          </p>
-          <p style={{fontSize:10,color:C.textLight,fontWeight:300}}>{k.sub}</p>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ─── TOP INSIGHTS PANEL ───────────────────────────────────────────────────────
-// Pure builder so callers (OverviewPage) can ask "are there any insights?"
-// without duplicating the logic — used to hide the column cleanly when empty.
-function buildTopInsights({runs, funnelPages, learnings, impactMetrics}) {
-  const deployed = runs.filter(isLive)
-  const pending  = runs.filter(isAwaitingApproval)
-
-  const topDropOff = [...funnelPages].filter(p=>p.drop_off_score>0).sort((a,b)=>b.drop_off_score-a.drop_off_score)[0]
-
-  const bestImpact = [...impactMetrics].filter(m=>m.value_before>m.value_after).sort((a,b)=>(b.value_before-b.value_after)-(a.value_before-a.value_after))[0]
-  const bestRun = bestImpact ? runs.find(r=>r.id===bestImpact.run_id) : null
-
-  const avgConvStr = deployed.map(r=>r.analysis_result?.expected_improvement).filter(Boolean)
-  const avgConvNum = avgConvStr.length>0
-    ? avgConvStr.reduce((s,v)=>{const n=parseFloat(v.replace(/[^0-9.]/g,''));return s+(isNaN(n)?0:n)},0)/avgConvStr.length
-    : null
-
-  const positiveLearnings = learnings.filter(l=>l.outcome==='positive')
-  const winRate = learnings.length>0?Math.round((positiveLearnings.length/learnings.length)*100):null
-
-  return [
-    topDropOff && {
-      icon:'⚠️', color:C.yellow, bg:C.yellowSoft, border:C.yellowMid,
-      label:'Biggest Drop-off',
-      value: topDropOff.page_path,
-      sub: `${topDropOff.drop_off_score}% exit rate · ${topDropOff.views_7d||0} views/week`,
-      detail: 'Agent will prioritize this page next run',
-    },
-    bestRun && {
-      icon:'📈', color:C.green, bg:C.greenSoft, border:'rgba(30,122,60,0.2)',
-      label:'Most Improved',
-      value: bestRun.analysis_result?.file_to_edit?.split('/').pop() || 'Last fix',
-      sub: `Bounce −${Math.round(bestImpact.value_before-bestImpact.value_after)}% after deployment`,
-      detail: timeAgo(bestRun.completed_at),
-    },
-    /* "Awaiting Review" card removed — the pending PR is surfaced by
-       PRMissionControl + the header badge (shown once). */
-    avgConvNum!=null && {
-      icon:'💡', color:C.accent, bg:C.accentSoft, border:C.accentMid,
-      label:'Top Recommendation',
-      value: deployed[0]?.analysis_result?.problem?.slice(0,35)||'No runs yet',
-      sub: `Est. impact: +${Math.round(avgConvNum)}% avg conversion`,
-      detail: 'Based on last fix',
-    },
-    winRate!=null && {
-      icon:'🧠', color:C.blue, bg:C.blueSoft, border:C.blueMid,
-      label:'Agent Win Rate',
-      value:`${winRate}%`,
-      sub: `${positiveLearnings.length} of ${learnings.length} changes improved metrics`,
-      detail: 'Business DNA learning',
-    },
-    funnelPages.length>0 && {
-      icon:'🗺️', color:C.textMuted, bg:'rgba(26,25,22,0.04)', border:C.border,
-      label:'Pages Analyzed',
-      value: funnelPages.length,
-      sub: `${funnelPages.filter(p=>p.drop_off_score>50).length} high-priority pages`,
-      detail: 'Funnel map updated last run',
-    },
-  ].filter(Boolean)
-}
-
-function TopInsights(props) {
-  const insights = buildTopInsights(props)
-
-  return (
-    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-      {insights.map((ins,i)=>(
-        <div key={i} className="card-hover fade-up" style={{
-          animationDelay:`${i*0.05}s`,
-          background:ins.bg, border:`1px solid ${ins.border}`,
-          borderRadius:10, padding:'13px 15px',
-        }}>
-          <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
-            <span style={{fontSize:16,flexShrink:0}}>{ins.icon}</span>
-            <div style={{flex:1,minWidth:0}}>
-              <SectionLabel style={{color:ins.color,marginBottom:4}}>{ins.label}</SectionLabel>
-              <p style={{fontSize:13,fontWeight:500,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:2}}>
-                {ins.value}
-              </p>
-              <p style={{fontSize:11,color:C.textMuted,lineHeight:1.4,marginBottom:4}}>{ins.sub}</p>
-              <p style={{fontSize:10,color:C.textLight}}>{ins.detail}</p>
-            </div>
-          </div>
-        </div>
-      ))}
-      {insights.length===0 && (
-        <div style={{gridColumn:'1/-1',padding:'24px',textAlign:'center'}}>
-          <p style={{fontSize:13,color:C.textLight}}>Insights will appear after the first agent run.</p>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── AGENT STATUS SIDEBAR ─────────────────────────────────────────────────────
-function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelectRun, onTriggerRun, triggerLoading, triggerMessage, networkData, isPreview, onOpenNetwork}) {
+// ─── STATUS HERO (Overview) ───────────────────────────────────────────────────
+function StatusHero({subscription, runs, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, onSelectRun}) {
   const isPaused  = subscription?.status==='paused'
   const activeRun = runs.find(r=>r.status==='running')
   const isRunning = !!activeRun
@@ -741,279 +550,286 @@ function AgentSidebar({subscription, runs, onTogglePause, actionLoading, onSelec
   const manualCooldownLeftMs = lastManualMs ? Math.max(0, 24*3600000 - (Date.now() - lastManualMs)) : 0
   const runNowDisabled       = isPaused || inFlight || manualCooldownLeftMs > 0 || triggerLoading
   const runNowLabel = triggerLoading ? '…'
-    : inFlight ? '⏳ Run in progress'
+    : inFlight ? 'Run in progress'
     : manualCooldownLeftMs > 0 ? `Next run in ${manualCooldownLeftMs >= 3600000 ? Math.ceil(manualCooldownLeftMs/3600000)+'h' : '<1h'}`
-    : '▶ Run now'
+    : 'Run now'
 
-  // FIX #4: memoize so nextMonday9am() is not recomputed on every render cycle
   const target = useMemo(() => nextMonday9am(), [])
   const countdown = useCountdown(target)
-  const stepIdx   = isRunning ? deriveAgentStep(activeRun) : (lastRun ? deriveAgentStep(lastRun) : -1)
+  const stepIdx = isRunning ? deriveAgentStep(activeRun) : -1
 
   const now = new Date()
   const weekMs = 7*24*3600000
   const weekProgress = Math.min(100,Math.max(0,((now-(new Date(target.getTime()-weekMs)))/weekMs)*100))
 
+  let heroLabel, heroDot, heroBig, heroNote, heroProgress
+  if (isPaused) {
+    heroLabel='AGENT PAUSED'; heroDot=C.gray
+    heroBig='On hold'; heroNote='No runs scheduled — resume any time.'; heroProgress=0
+  } else if (isRunning) {
+    heroLabel='AGENT RUNNING'; heroDot=C.yellow
+    heroBig=`Step ${Math.max(stepIdx,0)+1} of ${AGENT_STEPS.length}`
+    heroNote=AGENT_STEPS[stepIdx]?.label ? `${AGENT_STEPS[stepIdx].label} — ${AGENT_STEPS[stepIdx].desc}` : 'Analyzing your site…'
+    heroProgress=Math.round(((Math.max(stepIdx,0)+1)/AGENT_STEPS.length)*100)
+  } else {
+    heroLabel='AGENT IDLE · NEXT RUN IN'; heroDot=C.green
+    heroBig=countdown.str||'—'; heroNote='Every Monday · 9:00 am'; heroProgress=Math.round(weekProgress)
+  }
+
+  // Last-run summary column
+  const lastSteps = lastRun ? deriveAgentStep(lastRun)+1 : 0
+  const lastOutcome = !lastRun ? null
+    : lastRun.status==='running' ? 'Run in progress right now'
+    : isLive(lastRun) ? '1 fix shipped to production'
+    : isAwaitingApproval(lastRun) ? '1 fix awaiting your approval'
+    : lastRun.status==='rejected'||lastRun.status==='shopify_rejected' ? 'Fix rejected — nothing shipped'
+    : lastRun.status==='rolled_back'||lastRun.status==='shopify_rolled_back' ? 'Change rolled back'
+    : lastRun.status==='failed' ? 'Run failed — no changes made'
+    : (STATUS[lastRun.status]?.label || 'Completed')
+
+  return (
+    <Card className="fade-up dash-hero" style={{overflow:'hidden',marginBottom:14}}>
+      <div className="hero-cell">
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
+          <span className="pulse-dot" style={{width:8,height:8,borderRadius:'50%',background:heroDot,display:'inline-block',flexShrink:0}}/>
+          <SectionLabel style={{marginBottom:0}}>{heroLabel}</SectionLabel>
+        </div>
+        <p style={{fontFamily:FONT.serif,fontSize:'clamp(32px, 4vw, 44px)',lineHeight:1,fontWeight:500,color:C.ink,minHeight:44}}>{heroBig}</p>
+        <p style={{fontSize:12,color:C.textMuted,marginTop:10}}>{heroNote}</p>
+        <div style={{height:4,background:'#EDEBE0',borderRadius:2,marginTop:16,overflow:'hidden'}}>
+          <div style={{height:'100%',width:`${heroProgress}%`,background:C.accent,borderRadius:2,transition:'width 1s ease'}}/>
+        </div>
+      </div>
+
+      <div className="hero-cell">
+        <SectionLabel style={{marginBottom:14}}>{lastRun?`Last run · ${timeAgo(lastRun.created_at)}`:'Last run'}</SectionLabel>
+        {lastRun ? (
+          <>
+            <p style={{fontSize:13.5,fontWeight:500,lineHeight:1.45,color:C.text}}>
+              {lastSteps>0?`${lastSteps} step${lastSteps===1?'':'s'} completed`:'Run recorded'}<br/>{lastOutcome}
+            </p>
+            <button className="link-green btn" onClick={()=>onSelectRun(lastRun)} style={{
+              background:'none',border:'none',padding:0,fontSize:12,marginTop:12,fontFamily:FONT.sans,
+            }}>View run details →</button>
+          </>
+        ) : (
+          <p style={{fontSize:13,color:C.textMuted,lineHeight:1.55}}>No runs yet.<br/>Your first run kicks off Monday at 9:00 — or start one now.</p>
+        )}
+      </div>
+
+      <div className="hero-cell" style={{display:'flex',flexDirection:'column',gap:9,justifyContent:'center',minWidth:200}}>
+        {!isPaused && (
+          <button className="btn btn-primary v-press" onClick={onTriggerRun} disabled={runNowDisabled} style={{
+            fontSize:12.5,fontWeight:500,borderRadius:9,padding:'10px 18px',
+            opacity:runNowDisabled?.55:1,cursor:runNowDisabled?'not-allowed':'pointer',
+          }}>{runNowLabel}</button>
+        )}
+        <button className="btn btn-ghost" onClick={onTogglePause} disabled={actionLoading} style={{
+          fontSize:12.5,borderRadius:9,padding:'10px 18px',
+          opacity:actionLoading?.55:1,cursor:actionLoading?'not-allowed':'pointer',
+        }}>
+          {actionLoading?'…':isPaused?'Resume agent':'Pause agent'}
+        </button>
+        {triggerMessage && (
+          <p className="reveal-in" style={{fontSize:11,lineHeight:1.5,color:triggerMessage.error?C.redText:C.accent}}>{triggerMessage.text}</p>
+        )}
+        {!isPaused && !inFlight && manualCooldownLeftMs===0 && !triggerMessage && (
+          <p style={{fontSize:10,color:C.textLight,lineHeight:1.4,textAlign:'center'}}>One manual run/day · scheduled runs continue automatically</p>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+// ─── KPI ROW (Overview) ───────────────────────────────────────────────────────
+function KpiRow({runs}) {
+  const total    = runs.length
+  const deployed = runs.filter(isLive).length
+  const rate     = total>0 ? Math.round((deployed/total)*100) : null
+  const pending  = runs.filter(isAwaitingApproval)
+
+  const oneWeekAgo = new Date(Date.now() - 7 * 86400000)
+  const thisWeek = runs.filter(r=>new Date(r.created_at)>oneWeekAgo&&isLive(r)).length
+  const firstRun = runs.length ? runs[runs.length-1] : null
+  const sinceStr = firstRun ? new Date(firstRun.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'}) : null
+  const pendingHint = pending[0]?.analysis_result?.problem
+
+  const kpis = [
+    {
+      label:'Fixes live', num:deployed, format:n=>Math.round(n).toLocaleString(),
+      sub: thisWeek>0?`+${thisWeek} this week`:'Shipped to production',
+      subColor: thisWeek>0?C.accent:C.label,
+    },
+    {
+      label:'Deploy rate', num:rate??0, format:n=>rate==null?'—':`${Math.round(n)}%`,
+      sub: total>0?`${deployed} of ${total} held in production`:'No runs yet',
+      subColor: C.label,
+    },
+    {
+      label:'Runs completed', num:total, format:n=>Math.round(n).toLocaleString(),
+      sub: sinceStr?`since ${sinceStr}`:'Analyzed since launch',
+      subColor: C.label,
+    },
+    {
+      label:'Awaiting review', num:pending.length, format:n=>Math.round(n).toLocaleString(),
+      sub: pending.length>0?(pendingHint?pendingHint.slice(0,42)+(pendingHint.length>42?'…':''):'Reply YES or NO on Telegram'):'Nothing waiting on you',
+      subColor: pending.length>0?C.yellowText:C.label,
+    },
+  ]
+
+  return (
+    <div className="dash-kpis v-stagger" style={{marginBottom:14}}>
+      {kpis.map((k,i)=>(
+        <Card key={i} className="card-hover" style={{padding:'18px 22px'}}>
+          <SectionLabel>{k.label}</SectionLabel>
+          <p style={{fontFamily:FONT.serif,fontSize:38,fontWeight:500,lineHeight:1.15,color:C.ink,marginTop:8}}>
+            <CountUp value={k.num} format={k.format}/>
+          </p>
+          <p style={{fontSize:11.5,color:k.subColor,marginTop:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{k.sub}</p>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+// ─── ACTIVITY CARD (Overview) ─────────────────────────────────────────────────
+// Real run-outcome timeline rows only. Pending fixes live in PendingApprovalCard
+// + the header badge; this stream is "actions taken", so running + awaiting-
+// approval rows are skipped to avoid duplication.
+function ActivityCard({runs, onSelectRun, onGoRuns}) {
+  const items = runs
+    .filter(r => r.status!=='running' && !isAwaitingApproval(r))
+    .slice(0,5)
+
+  return (
+    <Card className="fade-up" style={{padding:'20px 24px'}}>
+      <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:6}}>
+        <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Activity</p>
+        <button className="link-green btn" onClick={onGoRuns} style={{background:'none',border:'none',padding:0,fontSize:11.5,fontFamily:FONT.sans}}>All runs →</button>
+      </div>
+      {items.length===0 && (
+        <p style={{fontSize:12,color:C.textLight,padding:'18px 0',textAlign:'center'}}>
+          No completed runs yet. Kick one off with Run now, or wait for Monday morning.
+        </p>
+      )}
+      {items.map((run,i)=>{
+        const analysis = run.analysis_result||{}
+        return (
+          <div key={run.id} className="stream-in run-row" onClick={()=>onSelectRun(run)} style={{
+            animationDelay:`${i*0.05}s`,
+            display:'grid',gridTemplateColumns:'26px 1fr auto',gap:12,alignItems:'center',
+            padding:'13px 0',borderBottom:i<items.length-1?`1px solid ${C.borderSoft}`:'none',
+          }}>
+            <StatusDotIcon status={run.status}/>
+            <div style={{minWidth:0}}>
+              <p style={{fontSize:13,fontWeight:500,lineHeight:1.35,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {analysis.problem || (STATUS[run.status]?.label || 'Run')}
+              </p>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4}}>
+                {analysis.file_to_edit && <FileChip>{analysis.file_to_edit.split('/').pop()}</FileChip>}
+                <span style={{fontSize:11,color:C.textLight}}>{timeAgo(run.created_at)}</span>
+              </div>
+            </div>
+            <StatusBadge status={run.status}/>
+          </div>
+        )
+      })}
+    </Card>
+  )
+}
+
+// ─── PERFORMANCE CARD (Overview sidebar column) ───────────────────────────────
+function PerformanceCard({runs}) {
   const deployed = runs.filter(isLive).length
   const total    = runs.length
   const rate     = total>0?Math.round((deployed/total)*100):0
+  const failed   = runs.filter(r=>['failed','rejected','shopify_rejected','shopify_token_failed','shopify_theme_read_failed'].includes(r.status)).length
+
+  // Run history — oldest → latest, colored by outcome (deployed = soft green).
+  const history = [...runs].slice(0,26).reverse()
+  const oldest  = history[0]
 
   return (
-    <div className="dash-ctx-sidebar" style={{width:272,flexShrink:0,position:'sticky',top:20,alignSelf:'flex-start',display:'flex',flexDirection:'column',gap:10}}>
-
-      {/* Site Network mini-map — FIRST sidebar item, above the Status card (the
-          "top-right" slot). 272px column keeps it compact; fixed 150px height +
-          overflow:hidden mean it can't stretch to content. The box is the click
-          target → Network tab. Pure graph in a card-matched frame (white bg, 1px
-          border, radius 12 — same as the Status/Performance cards). max-width keeps
-          it compact when the sidebar drops full-width ≤1100px. Hidden when no
-          graph/structure exists yet. */}
-      {networkData && (
-        <div
-          className="dash-mini-net"
-          role="button"
-          tabIndex={0}
-          onClick={onOpenNetwork}
-          onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onOpenNetwork?.() } }}
-          aria-label="Open the full Network map"
-          style={{position:'relative',height:150,cursor:'pointer'}}
-        >
-          {isPreview && (
-            <span style={{
-              position:'absolute',top:8,left:8,zIndex:2,
-              fontSize:9,letterSpacing:'.08em',textTransform:'uppercase',
-              color:C.textLight,background:'rgba(255,255,255,0.92)',
-              border:`1px solid ${C.border}`,borderRadius:4,padding:'1px 5px',
-              fontWeight:500,pointerEvents:'none',
-            }}>Preview</span>
-          )}
-          <MiniNetwork data={networkData} fonts={{sans:"'DM Sans', sans-serif"}} style={{height:'100%',background:C.bgCard}}/>
+    <Card className="fade-up" style={{padding:'20px 24px',animationDelay:'.08s'}}>
+      <p style={{fontSize:13.5,fontWeight:600,color:C.text,marginBottom:14}}>Performance</p>
+      <div style={{display:'flex',gap:26}}>
+        <div>
+          <p style={{fontFamily:FONT.serif,fontSize:30,fontWeight:500,color:C.accent,lineHeight:1}}>
+            <CountUp value={rate} format={n=>`${Math.round(n)}%`}/>
+          </p>
+          <p style={{fontSize:11,color:C.label,marginTop:2}}>Deploy rate</p>
         </div>
-      )}
-
-      <Card style={{overflow:'hidden'}}>
-        <div style={{
-          padding:'12px 16px',
-          background: isPaused?C.yellowSoft:isRunning?C.blueSoft:C.accentSoft,
-          borderBottom:`1px solid ${isPaused?C.yellowMid:isRunning?C.blueMid:C.accentMid}`,
-          display:'flex',alignItems:'center',justifyContent:'space-between',
-        }}>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <span className={isRunning?'pulse-dot':''} style={{
-              width:7,height:7,borderRadius:'50%',display:'inline-block',
-              background:isPaused?C.yellow:isRunning?C.blue:C.accent,
-            }}/>
-            <span style={{fontSize:10,letterSpacing:'.1em',textTransform:'uppercase',fontWeight:500,color:isPaused?C.yellow:isRunning?C.blue:C.accent}}>
-              {isPaused?'Paused':isRunning?'Running now':'Idle'}
-            </span>
-          </div>
-          <span style={{fontSize:10,color:C.textLight,fontFamily:'DM Mono,monospace'}}>Growth Agent</span>
+        <div>
+          <p style={{fontFamily:FONT.serif,fontSize:30,fontWeight:500,color:C.ink,lineHeight:1}}>
+            <CountUp value={failed}/>
+          </p>
+          <p style={{fontSize:11,color:C.label,marginTop:2}}>Failed / rejected</p>
         </div>
-
-        <div style={{padding:'14px 16px',borderBottom:`1px solid ${C.border}`}}>
-          {isPaused ? (
-            <p style={{fontSize:12,color:C.textMuted,lineHeight:1.6}}>Agent is paused. Resume to run again next Monday.</p>
-          ) : isRunning ? (
-            <div>
-              <SectionLabel style={{marginBottom:8}}>Currently running</SectionLabel>
-              <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:4}}>
-                <Spinner size={13}/>
-                <p style={{fontSize:13,color:C.text,fontWeight:500}}>{AGENT_STEPS[stepIdx]?.label||'Analyzing…'}</p>
-              </div>
-              <p style={{fontSize:11,color:C.textMuted}}>{AGENT_STEPS[stepIdx]?.desc||''}</p>
-            </div>
-          ) : (
-            <div>
-              <SectionLabel style={{marginBottom:8}}>Next run in</SectionLabel>
-              <p style={{fontFamily:'DM Mono,monospace',fontSize:22,color:C.text,letterSpacing:'.02em',marginBottom:10}}>{countdown.str}</p>
-              <div style={{height:2,background:'rgba(42,92,69,0.1)',borderRadius:2,marginBottom:5}}>
-                <div style={{height:'100%',width:`${weekProgress}%`,background:C.accent,borderRadius:2,transition:'width 1s'}}/>
-              </div>
-              <p style={{fontSize:10,color:C.textLight}}>Every Monday · 9:00 am</p>
-            </div>
-          )}
-        </div>
-
-        {lastRun && (
-          <div style={{padding:'13px 16px',borderBottom:`1px solid ${C.border}`}}>
-            <SectionLabel style={{marginBottom:11}}>{isRunning?'Live steps':'Last run · '+timeAgo(lastRun.created_at)}</SectionLabel>
-            <div style={{display:'flex',flexDirection:'column',gap:0}}>
-              {AGENT_STEPS.map((step,i)=>{
-                const done = i<stepIdx
-                const current = i===stepIdx
-                const failed = (lastRun.status==='failed')&&i===stepIdx
-                return (
-                  <div key={step.id} style={{
-                    display:'flex',gap:9,alignItems:'flex-start',
-                    paddingBottom:i<AGENT_STEPS.length-1?8:0,
-                    position:'relative',
-                  }}>
-                    {i<AGENT_STEPS.length-1&&(
-                      <div style={{position:'absolute',left:7,top:15,width:1,height:'calc(100% - 4px)',background:done?C.accent:C.border,opacity:0.3,zIndex:0}}/>
-                    )}
-                    <div style={{
-                      width:15,height:15,borderRadius:'50%',flexShrink:0,zIndex:1,
-                      background:failed?C.red:current?C.blue:done?C.accent:'rgba(26,25,22,0.07)',
-                      border:`1px solid ${failed?C.red:current?C.blue:done?C.accent:C.border}`,
-                      display:'flex',alignItems:'center',justifyContent:'center',
-                      fontSize:8,color:'#fff',
-                      animation:current?'pulse 2s ease infinite':'none',
-                    }}>
-                      {done&&!current?'✓':''}
-                    </div>
-                    <p style={{
-                      fontSize:11,paddingTop:1,
-                      color:failed?C.red:current?C.blue:done?C.text:C.textLight,
-                      fontWeight:current?500:300,
-                    }}>{step.label}</p>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Pending-approval block removed — the pending PR is shown once, in
-            PRMissionControl (main column) + the header badge. */}
-
-        <div style={{padding:'12px 16px',display:'flex',flexDirection:'column',gap:8}}>
-          {!isPaused && (
-            <button className="btn" onClick={onTriggerRun} disabled={runNowDisabled} style={{
-              width:'100%',padding:'9px',borderRadius:7,fontSize:12,fontWeight:500,
-              background:runNowDisabled?'transparent':C.accent,
-              color:runNowDisabled?C.textLight:'#fff',
-              border:`1px solid ${runNowDisabled?C.border:C.accent}`,
-              cursor:runNowDisabled?'not-allowed':'pointer',
-            }}>
-              {runNowLabel}
-            </button>
-          )}
-          {triggerMessage && (
-            <p style={{fontSize:11,lineHeight:1.5,color:triggerMessage.error?C.red:C.accent}}>{triggerMessage.text}</p>
-          )}
-          {!isPaused && !inFlight && manualCooldownLeftMs===0 && !triggerMessage && (
-            <p style={{fontSize:10,color:C.textLight,lineHeight:1.4,textAlign:'center'}}>One manual run/day · scheduled runs continue automatically</p>
-          )}
-          <button className="btn" onClick={onTogglePause} disabled={actionLoading} style={{
-            width:'100%',padding:'9px',borderRadius:7,fontSize:12,
-            background:isPaused?C.accent:'transparent',
-            color:isPaused?'#fff':C.textMuted,
-            border:`1px solid ${isPaused?C.accent:C.border}`,
-            opacity:actionLoading?0.5:1,cursor:actionLoading?'not-allowed':'pointer',
-          }}>
-            {actionLoading?'…':isPaused?'▶ Resume Agent':'⏸ Pause Agent'}
-          </button>
-        </div>
-      </Card>
-
-      <Card style={{padding:'14px 16px'}}>
-        <SectionLabel style={{marginBottom:12}}>Performance</SectionLabel>
-        {/* Process detail — the demoted deploy-rate + failure metrics (kept out of
-            the outcome-led KPIs). Fixes/awaiting counts live in the KPIs/header. */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
-          {[
-            {label:'Deploy rate',num:rate,format:n=>`${Math.round(n)}%`,color:C.green},
-            {label:'Failed / rejected',num:runs.filter(r=>r.status==='failed'||r.status==='rejected').length,format:n=>Math.round(n),color:C.textLight},
-          ].map((s,i)=>(
-            <div key={i}>
-              <p style={{fontFamily:'Instrument Serif,serif',fontSize:24,fontWeight:400,color:s.color,lineHeight:1}}><CountUp value={s.num} format={s.format}/></p>
-              <p style={{fontSize:10,color:C.textLight,marginTop:3}}>{s.label}</p>
-            </div>
-          ))}
-        </div>
-        {runs.length>0&&(
-          <>
-            <SectionLabel style={{marginBottom:6}}>Run history</SectionLabel>
-            <RunHistoryBar runs={runs}/>
-            <div style={{display:'flex',justifyContent:'space-between',marginTop:3}}>
-              <span style={{fontSize:9,color:C.textLight}}>oldest</span>
-              <span style={{fontSize:9,color:C.textLight}}>latest</span>
-            </div>
-          </>
-        )}
-      </Card>
-    </div>
-  )
-}
-
-// ─── OVERVIEW PAGE ────────────────────────────────────────────────────────────
-function OverviewPage({runs, subscription, funnelPages, learnings, impactMetrics, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, siteNetwork, structurePreview, websiteUrl, onOpenNetwork}) {
-  const activeRun = runs.find(r=>r.status==='running')
-  const pendingRun = runs.find(isAwaitingApproval)
-  // Hide the Top Insights column entirely when there's nothing to show (day-1),
-  // letting the activity stream span full width — no onboarding-copy placeholder.
-  const hasInsights = buildTopInsights({runs, funnelPages, learnings, impactMetrics}).length > 0
-
-  // Site Network mini-map data — reuses the already-fetched siteNetwork +
-  // websiteUrl (no extra fetch); same transform the Network tab uses. Falls back to
-  // site_structure_preview (onboarding's discover_structure) so the map appears
-  // before the first run populates agent_site_network. Null only when neither exists.
-  const networkInflight = runs.find(r=>r.status==='running') || runs.find(isAwaitingApproval) || null
-  const networkRow  = siteNetwork || structurePreview
-  const isPreview   = !siteNetwork && !!structurePreview
-  const networkData = buildNetworkData(networkRow, { domain: hubDomainFromUrl(websiteUrl), inflightRun: networkInflight })
-
-  return (
-    <div className="dash-overview-row" style={{display:'flex',gap:16,alignItems:'flex-start'}}>
-      <div style={{flex:1,minWidth:0,display:'flex',flexDirection:'column',gap:14}}>
-
-        {pendingRun && <div className="fade-up"><PRMissionControl run={pendingRun}/></div>}
-
-        <div className="fade-up" style={{animationDelay:'.05s'}}>
-          <KPIBar runs={runs} learnings={learnings}/>
-        </div>
-
-        <div style={{display:'grid',gridTemplateColumns:hasInsights?'1fr 1fr':'1fr',gap:14}}>
-          <Card className="fade-up" style={{padding:'16px 18px',animationDelay:'.1s'}}>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-              <div>
-                <SectionLabel style={{marginBottom:2}}>
-                  {activeRun?'🟢 Agent is running':'Activity Stream'}
-                </SectionLabel>
-                <p style={{fontSize:11,color:C.textLight}}>
-                  {activeRun?'Real-time progress':'Last actions taken'}
-                </p>
-              </div>
-              {activeRun&&<div style={{display:'flex',gap:6,alignItems:'center'}}>
-                <Spinner size={13}/>
-                <span style={{fontSize:10,color:C.blue}}>Live</span>
-              </div>}
-            </div>
-            <LiveActivityStream runs={runs} activeRun={activeRun}/>
-          </Card>
-
-          {hasInsights && (
-            <div className="fade-up" style={{animationDelay:'.12s',display:'flex',flexDirection:'column',gap:10}}>
-              <SectionLabel>Top Insights</SectionLabel>
-              <TopInsights runs={runs} funnelPages={funnelPages} learnings={learnings} impactMetrics={impactMetrics}/>
-            </div>
-          )}
-        </div>
-
-        {/* Condensed learnings strip; the full per-outcome list lives on Runs. */}
-        <AgentLearningStrip learnings={learnings}/>
       </div>
-
-      <AgentSidebar
-        subscription={subscription}
-        runs={runs}
-        onTogglePause={onTogglePause}
-        actionLoading={actionLoading}
-        onSelectRun={onSelectRun}
-        onTriggerRun={onTriggerRun}
-        triggerLoading={triggerLoading}
-        triggerMessage={triggerMessage}
-        networkData={networkData}
-        isPreview={isPreview}
-        onOpenNetwork={onOpenNetwork}
-      />
-    </div>
+      {history.length>0 && (
+        <>
+          <SectionLabel style={{margin:'18px 0 8px'}}>Run history</SectionLabel>
+          <div style={{display:'flex',alignItems:'flex-end',gap:3,height:38}}>
+            {history.map((run,i)=>{
+              const s = STATUS[run.status]||STATUS.pending
+              const h = isLive(run)?'100%':isAwaitingApproval(run)?'66%':run.status==='failed'||run.status==='rejected'||run.status==='shopify_rejected'?'34%':'56%'
+              const bg = isLive(run)?C.accentBar:s.dot
+              return (
+                <div key={run.id} title={`${s.label} · ${timeAgo(run.created_at)}`} className="v-bar-fill" style={{
+                  flex:1,borderRadius:2,height:h,background:bg,animationDelay:`${i*0.02}s`,
+                }}/>
+              )
+            })}
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:9.5,color:C.textFaint,marginTop:5}}>
+            <span>{oldest?new Date(oldest.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'oldest'}</span>
+            <span>today</span>
+          </div>
+        </>
+      )}
+      {history.length===0 && (
+        <p style={{fontSize:11,color:C.textLight,marginTop:14}}>Run history appears after your first run.</p>
+      )}
+    </Card>
   )
 }
 
-// ─── AGENT LEARNING STRIP ────────────────────────────────────────────────────
-function AgentLearningStrip({learnings}) {
-  // FIX #13: early return BEFORE any derived calculations to avoid NaN / division-by-zero
+// ─── GUARDRAILS TEASER (Overview sidebar column) ─────────────────────────────
+function GuardrailsTeaser({subscriptionId, onGoGuardrails}) {
+  const [ruleCount, setRuleCount] = useState(null)
+
+  useEffect(()=>{
+    if(!subscriptionId) return
+    supabase.from('agent_brand_guardrails').select('tone,forbidden_patterns,protected_elements,custom_rules')
+      .eq('subscription_id',subscriptionId).maybeSingle()
+      .then(({data})=>{
+        if(!data){ setRuleCount(0); return }
+        setRuleCount(
+          (data.tone?1:0) +
+          (data.forbidden_patterns?.length||0) +
+          (data.protected_elements?.length||0) +
+          (data.custom_rules?1:0)
+        )
+      })
+  },[subscriptionId])
+
+  return (
+    <Card className="fade-up card-hover" style={{padding:'18px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,animationDelay:'.12s'}}>
+      <div>
+        <p style={{fontSize:12.5,fontWeight:600,color:C.text}}>Guardrails</p>
+        <p style={{fontSize:11,color:C.label,marginTop:2}}>
+          {ruleCount==null ? 'Rules enforced on every run'
+            : ruleCount>0 ? `${ruleCount} rule${ruleCount===1?'':'s'} enforced on every run`
+            : 'Set brand rules the agent must follow'}
+        </p>
+      </div>
+      <button className="link-green btn" onClick={onGoGuardrails} style={{background:'none',border:'none',padding:0,fontSize:11.5,whiteSpace:'nowrap',fontFamily:FONT.sans}}>Edit →</button>
+    </Card>
+  )
+}
+
+// ─── BUSINESS DNA STRIP (Overview) ───────────────────────────────────────────
+function AgentLearningStrip({learnings, onGoDna}) {
   if (learnings.length===0) return null
 
   const wins    = learnings.filter(l=>l.outcome==='positive').length
@@ -1023,38 +839,35 @@ function AgentLearningStrip({learnings}) {
   const avgLift = posAvgDelta.length>0?Math.round(posAvgDelta.reduce((s,l)=>s+(l.delta||0),0)/posAvgDelta.length):null
 
   return (
-    <Card className="fade-up" style={{padding:'16px 18px',borderColor:C.accentMid,background:C.accentSoft}}>
-      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
-        <span style={{fontSize:18}}>🧠</span>
+    <Card className="fade-up" style={{padding:'20px 24px',animationDelay:'.15s'}}>
+      <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:14}}>
         <div>
-          <SectionLabel style={{color:C.accent,marginBottom:1}}>Business DNA · Agent is learning</SectionLabel>
-          <p style={{fontSize:11,color:C.textMuted}}>A record of what worked on your site, and what didn’t</p>
+          <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Business DNA</p>
+          <p style={{fontSize:11,color:C.label,marginTop:2}}>What worked on your site, and what didn’t — read on every run</p>
         </div>
+        <button className="link-green btn" onClick={onGoDna} style={{background:'none',border:'none',padding:0,fontSize:11.5,fontFamily:FONT.sans}}>View DNA →</button>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
-        <div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.accent,lineHeight:1}}><CountUp value={learnings.length}/></p>
-          <p style={{fontSize:10,color:C.textMuted,marginTop:3}}>total learnings</p>
-        </div>
-        <div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.green,lineHeight:1}}><CountUp value={rate} format={n=>`${Math.round(n)}%`}/></p>
-          <p style={{fontSize:10,color:C.textMuted,marginTop:3}}>win rate</p>
-        </div>
-        <div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.green,lineHeight:1}}>{avgLift!=null?<CountUp value={avgLift} format={n=>`+${Math.round(n)}%`}/>:'—'}</p>
-          <p style={{fontSize:10,color:C.textMuted,marginTop:3}}>avg improvement on wins</p>
-        </div>
-        <div>
-          <p style={{fontFamily:'Instrument Serif,serif',fontSize:28,color:C.textMuted,lineHeight:1}}><CountUp value={losses}/></p>
-          <p style={{fontSize:10,color:C.textMuted,marginTop:3}}>rolled back / avoided</p>
-        </div>
+      <div className="strip-grid">
+        {[
+          {num:learnings.length, format:undefined, color:C.ink,   sub:'total learnings'},
+          {num:rate,             format:n=>`${Math.round(n)}%`, color:C.accent, sub:'win rate'},
+          {num:avgLift,          format:n=>`+${Math.round(n)}%`, color:C.accent, sub:'avg improvement on wins'},
+          {num:losses,           format:undefined, color:C.textMuted, sub:'rolled back / avoided'},
+        ].map((s,i)=>(
+          <div key={i}>
+            <p style={{fontFamily:FONT.serif,fontSize:26,fontWeight:500,color:s.color,lineHeight:1}}>
+              {s.num!=null?<CountUp value={s.num} format={s.format}/>:'—'}
+            </p>
+            <p style={{fontSize:10.5,color:C.label,marginTop:3}}>{s.sub}</p>
+          </div>
+        ))}
       </div>
-      <div style={{marginTop:14,display:'flex',flexDirection:'column',gap:6}}>
+      <div style={{marginTop:14,display:'flex',flexDirection:'column'}}>
         {learnings.slice(0,3).map((l,i)=>(
-          <div key={l.id||i} style={{display:'flex',alignItems:'center',gap:10,fontSize:11}}>
-            <span style={{color:l.outcome==='positive'?C.green:C.red,flexShrink:0}}>{l.outcome==='positive'?'✓':'✕'}</span>
+          <div key={l.id||i} style={{display:'flex',alignItems:'center',gap:10,fontSize:11.5,padding:'7px 0',borderTop:`1px solid ${C.borderSoft}`}}>
+            <span style={{color:l.outcome==='positive'?C.green:C.red,flexShrink:0,fontWeight:600}}>{l.outcome==='positive'?'✓':'✕'}</span>
             <span style={{color:C.text,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.summary}</span>
-            {l.delta&&<span style={{color:l.outcome==='positive'?C.green:C.red,flexShrink:0,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}%</span>}
+            {l.delta&&<span style={{color:l.outcome==='positive'?C.greenText:C.redText,flexShrink:0,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}%</span>}
           </div>
         ))}
       </div>
@@ -1062,11 +875,49 @@ function AgentLearningStrip({learnings}) {
   )
 }
 
+// ─── OVERVIEW PAGE ────────────────────────────────────────────────────────────
+function OverviewPage({runs, subscription, learnings, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, onGoRuns, onGoGuardrails, onGoDna}) {
+  const pendingRun = runs.find(isAwaitingApproval)
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:14}}>
+      {pendingRun && <PendingApprovalCard run={pendingRun}/>}
+
+      <StatusHero
+        subscription={subscription} runs={runs}
+        onTogglePause={onTogglePause} actionLoading={actionLoading}
+        onTriggerRun={onTriggerRun} triggerLoading={triggerLoading}
+        triggerMessage={triggerMessage} onSelectRun={onSelectRun}
+      />
+
+      <KpiRow runs={runs}/>
+
+      <div className="dash-cols">
+        <ActivityCard runs={runs} onSelectRun={onSelectRun} onGoRuns={onGoRuns}/>
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <PerformanceCard runs={runs}/>
+          <GuardrailsTeaser subscriptionId={subscription?.id} onGoGuardrails={onGoGuardrails}/>
+        </div>
+      </div>
+
+      <AgentLearningStrip learnings={learnings} onGoDna={onGoDna}/>
+    </div>
+  )
+}
+
 // ─── RUNS PAGE ────────────────────────────────────────────────────────────────
 function RunsPage({runs, loading, onSelect, learnings=[]}) {
   const [filter, setFilter] = useState('all')
   // Outcomes lead; error/rejection states trail (don't headline failure).
-  const filters = ['all','deployed','waiting_approval','rejected','rolled_back','failed']
+  const filters = [
+    { key:'all',              label:'All' },
+    { key:'deployed',         label:'Deployed' },
+    { key:'waiting_approval', label:'Awaiting approval' },
+    { key:'rejected',         label:'Rejected' },
+    { key:'rolled_back',      label:'Rolled back' },
+    { key:'failed',           label:'Failed' },
+  ]
+  const countFor = key => key==='all' ? runs.length : runs.filter(r=>(STATUS_GROUP[key]||[key]).includes(r.status)).length
 
   // Group-aware: each chip matches its GitHub status AND its Shopify-direct twin(s).
   const filtered = filter==='all'?runs:runs.filter(r=>(STATUS_GROUP[filter]||[filter]).includes(r.status))
@@ -1083,253 +934,126 @@ function RunsPage({runs, loading, onSelect, learnings=[]}) {
     cur.runs.push(run)
   })
 
-  return (
-    <div style={{display:'flex',flexDirection:'column',gap:14}}>
-    <Card style={{overflow:'hidden'}}>
-      <div style={{padding:'14px 18px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
-        <div>
-          <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:1}}>Activity Log</p>
-          <p style={{fontSize:11,color:C.textLight}}>Click any run for full details</p>
-        </div>
-        <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
-          {filters.map(f=>(
-            <button key={f} className="btn" onClick={()=>setFilter(f)} style={{
-              background:filter===f?C.text:'transparent',
-              color:filter===f?C.bg:C.textMuted,
-              border:`1px solid ${filter===f?C.text:C.border}`,
-              borderRadius:5, padding:'3px 9px', fontSize:10,
-              fontFamily:'DM Sans,sans-serif',fontWeight:filter===f?500:400,
-              textTransform:'capitalize',
-            }}>
-              {f==='all'?'All':STATUS[f]?.label||f}
-            </button>
-          ))}
-        </div>
-      </div>
+  if (loading) return <div style={{padding:48,display:'flex',justifyContent:'center'}}><Spinner/></div>
 
-      {loading ? (
-        <div style={{padding:'48px',display:'flex',justifyContent:'center'}}><Spinner/></div>
-      ) : filtered.length===0 ? (
-        <div style={{padding:'48px',textAlign:'center'}}>
-          <p style={{fontSize:13,color:C.textLight}}>{filter==='all'?'No runs yet.':'No runs with this filter.'}</p>
-        </div>
-      ) : grouped.map((group,gi)=>(
-        <div key={gi}>
-          <div style={{padding:'10px 18px 5px',display:'flex',alignItems:'center',gap:10,background:'rgba(26,25,22,0.02)'}}>
-            <span style={{fontSize:10,letterSpacing:'.1em',textTransform:'uppercase',color:C.textLight,fontWeight:500,whiteSpace:'nowrap'}}>{group.label}</span>
-            <div style={{flex:1,height:1,background:C.border}}/>
-            <span style={{fontSize:10,color:C.textLight}}>{group.runs.length} run{group.runs.length!==1?'s':''}</span>
-          </div>
-          {group.runs.map((run,i)=>{
-            const analysis=run.analysis_result||{}
-            const s=STATUS[run.status]||STATUS.pending
-            const bounceDelta = (run.bounce_rate_before != null && run.bounce_rate_after != null)
-              ? run.bounce_rate_after - run.bounce_rate_before : null
-            // A/B testing is vestigial (no cron creates A/B runs); kept only so
-            // historical run_type='ab_test' rows still render. No badge is shown.
-            const hasAB        = !!run.ab_test_variants
-            const hasCompetitor= Array.isArray(run.competitor_changes) && run.competitor_changes.length > 0
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+      <div className="fade-up" style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,gap:16,flexWrap:'wrap'}}>
+        <p style={{fontSize:12.5,color:C.textMuted}}>Every change the agent made or proposed — click a run for full details.</p>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {filters.map(f=>{
+            const active = filter===f.key
             return (
-              <div key={run.id} className="run-row fade-up" onClick={()=>onSelect(run)}
-                style={{
-                  animationDelay:`${(gi*4+i)*0.03}s`,
-                  display:'flex',gap:0,background:'#fff',
-                  borderBottom:i<group.runs.length-1?`1px solid ${C.border}`:'none',
-                }}
-              >
-                <div style={{width:40,display:'flex',flexDirection:'column',alignItems:'center',paddingTop:18,flexShrink:0,position:'relative'}}>
-                  {i<group.runs.length-1&&(
-                    <div style={{position:'absolute',top:28,bottom:0,left:'50%',width:1,background:C.border,transform:'translateX(-50%)'}}/>
-                  )}
-                  <div style={{
-                    width:9,height:9,borderRadius:'50%',zIndex:1,
-                    background:s.dot,border:`2px solid #fff`,boxShadow:`0 0 0 1.5px ${s.dot}44`,
-                    animation:run.status==='running'?'pulse 2s ease infinite':'none',
-                  }}/>
-                </div>
-                {run.screenshot_before && (
-                  <img src={run.screenshot_before} alt="Before"
-                    style={{ width:80, height:50, objectFit:'cover', borderRadius:6, border:`1px solid ${C.border}`, marginTop:14, marginRight:12, flexShrink:0 }} />
-                )}
-                <div style={{flex:1,padding:'14px 18px 14px 0',minWidth:0}}>
-                  <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10,marginBottom:5}}>
-                    <p style={{fontSize:13,fontWeight:400,color:C.text,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                      {analysis.problem||'Analysis pending…'}
-                    </p>
-                    <StatusBadge status={run.status} small/>
-                  </div>
-                  <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:5}}>
-                    {hasCompetitor && (
-                      <span style={{fontSize:10,color:C.yellow,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,padding:'1px 7px',borderRadius:4,fontWeight:500,letterSpacing:'.04em',textTransform:'uppercase'}}>
-                        ⚠ Competitor change
-                      </span>
-                    )}
-                    {bounceDelta != null && (
-                      <span style={{fontSize:10, color: bounceDelta < 0 ? C.green : bounceDelta > 0 ? C.red : C.textLight, fontWeight:500}}>
-                        Bounce {run.bounce_rate_before}% → {run.bounce_rate_after}% {bounceDelta < 0 ? '↓' : bounceDelta > 0 ? '↑' : '→'}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-                    {analysis.file_to_edit&&(
-                      <code style={{fontSize:10,color:C.accent,background:C.accentSoft,padding:'1px 6px',borderRadius:4,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'inline-block'}}>
-                        {analysis.file_to_edit.split('/').pop()}
-                      </code>
-                    )}
-                    {analysis.expected_improvement&&(
-                      <span style={{fontSize:10,color:C.green}}>↑ {analysis.expected_improvement}</span>
-                    )}
-                    {run.pr_url&&(
-                      <a href={run.pr_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:10,color:C.accent,textDecoration:'none'}}>
-                        PR #{run.pr_number} ↗
-                      </a>
-                    )}
-                    <span style={{fontSize:10,color:C.textLight,marginLeft:'auto',whiteSpace:'nowrap'}}>{fmt(run.created_at)}</span>
-                  </div>
-                  {analysis.data_insight&&(
-                    <p style={{fontSize:11,color:C.textMuted,marginTop:5,lineHeight:1.5,overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>
-                      {analysis.data_insight}
-                    </p>
-                  )}
-                </div>
-              </div>
+              <button key={f.key} className="btn" onClick={()=>setFilter(f.key)} style={{
+                fontSize:11.5,fontWeight:500,padding:'6px 13px',borderRadius:20,
+                background:active?C.ink:C.bgCard,
+                color:active?C.sideText:'#4A5248',
+                border:`1px solid ${active?C.ink:C.border}`,
+              }}>
+                {f.label} · {countFor(f.key)}
+              </button>
             )
           })}
         </div>
-      ))}
-    </Card>
-
-    {/* Agent Learnings — full per-outcome history (moved here from the removed
-        Insights tab; the condensed AgentLearningStrip stays on Overview). */}
-    {learnings.length>0&&(
-      <Card style={{overflow:'hidden'}}>
-        <div style={{padding:'14px 18px',borderBottom:`1px solid ${C.border}`}}>
-          <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:1}}>Agent Learnings</p>
-          <p style={{fontSize:11,color:C.textLight}}>Every outcome improves future decisions</p>
-        </div>
-        {learnings.map((l,i)=>(
-          <div key={l.id||i} style={{
-            display:'flex',alignItems:'flex-start',gap:12,padding:'12px 18px',
-            borderBottom:i<learnings.length-1?`1px solid ${C.border}`:'none',
-            background:l.outcome==='positive'?C.greenSoft:C.redSoft,
-          }}>
-            <span style={{fontSize:14,color:l.outcome==='positive'?C.green:C.red,flexShrink:0,paddingTop:1}}>
-              {l.outcome==='positive'?'✓':'✕'}
-            </span>
-            <div style={{flex:1,minWidth:0}}>
-              <p style={{fontSize:12,color:C.text,marginBottom:2}}>{l.summary}</p>
-              <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-                <span style={{fontSize:10,color:C.textMuted}}>{l.change_type}</span>
-                {l.delta&&<span style={{fontSize:10,color:l.outcome==='positive'?C.green:C.red,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}% {l.metric_type}</span>}
-                <span style={{fontSize:10,color:C.textLight}}>{l.confidence} confidence</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </Card>
-    )}
-    </div>
-  )
-}
-
-// ─── FUNNEL PAGE ──────────────────────────────────────────────────────────────
-// FIX #6: removed internal Supabase fetch — data already fetched by parent fetchData(),
-//         passed via props to avoid double network requests and state inconsistency
-// Stufe 2: saveFunnelPages now persists EVERY detected page (incl. views_7d=0), so the
-//   tab splits into two groups — "With traffic" (views_7d>0, full render) and
-//   "Detected · no traffic yet" (views_7d=0, greyed, "no traffic yet" label). Landing
-//   floats to the top of whichever group it falls in; on a fresh/low-traffic site every
-//   page is no-traffic, so the landing page leads the only group that renders.
-function FunnelRow({page, muted, maxScore, showBorder}) {
-  const dropColor = page.drop_off_score>=60?C.red:page.drop_off_score>=30?C.yellow:C.green
-  const barW = Math.round(((page.drop_off_score||0)/maxScore)*100)
-  return (
-    <div style={{padding:'12px 18px',borderBottom:showBorder?`1px solid ${C.border}`:'none',opacity:muted?0.55:1}}>
-      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:!muted&&page.drop_off_score>0?6:0}}>
-        <span style={{fontSize:15,flexShrink:0}}>{PAGE_TYPE_EMOJI[page.page_type]||'📄'}</span>
-        <div style={{flex:1,minWidth:0}}>
-          <p style={{fontSize:12,color:muted?C.textLight:C.text,fontFamily:'DM Mono,monospace',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{page.page_path}</p>
-        </div>
-        <div style={{textAlign:'right',flexShrink:0}}>
-          {muted
-            ? <p style={{fontSize:10,color:C.textLight,fontStyle:'italic'}}>no traffic yet</p>
-            : <>
-                {page.views_7d>0&&<p style={{fontSize:11,color:C.text,fontWeight:400}}><CountUp value={page.views_7d} format={n=>Math.round(n).toLocaleString()}/> views</p>}
-                {page.drop_off_score>0&&<p style={{fontSize:10,color:dropColor,marginTop:1}}>{page.drop_off_score}% drop-off</p>}
-              </>}
-        </div>
       </div>
-      {!muted&&page.drop_off_score>0&&(
-        <div style={{height:3,background:'rgba(26,25,22,0.07)',borderRadius:2}}>
-          <div className="v-bar-fill" style={{height:'100%',width:`${barW}%`,'--v-w':`${barW}%`,background:dropColor,borderRadius:2,opacity:0.6}}/>
-        </div>
-      )}
-    </div>
-  )
-}
 
-function FunnelPage({funnelPages, loading}) {
-  if(loading) return <div style={{padding:'48px',display:'flex',justifyContent:'center'}}><Spinner/></div>
-  if(!funnelPages.length) return (
-    <div style={{padding:'40px',textAlign:'center'}}>
-      <p style={{fontSize:24,marginBottom:10}}>🗺️</p>
-      <p style={{fontSize:13,color:C.text,marginBottom:4}}>No funnel data yet</p>
-      <p style={{fontSize:11,color:C.textLight}}>Funnel analysis runs automatically every Monday.</p>
-    </div>
-  )
-
-  const biggestOpp = [...funnelPages].filter(p=>p.drop_off_score>0).sort((a,b)=>b.drop_off_score-a.drop_off_score)[0]
-  const maxScore = Math.max(...funnelPages.map(p=>p.drop_off_score||0),1)
-
-  // Landing floats to the top of its group; traffic pages then sort by drop-off (the
-  // opportunity signal) then views, no-traffic pages alphabetically for stable order.
-  const landingFirst = (a,b)=>(b.page_type==='landing')-(a.page_type==='landing')
-  const withTraffic = funnelPages.filter(p=>p.views_7d>0)
-    .sort((a,b)=>landingFirst(a,b)||(b.drop_off_score||0)-(a.drop_off_score||0)||b.views_7d-a.views_7d)
-  const noTraffic = funnelPages.filter(p=>!(p.views_7d>0))
-    .sort((a,b)=>landingFirst(a,b)||a.page_path.localeCompare(b.page_path))
-
-  const groups = [
-    withTraffic.length && {key:'traffic',   label:'With traffic',             rows:withTraffic, muted:false},
-    noTraffic.length   && {key:'notraffic', label:'Detected · no traffic yet', rows:noTraffic,   muted:true },
-  ].filter(Boolean)
-
-  return (
-    <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      {biggestOpp&&(
-        <div className="fade-up" style={{background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:10,padding:'16px 20px',boxShadow:'0 4px 18px rgba(196,125,14,0.12)'}}>
-          <SectionLabel style={{color:C.yellow,marginBottom:6}}>⚠️ Biggest Opportunity</SectionLabel>
-          <p style={{fontSize:14,color:C.text,fontWeight:500,marginBottom:3}}>{PAGE_TYPE_EMOJI[biggestOpp.page_type]} {biggestOpp.page_path}</p>
-          <p style={{fontSize:11,color:C.textMuted}}>{biggestOpp.drop_off_score}% drop-off · {biggestOpp.views_7d||0} views/week</p>
-          {biggestOpp.ai_insight&&<p style={{fontSize:11,color:C.textMuted,marginTop:6,fontStyle:'italic'}}>{biggestOpp.ai_insight}</p>}
-        </div>
+      {filtered.length===0 && (
+        <Card className="fade-up" style={{padding:48,textAlign:'center'}}>
+          <p style={{fontSize:13,color:C.label}}>{filter==='all'?'No runs yet.':'No runs with this status yet.'}</p>
+        </Card>
       )}
 
-      <Card style={{overflow:'hidden'}}>
-        <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.border}`}}>
-          <p style={{fontSize:12,fontWeight:500,color:C.text}}>{funnelPages.length} pages detected{withTraffic.length>0?` · ${withTraffic.length} with traffic`:''}</p>
-        </div>
-        {groups.map((g,gi)=>(
-          <div key={g.key}>
-            <div style={{padding:'7px 18px',background:'rgba(26,25,22,0.02)',borderBottom:`1px solid ${C.border}`}}>
-              <p style={{fontSize:10,fontWeight:600,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.4}}>{g.label} · {g.rows.length}</p>
-            </div>
-            {g.rows.map((page,ri)=>(
-              <FunnelRow key={page.id} page={page} muted={g.muted} maxScore={maxScore}
-                showBorder={!(gi===groups.length-1&&ri===g.rows.length-1)}/>
-            ))}
+      {grouped.map((group,gi)=>(
+        <section key={gi} className="fade-up" style={{marginBottom:14,animationDelay:`${gi*0.06}s`}}>
+          <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',padding:'0 4px 8px'}}>
+            <SectionLabel style={{marginBottom:0}}>{group.label}</SectionLabel>
+            <span style={{fontSize:11,color:C.textLight}}>{group.runs.length} run{group.runs.length!==1?'s':''}</span>
           </div>
-        ))}
-      </Card>
+          <Card style={{overflow:'hidden'}}>
+            {group.runs.map((run,i)=>{
+              const analysis=run.analysis_result||{}
+              const bounceDelta = (run.bounce_rate_before != null && run.bounce_rate_after != null)
+                ? run.bounce_rate_after - run.bounce_rate_before : null
+              const hasCompetitor = Array.isArray(run.competitor_changes) && run.competitor_changes.length > 0
+              return (
+                <div key={run.id} className="run-row" onClick={()=>onSelect(run)} style={{
+                  display:'grid',gridTemplateColumns:'26px 1fr auto auto',gap:14,alignItems:'center',
+                  padding:'15px 22px',
+                  borderBottom:i<group.runs.length-1?`1px solid ${C.borderSoft}`:'none',
+                }}>
+                  <StatusDotIcon status={run.status}/>
+                  <div style={{minWidth:0}}>
+                    <p style={{fontSize:13,fontWeight:500,lineHeight:1.4,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {analysis.problem||'Analysis pending…'}
+                    </p>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4,flexWrap:'wrap'}}>
+                      {analysis.file_to_edit && <FileChip>{analysis.file_to_edit.split('/').pop()}</FileChip>}
+                      {analysis.expected_improvement && (
+                        <span style={{fontSize:11,color:C.accent,fontWeight:500}}>{analysis.expected_improvement}</span>
+                      )}
+                      {bounceDelta != null && (
+                        <span style={{fontSize:11,color:bounceDelta<0?C.greenText:bounceDelta>0?C.redText:C.textLight,fontWeight:500}}>
+                          Bounce {run.bounce_rate_before}% → {run.bounce_rate_after}%
+                        </span>
+                      )}
+                      {hasCompetitor && (
+                        <span style={{fontSize:10.5,color:C.yellowText,background:C.yellowBg,padding:'2px 8px',borderRadius:20,fontWeight:500}}>
+                          Competitor change
+                        </span>
+                      )}
+                      {run.pr_url && (
+                        <a href={run.pr_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} className="link-green" style={{fontSize:11}}>
+                          PR #{run.pr_number} ↗
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <StatusBadge status={run.status}/>
+                  <span style={{fontSize:11,color:C.textLight,whiteSpace:'nowrap',minWidth:74,textAlign:'right'}}>{fmt(run.created_at)}</span>
+                </div>
+              )
+            })}
+          </Card>
+        </section>
+      ))}
+
+      {/* Agent Learnings — full per-outcome history (the condensed strip stays on Overview). */}
+      {learnings.length>0&&(
+        <section className="fade-up" style={{animationDelay:'.1s'}}>
+          <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',padding:'0 4px 8px'}}>
+            <SectionLabel style={{marginBottom:0}}>Agent learnings</SectionLabel>
+            <span style={{fontSize:11,color:C.textLight}}>every outcome improves future decisions</span>
+          </div>
+          <Card style={{overflow:'hidden'}}>
+            {learnings.map((l,i)=>(
+              <div key={l.id||i} style={{
+                display:'flex',alignItems:'flex-start',gap:12,padding:'13px 22px',
+                borderBottom:i<learnings.length-1?`1px solid ${C.borderSoft}`:'none',
+              }}>
+                <span style={{fontSize:13,color:l.outcome==='positive'?C.green:C.red,flexShrink:0,paddingTop:1,fontWeight:600}}>
+                  {l.outcome==='positive'?'✓':'✕'}
+                </span>
+                <div style={{flex:1,minWidth:0}}>
+                  <p style={{fontSize:12.5,color:C.text,marginBottom:3,lineHeight:1.5}}>{l.summary}</p>
+                  <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                    <span style={{fontSize:10.5,color:C.textMuted}}>{l.change_type}</span>
+                    {l.delta&&<span style={{fontSize:10.5,color:l.outcome==='positive'?C.greenText:C.redText,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}% {l.metric_type}</span>}
+                    <span style={{fontSize:10.5,color:C.textLight}}>{l.confidence} confidence</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </Card>
+        </section>
+      )}
     </div>
   )
 }
 
-// ─── NETWORK PAGE — helpers ───────────────────────────────────────────────────
-// clusterFromPath / labelFromNode / hubDomainFromUrl / buildNetworkData now live
-// in ../lib/siteNetworkData.js (shared with the onboarding first-connect finale).
-
-// Humanized node status copy (mirrors SiteNetwork's STATUS_COPY) for the panel.
+// ─── NETWORK PAGE ─────────────────────────────────────────────────────────────
+// The graph itself (SiteNetwork) is deliberately untouched by the redesign —
+// same component, same fonts, same visual language. Only the framing card
+// adopts the new palette.
 const NODE_STATUS_COPY = {
   neutral:         'Watching',
   tracked:         'Tracked',
@@ -1345,7 +1069,6 @@ const NODE_STATUS_DOT = {
   problem:         '#c2573d',
 }
 
-// ─── NETWORK PAGE ─────────────────────────────────────────────────────────────
 function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
   const [selectedNode, setSelectedNode] = useState(null)
   const activeRun = runs.find(r => r.status === 'running') || null
@@ -1353,7 +1076,6 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
   const lastRun   = runs[0] || null
 
   // Most-recent active run drives fix-in-flight + the panel's PR link.
-  // runs is created_at desc; running takes priority over awaiting-approval.
   const inflightRun = runs.find(r => r.status === 'running')
                    || runs.find(isAwaitingApproval)
                    || null
@@ -1363,7 +1085,6 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
   const networkRow = siteNetwork || structurePreview
   const isPreview  = !siteNetwork && !!structurePreview
 
-  // Status line
   let statusText, statusColor
   if (isRunning) {
     const stepId    = activeRun.current_step && CURRENT_STEP_TO_ID[activeRun.current_step]
@@ -1371,7 +1092,7 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
       ? (AGENT_STEPS.find(s => s.id === stepId)?.label || activeRun.current_step)
       : 'Running'
     statusText  = `Running now · ${stepLabel.toLowerCase()}`
-    statusColor = C.blue
+    statusColor = C.accent
   } else if (lastRun) {
     const next = nextMonday9am()
     const nextLabel = next.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
@@ -1385,60 +1106,41 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
     statusColor = C.textLight
   }
 
-  // Hub label (deploy-subdomain aware) + shared transform → SiteNetworkData.
   const domain = hubDomainFromUrl(websiteUrl)
   const networkData = buildNetworkData(networkRow, { domain, inflightRun })
 
   return (
     <div>
-      {/* Status bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:18 }}>
         {isRunning && (
-          <span className="pulse-dot" style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: C.blue, display: 'inline-block', flexShrink: 0,
-          }} />
+          <span className="pulse-dot" style={{ width:6, height:6, borderRadius:'50%', background:C.yellow, display:'inline-block', flexShrink:0 }}/>
         )}
-        <span style={{ fontSize: 11, color: statusColor, fontWeight: isRunning ? 500 : 400 }}>
-          {statusText}
-        </span>
+        <span style={{ fontSize:11.5, color:statusColor, fontWeight:isRunning?500:400 }}>{statusText}</span>
       </div>
 
-      {/* Graph card */}
-      <div style={{
-        position: 'relative',
-        background: C.bgCard, borderRadius: 12,
-        border: `1px solid ${C.border}`, overflow: 'hidden',
-      }}>
+      <Card style={{ position:'relative', overflow:'hidden' }}>
         {networkData ? (
           <SiteNetwork
             data={networkData}
             onNodeClick={(n) => { if (!n.isHub) setSelectedNode(n) }}
-            fonts={{
-              sans:  "'DM Sans', sans-serif",
-              serif: "'Instrument Serif', serif",
-              mono:  "'DM Mono', monospace",
-            }}
-            style={{ height: 'calc(100vh - 150px)', minHeight: 360 }}
+            fonts={NETWORK_FONTS}
+            style={{ height:'calc(100vh - 190px)', minHeight:360 }}
           />
         ) : (
           <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            justifyContent: 'center', padding: '64px 24px', textAlign: 'center',
+            display:'flex', flexDirection:'column', alignItems:'center',
+            justifyContent:'center', padding:'64px 24px', textAlign:'center',
           }}>
             <div style={{
-              width: 40, height: 40, borderRadius: '50%',
-              background: C.accentSoft, display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              marginBottom: 16, fontSize: 20, color: C.accent,
+              width:40, height:40, borderRadius:'50%',
+              background:C.chipBg, display:'flex',
+              alignItems:'center', justifyContent:'center',
+              marginBottom:16, fontSize:20, color:C.accent,
             }}>◎</div>
-            <p style={{
-              fontFamily: 'Instrument Serif, serif', fontWeight: 400,
-              fontSize: 20, color: C.text, marginBottom: 8,
-            }}>
+            <p style={{ fontFamily:FONT.serif, fontWeight:500, fontSize:20, color:C.text, marginBottom:8 }}>
               {isRunning ? 'Mapping your site…' : 'Your network graph appears here'}
             </p>
-            <p style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7, maxWidth: 340 }}>
+            <p style={{ fontSize:12, color:C.textMuted, lineHeight:1.7, maxWidth:340 }}>
               {isRunning
                 ? "The agent is mapping your site's structure. Check back in a few minutes."
                 : "Your first network graph will appear after Monday's run. The agent maps every page, section, and component of your site and how they connect."
@@ -1453,38 +1155,38 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
           const prNum = inflightRun?.pr_number
           return (
             <div style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: 320, maxWidth: '85%',
-              background: C.bgCard, borderLeft: `1px solid ${C.border}`,
-              boxShadow: '-8px 0 28px rgba(26,25,22,0.08)', zIndex: 20,
-              padding: '20px 22px', overflowY: 'auto',
-              animation: 'slideInRight .22s ease both',
+              position:'absolute', top:0, right:0, bottom:0, width:320, maxWidth:'85%',
+              background:C.bgCard, borderLeft:`1px solid ${C.border}`,
+              boxShadow:'-8px 0 28px rgba(30,54,43,.08)', zIndex:20,
+              padding:'20px 22px', overflowY:'auto',
+              animation:'slideInRight .22s ease both',
             }}>
               <style>{`@keyframes slideInRight { from { opacity:0; transform:translateX(16px) } to { opacity:1; transform:none } }`}</style>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                <p style={{ fontFamily: 'Instrument Serif, serif', fontWeight: 400, fontSize: 22, color: C.text, lineHeight: 1.15 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12 }}>
+                <p style={{ fontFamily:FONT.serif, fontWeight:500, fontSize:22, color:C.text, lineHeight:1.15 }}>
                   {selectedNode.label}
                 </p>
                 <button className="btn" onClick={() => setSelectedNode(null)} style={{
-                  background: 'none', border: `1px solid ${C.border}`, borderRadius: 6,
-                  width: 26, height: 26, fontSize: 14, color: C.textMuted, flexShrink: 0, lineHeight: 1,
+                  background:'none', border:`1px solid ${C.border}`, borderRadius:6,
+                  width:26, height:26, fontSize:14, color:C.textMuted, flexShrink:0, lineHeight:1,
                 }}>×</button>
               </div>
 
-              <p style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: C.textMuted, wordBreak: 'break-all', marginTop: 6, marginBottom: 16 }}>
+              <p style={{ fontFamily:FONT.mono, fontSize:11, color:C.textMuted, wordBreak:'break-all', marginTop:6, marginBottom:16 }}>
                 {selectedNode.id}
               </p>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: prUrl ? 18 : 0 }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: NODE_STATUS_DOT[selectedNode.status], flexShrink: 0 }} />
-                <span style={{ fontSize: 13, color: C.text }}>{NODE_STATUS_COPY[selectedNode.status] || 'Watching'}</span>
+              <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:prUrl?18:0 }}>
+                <span style={{ width:9, height:9, borderRadius:'50%', background:NODE_STATUS_DOT[selectedNode.status], flexShrink:0 }}/>
+                <span style={{ fontSize:13, color:C.text }}>{NODE_STATUS_COPY[selectedNode.status] || 'Watching'}</span>
               </div>
 
               {prUrl && (
                 <a href={prUrl} target="_blank" rel="noreferrer" className="v-press" style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 7,
-                  background: C.yellowSoft, border: `1px solid ${C.yellowMid}`, borderRadius: 8,
-                  padding: '9px 13px', fontSize: 12, color: C.yellow, fontWeight: 500, textDecoration: 'none',
+                  display:'inline-flex', alignItems:'center', gap:7,
+                  background:C.yellowBg, border:'1px solid #EADFC2', borderRadius:8,
+                  padding:'9px 13px', fontSize:12, color:C.yellowText, fontWeight:500, textDecoration:'none',
                 }}>
                   View open PR{prNum ? ` #${prNum}` : ''} →
                 </a>
@@ -1492,7 +1194,253 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
             </div>
           )
         })()}
+      </Card>
+    </div>
+  )
+}
+
+// ─── FUNNEL PAGE ──────────────────────────────────────────────────────────────
+// Real data only: agent_funnel_pages rows (page_path, views_7d, drop_off_score,
+// page_type, ai_insight). Leverage badges are derived from drop-off severity;
+// the dark "highest leverage" card is the top drop-off page with traffic.
+function FunnelPage({funnelPages, loading}) {
+  if(loading) return <div style={{padding:48,display:'flex',justifyContent:'center'}}><Spinner/></div>
+
+  const banner = (
+    <InfoBanner iconPath="M3 4h18l-7 8v6l-4 2v-8L3 4z">
+      Every page mapped and cross-referenced with your analytics — the agent fixes the highest-leverage page first.
+    </InfoBanner>
+  )
+
+  if(!funnelPages.length) return (
+    <div>
+      {banner}
+      <Card className="fade-up" style={{padding:48,textAlign:'center'}}>
+        <p style={{fontSize:13,color:C.text,marginBottom:4,fontWeight:500}}>No funnel data yet</p>
+        <p style={{fontSize:11.5,color:C.textLight}}>Funnel analysis runs automatically every Monday.</p>
+      </Card>
+    </div>
+  )
+
+  const withTraffic = funnelPages.filter(p=>p.views_7d>0)
+  const noTraffic   = funnelPages.filter(p=>!(p.views_7d>0))
+  const biggestOpp  = [...withTraffic].filter(p=>p.drop_off_score>0).sort((a,b)=>b.drop_off_score-a.drop_off_score)[0]
+    || [...funnelPages].filter(p=>p.drop_off_score>0).sort((a,b)=>b.drop_off_score-a.drop_off_score)[0]
+  const maxViews = Math.max(...funnelPages.map(p=>p.views_7d||0),1)
+  const totalViews = withTraffic.reduce((s,p)=>s+(p.views_7d||0),0)
+
+  // Traffic bars: top pages by views, shaded dark→light green (mockup funnel look).
+  const barPages = [...withTraffic].sort((a,b)=>b.views_7d-a.views_7d).slice(0,6)
+  const BAR_SHADES = ['#3E6B54','#4F7B63','#5C8A6F','#6D9A7F','#7FA98F','#93B8A1']
+
+  const leverageOf = (p) => {
+    if (biggestOpp && p.page_path===biggestOpp.page_path) return { badge:'Next focus', bg:C.ink,    color:C.sideText }
+    if (!(p.views_7d>0))       return { badge:'No traffic', bg:C.grayBg,  color:C.textLight }
+    if (p.drop_off_score>=60)  return { badge:'High',       bg:C.yellowBg,color:C.yellowText }
+    if (p.drop_off_score>=30)  return { badge:'Medium',     bg:C.grayBg,  color:C.grayText }
+    return                            { badge:'Low',        bg:C.grayBg,  color:C.textLight }
+  }
+
+  const sorted = [
+    ...[...withTraffic].sort((a,b)=>(b.drop_off_score||0)-(a.drop_off_score||0)||b.views_7d-a.views_7d),
+    ...[...noTraffic].sort((a,b)=>a.page_path.localeCompare(b.page_path)),
+  ]
+
+  return (
+    <div>
+      {banner}
+
+      <div className="funnel-top" style={{marginBottom:14}}>
+        <Card className="fade-up" style={{padding:'22px 26px'}}>
+          <p style={{fontSize:13.5,fontWeight:600,color:C.text,marginBottom:4}}>Traffic by page</p>
+          <p style={{fontSize:11.5,color:C.label,marginBottom:18}}>
+            Last 7 days{totalViews>0?` · ${totalViews.toLocaleString()} views across ${withTraffic.length} page${withTraffic.length===1?'':'s'}`:''}
+          </p>
+          {barPages.length===0 && (
+            <p style={{fontSize:12,color:C.textLight,padding:'8px 0'}}>No traffic recorded yet — bars appear once visitors arrive.</p>
+          )}
+          {barPages.map((p,i)=>{
+            const w = Math.max(4,Math.round(((p.views_7d||0)/maxViews)*100))
+            return (
+              <div key={p.page_path} style={{marginBottom:i<barPages.length-1?14:0}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6,gap:12}}>
+                  <span style={{fontSize:12.5,fontWeight:500,fontFamily:FONT.mono,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.page_path}</span>
+                  <span style={{fontSize:12,color:C.textMuted,flexShrink:0}}>
+                    <span style={{fontFamily:FONT.serif,fontSize:15,color:C.ink}}><CountUp value={p.views_7d} format={n=>Math.round(n).toLocaleString()}/></span>
+                    {p.drop_off_score>0?` · ${p.drop_off_score}% drop-off`:''}
+                  </span>
+                </div>
+                <div style={{height:22,background:C.borderSoft,borderRadius:6,overflow:'hidden'}}>
+                  <div className="v-bar-fill" style={{height:'100%',width:`${w}%`,'--v-w':`${w}%`,background:BAR_SHADES[i]||BAR_SHADES[5],borderRadius:6,animationDelay:`${i*0.08}s`}}/>
+                </div>
+              </div>
+            )
+          })}
+        </Card>
+
+        <div className="fade-up" style={{background:C.sidebar,borderRadius:14,padding:'22px 26px',color:C.sideText,animationDelay:'.08s'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
+            <span className="pulse-dot" style={{width:8,height:8,borderRadius:'50%',background:C.yellow,display:'inline-block'}}/>
+            <span style={{fontSize:10.5,letterSpacing:'.14em',color:C.sideMuted,fontWeight:500}}>HIGHEST LEVERAGE</span>
+          </div>
+          {biggestOpp ? (
+            <>
+              <p style={{fontFamily:FONT.mono,fontSize:17,color:'#C9E3D2'}}>{biggestOpp.page_path}</p>
+              <p style={{fontSize:12.5,lineHeight:1.6,color:'#C7CFC4',marginTop:10}}>
+                {biggestOpp.drop_off_score}% of visitors drop off here · {biggestOpp.views_7d||0} views/week.
+                {biggestOpp.ai_insight?` ${biggestOpp.ai_insight}`:''}
+              </p>
+              <p style={{fontSize:11.5,color:C.sideFaint,marginTop:12,paddingTop:12,borderTop:'1px solid rgba(255,255,255,.12)'}}>
+                The agent prioritizes this page in its next run.
+              </p>
+            </>
+          ) : (
+            <p style={{fontSize:12.5,lineHeight:1.6,color:'#C7CFC4'}}>
+              No drop-off hotspot detected yet. Once your pages collect traffic, the biggest leak shows up here.
+            </p>
+          )}
+        </div>
       </div>
+
+      <Card className="fade-up table-scroll" style={{overflow:'hidden',animationDelay:'.12s'}}>
+        <div style={{minWidth:560}}>
+          <div style={{display:'grid',gridTemplateColumns:'1.4fr .6fr 1fr auto',gap:14,alignItems:'center',padding:'13px 22px',borderBottom:`1px solid ${C.border}`,fontSize:10,letterSpacing:'.13em',color:C.label,fontWeight:500}}>
+            <span>PAGE</span><span>VIEWS / WK</span><span>DROP-OFF</span><span style={{minWidth:96,textAlign:'right'}}>LEVERAGE</span>
+          </div>
+          {sorted.map((p,i)=>{
+            const lev = leverageOf(p)
+            const isNext = biggestOpp && p.page_path===biggestOpp.page_path
+            const muted = !(p.views_7d>0)
+            const dropW = Math.min(100,p.drop_off_score||0)
+            return (
+              <div key={p.id||p.page_path} style={{
+                display:'grid',gridTemplateColumns:'1.4fr .6fr 1fr auto',gap:14,alignItems:'center',
+                padding:'14px 22px',borderBottom:i<sorted.length-1?`1px solid ${C.borderSoft}`:'none',
+                background:isNext?C.bgSoft:'transparent',opacity:muted?.6:1,
+              }}>
+                <span style={{fontFamily:FONT.mono,fontSize:12,color:C.ink,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.page_path}</span>
+                <span style={{fontSize:12,color:'#4A5248'}}>{muted?'—':(p.views_7d||0).toLocaleString()}</span>
+                <div style={{display:'flex',alignItems:'center',gap:9}}>
+                  <div style={{flex:1,height:5,background:C.borderSoft,borderRadius:3,overflow:'hidden',maxWidth:110}}>
+                    <div className="v-bar-fill" style={{height:'100%',width:`${dropW}%`,'--v-w':`${dropW}%`,background:dropW>=60?C.red:dropW>=30?C.yellow:C.accentBar,borderRadius:3,animationDelay:`${i*0.04}s`}}/>
+                  </div>
+                  <span style={{fontSize:11,color:dropW>=60?C.redText:C.label,minWidth:32,fontWeight:dropW>=60?500:400}}>{p.drop_off_score?`${p.drop_off_score}%`:'—'}</span>
+                </div>
+                <span style={{fontSize:10.5,fontWeight:500,color:lev.color,background:lev.bg,borderRadius:20,padding:'4px 11px',whiteSpace:'nowrap',minWidth:74,textAlign:'center'}}>{lev.badge}</span>
+              </div>
+            )
+          })}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// ─── BUSINESS DNA PAGE ────────────────────────────────────────────────────────
+function DNAPage({ subscriptionId }) {
+  const [dna, setDna]         = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!subscriptionId) return
+    setLoading(true)
+    supabase.from('agent_business_dna')
+      .select('id, fix_type, outcome, notes, created_at, run_id')
+      .eq('subscription_id', subscriptionId)
+      .order('created_at', { ascending: false }).limit(100)
+      .then(({ data }) => { setDna(data || []); setLoading(false) })
+  }, [subscriptionId])
+
+  const grouped = useMemo(() => {
+    const out = { success: [], rollback: [], pending: [] }
+    for (const d of dna) if (out[d.outcome]) out[d.outcome].push(d)
+    return out
+  }, [dna])
+
+  const banner = (
+    <InfoBanner iconPath="M6 3c0 6 12 6 12 12M18 3c0 6-12 6-12 12M6 15c0 3 2 6 6 6M18 15c0 3-2 6-6 6">
+      What the agent has learned about your business — every fix is checked against these facts.
+    </InfoBanner>
+  )
+
+  if (loading) return (
+    <div style={{maxWidth:800}}>
+      {banner}
+      <div style={{padding:32,display:'flex',justifyContent:'center'}}><Spinner/></div>
+    </div>
+  )
+
+  const GROUPS = [
+    { key:'success',  title:'What works for this site', sub:'Doubled down on in future runs',       mark:{sym:'✓', color:C.green,  label:'Success'} },
+    { key:'rollback', title:'Never do again',           sub:'Rolled back — the agent avoids these', mark:{sym:'✕', color:C.red,    label:'Rolled back'} },
+    { key:'pending',  title:'Pending',                  sub:'Deployed, awaiting the 7-day verdict', mark:{sym:'·', color:C.yellow, label:'Pending'} },
+  ]
+
+  return (
+    <div style={{maxWidth:800}}>
+      {banner}
+
+      {dna.length === 0 && (
+        <Card className="fade-up" style={{padding:'40px 24px',textAlign:'center'}}>
+          <p style={{fontSize:13,color:C.textMuted}}>
+            No DNA recorded yet. Entries appear after the agent's fixes are deployed, evaluated, or rolled back.
+          </p>
+        </Card>
+      )}
+
+      {GROUPS.map((g,gi)=>{
+        const entries = grouped[g.key]
+        if (!entries.length) return null
+        return (
+          <Card key={g.key} className="fade-up" style={{padding:'20px 26px',marginBottom:14,animationDelay:`${gi*0.06}s`}}>
+            <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>{g.title}</p>
+            <p style={{fontSize:11.5,color:C.label,margin:'3px 0 4px'}}>{g.sub}</p>
+            {entries.map((e,i)=>(
+              <div key={e.id} style={{
+                display:'grid',gridTemplateColumns:'1fr auto',gap:16,alignItems:'center',
+                padding:'13px 0',borderBottom:i<entries.length-1?`1px solid ${C.borderSoft}`:'none',
+              }}>
+                <div style={{minWidth:0}}>
+                  <p style={{fontSize:13,lineHeight:1.5,color:C.text}}>
+                    {e.notes || e.fix_type.replace(/_/g,' ')}
+                  </p>
+                  <div style={{fontSize:10.5,color:C.textLight,marginTop:4}}>
+                    learned from <FileChip style={{fontSize:10.5,padding:'1.5px 6px'}}>{e.fix_type.replace(/_/g,' ')}</FileChip>
+                    <span style={{marginLeft:8}}>{new Date(e.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>
+                  </div>
+                </div>
+                <span style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:11,color:g.mark.color,fontWeight:500,whiteSpace:'nowrap'}}>
+                  <span style={{fontWeight:600}}>{g.mark.sym}</span>{g.mark.label}
+                </span>
+              </div>
+            ))}
+          </Card>
+        )
+      })}
+
+      {dna.length > 0 && (
+        <Card className="fade-up" style={{padding:'20px 26px',animationDelay:'.18s'}}>
+          <p style={{fontSize:13.5,fontWeight:600,color:C.text,marginBottom:8}}>Timeline</p>
+          {dna.slice(0, 30).map((d,i) => {
+            const s = d.outcome==='success' ? {color:C.greenText,bg:C.greenBg}
+                    : d.outcome==='rollback' ? {color:C.redText,bg:C.redBg}
+                    : {color:C.yellowText,bg:C.yellowBg}
+            return (
+              <div key={d.id} style={{display:'flex',alignItems:'center',gap:12,padding:'9px 0',borderBottom:i<Math.min(dna.length,30)-1?`1px solid ${C.borderSoft}`:'none'}}>
+                <span style={{fontSize:10.5,color:C.textLight,fontFamily:FONT.mono,minWidth:70}}>
+                  {new Date(d.created_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}
+                </span>
+                <span style={{fontSize:12.5,color:C.text,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.fix_type.replace(/_/g,' ')}</span>
+                <span style={{fontSize:10.5,color:s.color,background:s.bg,borderRadius:20,padding:'3px 10px',fontWeight:500,textTransform:'capitalize'}}>
+                  {d.outcome}
+                </span>
+              </div>
+            )
+          })}
+        </Card>
+      )}
+
+      <p style={{fontSize:11.5,color:C.label,padding:'14px 4px 0'}}>The agent reads this log on every run — successes are doubled down on, rollbacks avoided.</p>
     </div>
   )
 }
@@ -1522,151 +1470,82 @@ function GuardrailsPage({subscriptionId}) {
     setSaving(false);setSaved(true);setTimeout(()=>setSaved(false),2500)
   }
 
-  const inp = {width:'100%',background:'rgba(26,25,22,0.04)',border:`1px solid ${C.border}`,borderRadius:7,padding:'9px 11px',fontSize:13,fontFamily:'DM Sans,sans-serif',color:C.text}
-  const lbl = {fontSize:10,letterSpacing:'.08em',textTransform:'uppercase',color:C.textLight,fontWeight:500,display:'block',marginBottom:7}
+  const inp = {width:'100%',background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:9,padding:'10px 14px',fontSize:12.5,fontFamily:FONT.sans,color:C.text}
+  const ruleCount = (tone.trim()?1:0)+forbidden.length+protected_.length+(customRules.trim()?1:0)
 
-  return (
-    <Card style={{padding:'22px'}}>
-      <p style={{fontSize:13,color:C.textMuted,lineHeight:1.7,marginBottom:20}}>
-        These rules are enforced on every run — the agent will not make changes that violate them.
-      </p>
-      <div style={{display:'flex',flexDirection:'column',gap:18}}>
-        <div>
-          <label style={lbl}>Tone of voice</label>
-          <input value={tone} onChange={e=>setTone(e.target.value)} placeholder='"friendly but direct", "professional, no fluff"' style={inp}/>
+  const chipSection = ({title, sub, list, setList, input, setInput, placeholder, danger}) => (
+    <Card className="fade-up" style={{padding:'22px 26px',marginBottom:14}}>
+      <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>{title}</p>
+      <p style={{fontSize:11.5,color:C.label,margin:'3px 0 14px'}}>{sub}</p>
+      {list.length>0 && (
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12}}>
+          {list.map(tag=>(
+            <span key={tag} className="pop-in" style={{
+              display:'inline-flex',alignItems:'center',gap:7,fontSize:12,
+              background:danger?C.redBg:C.bgChip,
+              border:`1px solid ${danger?C.dangerBorder:C.border}`,
+              color:danger?'#7A4438':C.text,
+              borderRadius:20,padding:'6px 8px 6px 13px',
+            }}>
+              {tag}
+              <button className="chip-x" onClick={()=>removeTag(list,setList,tag)} aria-label={`Remove ${tag}`} style={{
+                background:danger?C.dangerBorder:'#E7E4D6',color:danger?'#9C6455':C.textMuted,
+              }}>×</button>
+            </span>
+          ))}
         </div>
-        {[
-          {label:'Never do these',list:forbidden,setList:setForbidden,input:forbInput,setInput:setForbInput,placeholder:'"clickbait headlines"'},
-          {label:'Never change these',list:protected_,setList:setProtected,input:protInput,setInput:setProtInput,placeholder:'"brand colors"'},
-        ].map(({label,list,setList,input,setInput,placeholder})=>(
-          <div key={label}>
-            <label style={lbl}>{label}</label>
-            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>
-              {list.map(tag=>(
-                <span key={tag} style={{display:'inline-flex',alignItems:'center',gap:5,background:'rgba(26,25,22,0.06)',border:`1px solid ${C.border}`,borderRadius:20,padding:'3px 9px',fontSize:12}}>
-                  {tag}<span className="tag-remove" onClick={()=>removeTag(list,setList,tag)}>×</span>
-                </span>
-              ))}
-            </div>
-            <div style={{display:'flex',gap:8}}>
-              <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addTag(list,setList,input,setInput)} placeholder={`e.g. ${placeholder} — press Enter`} style={{...inp,flex:1}}/>
-              <button className="btn" onClick={()=>addTag(list,setList,input,setInput)} style={{background:C.text,color:C.bg,borderRadius:7,padding:'9px 13px',fontSize:13,fontFamily:'DM Sans,sans-serif'}}>Add</button>
-            </div>
-          </div>
-        ))}
-        <div>
-          <label style={lbl}>Additional rules</label>
-          <textarea value={customRules} onChange={e=>setCustomRules(e.target.value)} placeholder="Any other instructions for the agent..." rows={3} style={{...inp,resize:'vertical',lineHeight:1.6}}/>
-        </div>
-        <button className="btn v-press" onClick={handleSave} disabled={saving} style={{
-          background:saved?C.green:C.accent,color:'#fff',borderRadius:8,
-          padding:'12px',fontSize:14,fontFamily:'DM Sans,sans-serif',fontWeight:500,
-          opacity:saving?0.7:1,transition:'background .25s',
-          boxShadow:saved?'none':'0 3px 14px rgba(42,92,69,0.22)',
-          alignSelf:'flex-start',minWidth:170,
-        }}>
-          {saving?'Saving…':saved?'✓ Saved':'Save Guardrails'}
-        </button>
-      </div>
+      )}
+      <input value={input} onChange={e=>setInput(e.target.value)}
+        onKeyDown={e=>e.key==='Enter'&&addTag(list,setList,input,setInput)}
+        placeholder={placeholder} style={inp}/>
     </Card>
   )
-}
-
-// ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
-// ─── BUSINESS DNA PAGE (Part 5) ──────────────────────────────────────────────
-function DNAPage({ subscriptionId }) {
-  const [dna, setDna]               = useState([])
-  const [loading, setLoading]       = useState(true)
-
-  useEffect(() => {
-    if (!subscriptionId) return
-    setLoading(true)
-    supabase.from('agent_business_dna')
-      .select('id, fix_type, outcome, notes, created_at, run_id')
-      .eq('subscription_id', subscriptionId)
-      .order('created_at', { ascending: false }).limit(100)
-      .then(({ data }) => { setDna(data || []); setLoading(false) })
-  }, [subscriptionId])
-
-  const grouped = useMemo(() => {
-    const out = { success: {}, rollback: {}, pending: {} }
-    for (const d of dna) {
-      if (!out[d.outcome]) continue
-      if (!out[d.outcome][d.fix_type]) out[d.outcome][d.fix_type] = []
-      out[d.outcome][d.fix_type].push(d)
-    }
-    return out
-  }, [dna])
-
-  if (loading) return <p style={{ fontSize: 12, color: C.textMuted, fontWeight: 300 }}>Loading DNA…</p>
-
-  const renderGroup = (title, color, bg, fixTypes, isPending = false) => {
-    const types = Object.keys(fixTypes)
-    if (types.length === 0) return null
-    return (
-      <div style={{ background: bg, border: `1px solid ${color}33`, borderRadius: 12, padding: '16px 18px', marginBottom: 14 }}>
-        <p style={{ fontSize: 12, fontWeight: 500, color, marginBottom: 12, letterSpacing: '.02em' }}>{title}</p>
-        {types.map(type => {
-          const entries = fixTypes[type]
-          return (
-            <div key={type} style={{ marginBottom: 10 }}>
-              <p style={{ fontSize: 13, color: C.text, fontWeight: 500, marginBottom: 4 }}>
-                {type.replace(/_/g, ' ')} <span style={{ color: C.textLight, fontWeight: 300 }}>· {entries.length} {isPending ? 'pending' : title.toLowerCase().includes('works') ? `success${entries.length > 1 ? 'es' : ''}` : `rollback${entries.length > 1 ? 's' : ''}`}</span>
-              </p>
-              {entries.slice(0, 2).map(e => (
-                <p key={e.id} style={{ fontSize: 11, color: C.textMuted, fontWeight: 300, marginLeft: 10, lineHeight: 1.5 }}>
-                  · {e.notes || 'no note'}
-                </p>
-              ))}
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
 
   return (
-    <>
-      <p style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7, marginBottom: 14 }}>
-        Your site's accumulated learnings. Successes are doubled down on; rollbacks are avoided. The agent reads this on every run.
-      </p>
+    <div style={{maxWidth:760}}>
+      <InfoBanner iconPath="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z">
+        Enforced on every run — the agent will never make a change that violates these rules.
+      </InfoBanner>
 
-      {dna.length === 0 && (
-        <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
-          <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300 }}>
-            No DNA recorded yet. Entries appear after the agent's fixes are deployed, evaluated, or rolled back.
-          </p>
-        </div>
-      )}
+      <Card className="fade-up" style={{padding:'22px 26px',marginBottom:14}}>
+        <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Tone of voice</p>
+        <p style={{fontSize:11.5,color:C.label,margin:'3px 0 14px'}}>How the agent writes copy on your behalf.</p>
+        <input value={tone} onChange={e=>setTone(e.target.value)} placeholder='"friendly but direct", "professional, no fluff"' style={inp}/>
+      </Card>
 
-      {renderGroup('What works for this site', C.green, C.greenSoft, grouped.success)}
-      {renderGroup('Never do again',           C.red,   C.redSoft,   grouped.rollback)}
-      {renderGroup('Pending',                  C.yellow,C.yellowSoft,grouped.pending, true)}
+      {chipSection({
+        title:'Never do these', sub:'Tactics the agent must never use.',
+        list:forbidden, setList:setForbidden, input:forbInput, setInput:setForbInput,
+        placeholder:'e.g. "clickbait headlines" — press Enter', danger:true,
+      })}
+      {chipSection({
+        title:'Never change these', sub:'Parts of your site that are off-limits.',
+        list:protected_, setList:setProtected, input:protInput, setInput:setProtInput,
+        placeholder:'e.g. "brand colors" — press Enter', danger:false,
+      })}
 
-      {dna.length > 0 && (
-        <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: '16px 18px', marginTop: 18 }}>
-          <p style={{ fontSize: 12, fontWeight: 500, color: C.text, marginBottom: 12 }}>Timeline</p>
-          {dna.slice(0, 30).map(d => {
-            const badgeColor = d.outcome === 'success' ? C.green : d.outcome === 'rollback' ? C.red : C.yellow
-            const badgeBg    = d.outcome === 'success' ? C.greenSoft : d.outcome === 'rollback' ? C.redSoft : C.yellowSoft
-            return (
-              <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
-                <span style={{ fontSize: 10, color: C.textLight, fontFamily: 'DM Mono,monospace', minWidth: 70 }}>
-                  {new Date(d.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                </span>
-                <span style={{ fontSize: 12, color: C.text, flex: 1 }}>{d.fix_type.replace(/_/g, ' ')}</span>
-                <span style={{ fontSize: 10, color: badgeColor, background: badgeBg, border: `1px solid ${badgeColor}33`, borderRadius: 5, padding: '2px 8px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.04em' }}>
-                  {d.outcome}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </>
+      <Card className="fade-up" style={{padding:'22px 26px',marginBottom:18}}>
+        <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Additional rules</p>
+        <p style={{fontSize:11.5,color:C.label,margin:'3px 0 14px'}}>Anything else the agent should keep in mind.</p>
+        <textarea value={customRules} onChange={e=>setCustomRules(e.target.value)} placeholder="Any other instructions for the agent…" rows={3}
+          style={{...inp,resize:'vertical',lineHeight:1.55}}/>
+      </Card>
+
+      <div className="fade-up" style={{display:'flex',alignItems:'center',gap:14}}>
+        <button className="btn v-press" onClick={handleSave} disabled={saving} style={{
+          background:saved?C.green:C.ink,color:C.sideText,borderRadius:9,
+          padding:'11px 22px',fontSize:12.5,fontWeight:500,
+          opacity:saving?.7:1,transition:'background .25s ease',minWidth:150,
+        }}>
+          {saving?'Saving…':saved?'Saved ✓':'Save guardrails'}
+        </button>
+        <span style={{fontSize:11.5,color:C.label}}>{ruleCount} rule{ruleCount===1?'':'s'} active</span>
+      </div>
+    </div>
   )
 }
 
+// ─── SETTINGS — SUBSCRIPTION CARD ─────────────────────────────────────────────
 function StripeSubscriptionPanel({ navigate }) {
   const [portalLoading, setPortalLoading] = useState(false)
   const [subscribeLoading, setSubscribeLoading] = useState(false)
@@ -1714,17 +1593,7 @@ function StripeSubscriptionPanel({ navigate }) {
 
   async function openPortal() {
     setPortalLoading(true)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await fetch('/api/stripe?action=portal', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      })
-      const data = await res.json()
-      if (data.url) window.location.href = data.url
-    } catch (e) {
-      console.error('Portal error:', e)
-    }
+    try { await openBillingPortal() } catch (e) { console.error('Portal error:', e) }
     setPortalLoading(false)
   }
 
@@ -1738,96 +1607,71 @@ function StripeSubscriptionPanel({ navigate }) {
     ? Math.max(0, Math.ceil((new Date(trialEnd).getTime() - Date.now()) / 86400000))
     : null
 
-  return (
-    <div style={{ padding:'18px 20px', borderBottom:`1px solid ${C.border}` }}>
-      <p style={{ fontSize:13, fontWeight:500, color:C.text, marginBottom:4 }}>Subscription</p>
-      <p style={{ fontSize:11, color:C.textMuted, fontWeight:300, marginBottom:14 }}>Manage your Velyr plan and billing.</p>
+  const ghostBtn = {fontSize:12,fontWeight:500,color:C.ink,background:'none',border:'1px solid #C9C6B8',borderRadius:9,padding:'9px 16px',whiteSpace:'nowrap'}
 
-      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-        {isTrialing && (
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:C.accentSoft, border:`1px solid ${C.accentMid}`, borderRadius:9, padding:'10px 14px', flexWrap:'wrap', gap:10 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, display:'inline-block' }} />
-              <span style={{ fontSize:13, color:C.accent, fontWeight:500 }}>
+  return (
+    <Card className="fade-up" style={{padding:'22px 26px',marginBottom:14}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap'}}>
+        <div>
+          <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Subscription</p>
+          {isActive && (
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:C.green}}/>
+              <span style={{fontSize:12.5,color:'#4A5248'}}>
+                Growth Agent — active{cancelAtPeriodEnd&&currentPeriodEnd?` · cancels ${new Date(currentPeriodEnd).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}`:''}
+              </span>
+            </div>
+          )}
+          {isTrialing && (
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:C.green}}/>
+              <span style={{fontSize:12.5,color:'#4A5248'}}>
                 Free trial{trialDaysLeft != null ? ` — ${trialDaysLeft} day${trialDaysLeft === 1 ? '' : 's'} left` : ''}
                 {cancelAtPeriodEnd ? ' · ends, won’t renew' : ' · then €29/mo'}
               </span>
             </div>
-            <button onClick={openPortal} disabled={portalLoading} className="btn" style={{ background:'transparent', border:`1px solid ${C.accent}`, color:C.accent, borderRadius:7, padding:'6px 13px', fontSize:12, fontFamily:'DM Sans,sans-serif', fontWeight:400 }}>
-              {portalLoading ? '…' : (cancelAtPeriodEnd ? 'Manage →' : 'Cancel trial')}
-            </button>
-          </div>
-        )}
-
-        {isActive && (
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:C.accentSoft, border:`1px solid ${C.accentMid}`, borderRadius:9, padding:'10px 14px', flexWrap:'wrap', gap:10 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ width:7, height:7, borderRadius:'50%', background:C.accent, display:'inline-block' }} />
-              <span style={{ fontSize:13, color:C.accent, fontWeight:500 }}>Growth Agent — Active</span>
+          )}
+          {isPastDue && (
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:C.yellow}}/>
+              <span style={{fontSize:12.5,color:C.yellowText,fontWeight:500}}>Payment failed — update your card to resume the agent</span>
             </div>
-            <button onClick={openPortal} disabled={portalLoading} className="btn" style={{ background:'transparent', border:`1px solid ${C.accent}`, color:C.accent, borderRadius:7, padding:'6px 13px', fontSize:12, fontFamily:'DM Sans,sans-serif', fontWeight:400 }}>
-              {portalLoading ? '…' : 'Manage subscription →'}
-            </button>
-          </div>
-        )}
+          )}
+          {isCancelled && (
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:C.gray}}/>
+              <span style={{fontSize:12.5,color:C.textMuted}}>Subscription ended — your agent is paused.</span>
+            </div>
+          )}
+          {!isActive && !isTrialing && !isPastDue && !isCancelled && (
+            <p style={{fontSize:12.5,color:C.textMuted,marginTop:6}}>No active subscription yet — finish setup to start your 14-day free trial, no card required.</p>
+          )}
+        </div>
 
-        {/* Kündigungsbutton (BGB §312k) — explicit cancellation entry point.
-            Routes to the same Stripe Billing Portal as "Manage subscription",
-            where the cancellation step is confirmed and a receipt is issued. */}
-        {isActive && !cancelAtPeriodEnd && (
-          <button
-            onClick={openPortal}
-            disabled={portalLoading}
-            className="btn"
-            style={{
-              background: 'transparent', border: `1px solid ${C.red}`, color: C.red,
-              borderRadius: 7, padding: '8px 14px', fontSize: 12,
-              fontFamily: 'DM Sans,sans-serif', fontWeight: 500,
-              alignSelf: 'flex-start',
-              opacity: portalLoading ? 0.6 : 1,
-            }}
-          >
-            {portalLoading ? '…' : 'Cancel subscription'}
+        {(isActive || isTrialing) && (
+          <button className="btn v-press" onClick={openPortal} disabled={portalLoading} style={ghostBtn}>
+            {portalLoading ? '…' : isTrialing && !cancelAtPeriodEnd ? 'Manage trial →' : 'Manage subscription →'}
           </button>
         )}
-
-        {isActive && cancelAtPeriodEnd && currentPeriodEnd && (
-          <p style={{ fontSize: 12, color: '#f5a623', marginTop: 4 }}>
-            Cancels on {new Date(currentPeriodEnd).toLocaleDateString()} — you have full access until then.
-          </p>
-        )}
-
         {isPastDue && (
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:C.yellowSoft, border:`1px solid ${C.yellowMid}`, borderRadius:9, padding:'10px 14px', flexWrap:'wrap', gap:10 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ width:7, height:7, borderRadius:'50%', background:C.yellow, display:'inline-block' }} />
-              <span style={{ fontSize:13, color:C.yellow, fontWeight:500 }}>Payment failed — update your card to resume the agent</span>
-            </div>
-            <button onClick={openPortal} disabled={portalLoading} className="btn" style={{ background:'transparent', border:`1px solid ${C.yellow}`, color:C.yellow, borderRadius:7, padding:'6px 13px', fontSize:12, fontFamily:'DM Sans,sans-serif', fontWeight:400 }}>
-              {portalLoading ? '…' : 'Update payment →'}
-            </button>
-          </div>
+          <button className="btn v-press" onClick={openPortal} disabled={portalLoading} style={{...ghostBtn,color:C.yellowText,borderColor:'#EADFC2'}}>
+            {portalLoading ? '…' : 'Update payment →'}
+          </button>
         )}
-
         {isCancelled && (
-          <div style={{ background:'rgba(26,25,22,0.03)', border:`1px solid ${C.border}`, borderRadius:9, padding:'14px', textAlign:'center' }}>
-            <p style={{ fontSize:13, color:C.textMuted, fontWeight:500, marginBottom:4 }}>Subscription ended</p>
-            <p style={{ fontSize:12, color:C.textMuted, fontWeight:300, marginBottom:12 }}>Your agent is paused. Start a new subscription to resume weekly improvements.</p>
-            <button onClick={subscribeNow} disabled={subscribeLoading} className="btn v-press" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, opacity: subscribeLoading ? 0.7 : 1, cursor: subscribeLoading ? 'not-allowed' : 'pointer' }}>
-              {subscribeLoading ? 'Opening Stripe…' : 'Restart subscription →'}
-            </button>
-          </div>
+          <button className="btn btn-primary v-press" onClick={subscribeNow} disabled={subscribeLoading} style={{
+            fontSize:12.5,fontWeight:500,borderRadius:9,padding:'10px 18px',
+            opacity:subscribeLoading?.7:1,cursor:subscribeLoading?'not-allowed':'pointer',whiteSpace:'nowrap',
+          }}>
+            {subscribeLoading ? 'Opening Stripe…' : 'Restart subscription →'}
+          </button>
         )}
-
         {!isActive && !isTrialing && !isPastDue && !isCancelled && (
-          <div style={{ background:'rgba(26,25,22,0.03)', border:`1px solid ${C.border}`, borderRadius:9, padding:'14px', textAlign:'center' }}>
-            <p style={{ fontSize:13, color:C.textMuted, fontWeight:300, marginBottom:12 }}>No active subscription yet. Finish setup to start your 14-day free trial — no card required.</p>
-            <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
-              <button onClick={() => navigate('/agent/onboarding')} className="btn v-press" style={{ background:C.accent, color:'#fff', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontFamily:'DM Sans,sans-serif', fontWeight:500, cursor:'pointer' }}>
-                Start free trial — €29/mo after →
-              </button>
-            </div>
-          </div>
+          <button className="btn btn-primary v-press" onClick={() => navigate('/agent/onboarding')} style={{
+            fontSize:12.5,fontWeight:500,borderRadius:9,padding:'10px 18px',whiteSpace:'nowrap',
+          }}>
+            Start free trial →
+          </button>
         )}
       </div>
 
@@ -1838,14 +1682,16 @@ function StripeSubscriptionPanel({ navigate }) {
         onConfirm={() => { setSubConfirmOpen(false); doSubscribeNow() }}
         loading={subscribeLoading}
       />
-    </div>
+    </Card>
   )
 }
 
+// ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
 function SettingsPage({subscription, user, onTogglePause, actionLoading, onDeleteRequest, onSaveSettings, navigate}) {
   const [isPublic, setIsPublic]   = useState(subscription?.is_public || false)
   const [slug, setSlug]           = useState(subscription?.public_slug || '')
   const [competitors, setCompetitors] = useState(() => {
+    // Exactly TWO competitor slots — a deliberate product cap, do not add a third.
     const initial = subscription?.competitors || []
     while (initial.length < 2) initial.push('')
     return initial.slice(0, 2)
@@ -1856,10 +1702,14 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
   const [compError,    setCompError]    = useState(null)
   const [publicSaved,  setPublicSaved]  = useState(false)
   const [compSaved,    setCompSaved]    = useState(false)
+  // Danger-zone cancel (Kündigungsbutton, BGB §312k) — routes to the Stripe
+  // Billing Portal where cancellation is confirmed and a receipt issued.
+  const [cancelLoading, setCancelLoading] = useState(false)
 
-  const slugValid    = !slug || /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/.test(slug)
-  const previewUrl   = slug ? `velyr.io/agent/${slug}` : 'velyr.io/agent/your-slug'
-  const publicUrl    = (subscription?.is_public && subscription?.public_slug) ? `/agent/${subscription.public_slug}` : null
+  const isPaused    = subscription?.status==='paused'
+  const slugValid   = !slug || /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/.test(slug)
+  const publicUrl   = (subscription?.is_public && subscription?.public_slug) ? `/agent/${subscription.public_slug}` : null
+  const hasBilling  = !!subscription?.subscription_status && !['cancelled','canceled'].includes(subscription.subscription_status)
 
   async function savePublic() {
     setPublicError(null); setPublicSaved(false)
@@ -1886,100 +1736,126 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
     finally       { setSavingComp(false) }
   }
 
+  async function cancelViaPortal() {
+    setCancelLoading(true)
+    try { await openBillingPortal() } catch (e) { console.error('Portal error:', e) }
+    setCancelLoading(false)
+  }
+
+  const monoInput = {
+    fontFamily:FONT.mono,fontSize:12,border:`1px solid ${C.border}`,borderRadius:8,
+    padding:'9px 12px',background:C.bgSoft,color:C.text,
+  }
+
   return (
-    <Card style={{overflow:'hidden'}}>
-      <StripeSubscriptionPanel navigate={navigate} />
-      <div style={{padding:'18px 20px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap'}}>
-        <div>
-          <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:2}}>
-            {subscription?.status==='paused'?'⏸ Agent is paused':'▶ Agent is active'}
+    <div style={{maxWidth:760}}>
+      <StripeSubscriptionPanel navigate={navigate}/>
+
+      {/* Agent pause / resume */}
+      <Card className="fade-up" style={{padding:'22px 26px',marginBottom:14,animationDelay:'.04s'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16}}>
+          <div>
+            <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>{isPaused?'Agent is paused':'Agent is active'}</p>
+            <p style={{fontSize:11.5,color:C.label,marginTop:4}}>
+              {isPaused?'Resume to run again every Monday at 9:00 am.':'Runs every Monday at 9:00 am.'}
+            </p>
+          </div>
+          <Toggle on={!isPaused} onClick={onTogglePause} disabled={actionLoading} label={isPaused?'Resume agent':'Pause agent'}/>
+        </div>
+      </Card>
+
+      {/* Public profile */}
+      <Card className="fade-up" style={{padding:'22px 26px',marginBottom:14,animationDelay:'.08s'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16}}>
+          <div>
+            <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Public profile</p>
+            <p style={{fontSize:11.5,color:C.label,marginTop:4}}>Share a public timeline of your agent's runs and results.</p>
+          </div>
+          <Toggle on={isPublic} onClick={()=>setIsPublic(v=>!v)} label="Make my agent timeline public"/>
+        </div>
+        {isPublic && (
+          <div className="reveal-in" style={{display:'flex',alignItems:'center',gap:10,marginTop:16,paddingTop:16,borderTop:`1px solid ${C.borderSoft}`,flexWrap:'wrap'}}>
+            <span style={{fontSize:12,color:C.label,fontFamily:FONT.mono}}>velyr.io/agent/</span>
+            <input value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,''))} placeholder="your-slug"
+              style={{...monoInput,width:180,borderColor:slugValid?C.border:C.red}}/>
+            <button className="btn btn-primary v-press" onClick={savePublic} disabled={savingPublic} style={{
+              fontSize:12,fontWeight:500,borderRadius:8,padding:'9px 16px',opacity:savingPublic?.6:1,
+            }}>{savingPublic?'Saving…':'Save'}</button>
+            {publicUrl && (
+              <a href={publicUrl} target="_blank" rel="noreferrer" className="link-green" style={{fontSize:12}}>View public timeline →</a>
+            )}
+          </div>
+        )}
+        {!isPublic && subscription?.is_public && (
+          <div className="reveal-in" style={{display:'flex',alignItems:'center',gap:10,marginTop:16,paddingTop:16,borderTop:`1px solid ${C.borderSoft}`}}>
+            <button className="btn btn-primary v-press" onClick={savePublic} disabled={savingPublic} style={{
+              fontSize:12,fontWeight:500,borderRadius:8,padding:'9px 16px',opacity:savingPublic?.6:1,
+            }}>{savingPublic?'Saving…':'Save'}</button>
+            <span style={{fontSize:11.5,color:C.label}}>Saves the timeline as private.</span>
+          </div>
+        )}
+        {(publicSaved||publicError) && (
+          <p className="reveal-in" style={{fontSize:11.5,marginTop:10,color:publicError?C.redText:C.green}}>
+            {publicError||'✓ Saved'}
           </p>
-          <p style={{fontSize:11,color:C.textMuted,fontWeight:300}}>
-            {subscription?.status==='paused'?'Resume to run again every Monday.':'Runs every Monday at 9am.'}
-          </p>
+        )}
+      </Card>
+
+      {/* Competitors — capped at two, by design. */}
+      <Card className="fade-up" style={{padding:'22px 26px',marginBottom:14,animationDelay:'.12s'}}>
+        <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Competitors</p>
+        <p style={{fontSize:11.5,color:C.label,margin:'4px 0 14px'}}>Scanned every Monday — you'll be alerted if anything changes. Up to two sites.</p>
+        <div style={{display:'flex',flexDirection:'column',gap:8,maxWidth:420}}>
+          {competitors.map((url, i) => (
+            <input key={i} type="url" value={url}
+              onChange={e=>{ const next=[...competitors]; next[i]=e.target.value; setCompetitors(next) }}
+              placeholder={`https://competitor-${i+1}.com`}
+              style={{...monoInput,width:'100%'}}/>
+          ))}
         </div>
-        <button className="btn" onClick={onTogglePause} disabled={actionLoading} style={{
-          background:subscription?.status==='paused'?C.accent:'transparent',
-          color:subscription?.status==='paused'?'#fff':C.textMuted,
-          border:`1px solid ${subscription?.status==='paused'?C.accent:C.border}`,
-          borderRadius:7,padding:'8px 15px',fontSize:12,fontFamily:'DM Sans,sans-serif',fontWeight:400,
-          opacity:actionLoading?0.6:1,
-        }}>
-          {actionLoading?'…':subscription?.status==='paused'?'Resume Agent':'Pause Agent'}
-        </button>
-      </div>
-
-      {/* Public Profile (Part 4d) */}
-      <div style={{padding:'18px 20px',borderBottom:`1px solid ${C.border}`}}>
-        <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:4}}>Public Profile</p>
-        <p style={{fontSize:11,color:C.textMuted,fontWeight:300,marginBottom:14}}>Share a public timeline of your agent's work — runs and results.</p>
-
-        <label style={{display:'flex',alignItems:'center',gap:10,marginBottom:12,cursor:'pointer'}}>
-          <input type="checkbox" checked={isPublic} onChange={e=>setIsPublic(e.target.checked)} style={{width:14,height:14}} />
-          <span style={{fontSize:12,color:C.text}}>Make my agent timeline public</span>
-        </label>
-
-        <div style={{marginBottom:8}}>
-          <label style={{fontSize:11,color:C.textMuted,fontWeight:300,marginBottom:4,display:'block'}}>Your public URL slug</label>
-          <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,''))} placeholder="demo-store"
-            style={{width:'100%',maxWidth:280,padding:'8px 12px',fontSize:13,fontFamily:'DM Mono,monospace',
-              border:`1px solid ${slugValid?C.border:C.red}`,borderRadius:6,background:'#fff',outline:'none'}} />
-          <p style={{fontSize:11,color:C.textMuted,marginTop:6,fontFamily:'DM Mono,monospace'}}>{previewUrl}</p>
-        </div>
-
-        <div style={{display:'flex',alignItems:'center',gap:12,marginTop:12,flexWrap:'wrap'}}>
-          <button className="btn v-press" onClick={savePublic} disabled={savingPublic} style={{
-            background:C.accent,color:'#fff',border:'none',borderRadius:7,padding:'8px 16px',
-            fontSize:12,fontFamily:'DM Sans,sans-serif',fontWeight:400,opacity:savingPublic?0.6:1,
-          }}>{savingPublic?'Saving…':'Save'}</button>
-          {publicUrl && (
-            <a href={publicUrl} target="_blank" rel="noreferrer" style={{fontSize:12,color:C.accent,textDecoration:'none',fontWeight:500}}>
-              View public timeline →
-            </a>
-          )}
-          {publicSaved && <span style={{fontSize:11,color:C.green}}>✓ Saved</span>}
-          {publicError && <span style={{fontSize:11,color:C.red}}>{publicError}</span>}
-        </div>
-      </div>
-
-      {/* Competitors (Part 6d) */}
-      <div style={{padding:'18px 20px',borderBottom:`1px solid ${C.border}`}}>
-        <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:4}}>Competitors</p>
-        <p style={{fontSize:11,color:C.textMuted,fontWeight:300,marginBottom:14}}>We'll scan these every Monday and alert you if anything changes.</p>
-        {competitors.map((url, i) => (
-          <input key={i} type="url" value={url} onChange={e=>{ const next=[...competitors]; next[i]=e.target.value; setCompetitors(next) }}
-            placeholder={`https://competitor-${i+1}.com`}
-            style={{width:'100%',maxWidth:420,padding:'8px 12px',fontSize:13,fontFamily:'DM Mono,monospace',
-              border:`1px solid ${C.border}`,borderRadius:6,background:'#fff',outline:'none',marginBottom:8,display:'block'}} />
-        ))}
-        <div style={{display:'flex',alignItems:'center',gap:12,marginTop:8,flexWrap:'wrap'}}>
-          <button className="btn v-press" onClick={saveCompetitors} disabled={savingComp} style={{
-            background:C.accent,color:'#fff',border:'none',borderRadius:7,padding:'8px 16px',
-            fontSize:12,fontFamily:'DM Sans,sans-serif',fontWeight:400,opacity:savingComp?0.6:1,
+        <div style={{display:'flex',alignItems:'center',gap:12,marginTop:14,flexWrap:'wrap'}}>
+          <button className="btn btn-primary v-press" onClick={saveCompetitors} disabled={savingComp} style={{
+            fontSize:12,fontWeight:500,borderRadius:8,padding:'9px 16px',opacity:savingComp?.6:1,
           }}>{savingComp?'Saving…':'Save competitors'}</button>
-          {compSaved && <span style={{fontSize:11,color:C.green}}>✓ Saved</span>}
-          {compError && <span style={{fontSize:11,color:C.red}}>{compError}</span>}
+          {compSaved && <span className="reveal-in" style={{fontSize:11.5,color:C.green}}>✓ Saved</span>}
+          {compError && <span className="reveal-in" style={{fontSize:11.5,color:C.redText}}>{compError}</span>}
         </div>
-      </div>
+      </Card>
 
-      <div style={{padding:'18px 20px',borderBottom:`1px solid ${C.border}`}}>
-        <p style={{fontSize:13,fontWeight:500,color:C.text,marginBottom:8}}>Account</p>
-        <p style={{fontSize:12,color:C.textMuted,marginBottom:2}}>Email: {user?.email}</p>
-      </div>
-      <div style={{padding:'18px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap'}}>
+      {/* Account */}
+      <Card className="fade-up" style={{padding:'22px 26px',marginBottom:26,animationDelay:'.16s'}}>
+        <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Account</p>
+        <p style={{fontSize:12.5,color:'#4A5248',marginTop:6}}>{user?.email}</p>
+      </Card>
+
+      {/* Danger zone */}
+      <div className="fade-up" style={{
+        border:`1px solid ${C.dangerBorder}`,borderRadius:14,padding:'20px 26px',
+        display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap',
+        animationDelay:'.2s',
+      }}>
         <div>
-          <p style={{fontSize:13,fontWeight:500,color:C.red,marginBottom:2}}>Delete account</p>
-          <p style={{fontSize:11,color:C.textMuted}}>Permanently deletes your account and all data.</p>
+          <p style={{fontSize:13,fontWeight:600,color:C.redText}}>Danger zone</p>
+          <p style={{fontSize:11.5,color:'#A8887F',marginTop:3}}>
+            {hasBilling
+              ? 'Cancel your subscription or permanently delete your account and all data.'
+              : 'Permanently delete your account and all data.'}
+          </p>
         </div>
-        <button className="btn" onClick={onDeleteRequest} style={{
-          background:'transparent',color:C.red,
-          border:`1px solid rgba(184,50,50,0.3)`,
-          borderRadius:7,padding:'7px 14px',fontSize:12,fontFamily:'DM Sans,sans-serif',
-        }}>
-          Delete account
-        </button>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          {hasBilling && (
+            <button className="btn" onClick={cancelViaPortal} disabled={cancelLoading} style={{
+              fontSize:12,color:C.redText,background:'none',border:`1px solid ${C.dangerBorder}`,
+              borderRadius:8,padding:'8px 14px',whiteSpace:'nowrap',opacity:cancelLoading?.6:1,
+            }}>{cancelLoading?'…':'Cancel subscription'}</button>
+          )}
+          <button className="btn" onClick={onDeleteRequest} style={{
+            fontSize:12,color:C.redText,background:'none',border:`1px solid ${C.dangerBorder}`,
+            borderRadius:8,padding:'8px 14px',whiteSpace:'nowrap',
+          }}>Delete account</button>
+        </div>
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -1988,19 +1864,19 @@ function RunDetail({run, onClose}) {
   const analysis = run.analysis_result||{}
   const funnel   = run.funnel_analysis
   const fields   = [
-    {label:'💡 Data Insight',         text:analysis.data_insight},
-    {label:'💥 Impact',               text:analysis.impact},
-    {label:'✅ Solution',             text:analysis.solution},
-    {label:'📈 Expected improvement', text:analysis.expected_improvement},
-    {label:'🔍 Competitor angle',     text:analysis.competitor_insight},
+    {label:'Data insight',         text:analysis.data_insight},
+    {label:'Impact',               text:analysis.impact},
+    {label:'Solution',             text:analysis.solution},
+    {label:'Expected improvement', text:analysis.expected_improvement},
+    {label:'Competitor angle',     text:analysis.competitor_insight},
   ]
 
   return (
-    <div style={{position:'fixed',inset:0,zIndex:999,background:'rgba(26,25,22,0.4)',backdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:24}} onClick={onClose}>
+    <div className="fade-in" style={{position:'fixed',inset:0,zIndex:999,background:'rgba(20,32,26,.45)',backdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:24}} onClick={onClose}>
       <div className="pop-in" onClick={e=>e.stopPropagation()} style={{
-        background:'#fff',borderRadius:16,padding:'28px 26px',
+        background:C.bgCard,borderRadius:16,padding:'28px 26px',
         maxWidth:560,width:'100%',maxHeight:'88vh',overflowY:'auto',
-        boxShadow:'0 20px 60px rgba(26,25,22,0.15)',position:'relative',
+        boxShadow:'0 20px 60px rgba(20,32,26,.2)',position:'relative',
       }}>
         <button onClick={onClose} style={{position:'absolute',top:14,right:16,background:'none',border:'none',fontSize:20,cursor:'pointer',color:C.textLight}}>×</button>
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:18}}>
@@ -2008,9 +1884,9 @@ function RunDetail({run, onClose}) {
           <span style={{fontSize:11,color:C.textLight}}>{new Date(run.created_at).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>
         </div>
         {analysis.problem&&(
-          <h3 style={{fontFamily:'Instrument Serif,serif',fontWeight:400,fontSize:24,letterSpacing:'-.01em',marginBottom:20,color:C.text,lineHeight:1.25}}>{analysis.problem}</h3>
+          <h3 style={{fontFamily:FONT.serif,fontWeight:500,fontSize:24,letterSpacing:'-.01em',marginBottom:20,color:C.ink,lineHeight:1.25}}>{analysis.problem}</h3>
         )}
-        <div style={{background:'rgba(26,25,22,0.02)',border:`1px solid ${C.border}`,borderRadius:10,padding:'13px 15px',marginBottom:16}}>
+        <div style={{background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:10,padding:'14px 16px',marginBottom:16}}>
           <SectionLabel style={{marginBottom:12}}>What the agent did</SectionLabel>
           {/* Wrapping grid (never scrolls horizontally) — stages flow
               left-to-right then wrap; checkmarks show how far the run got. */}
@@ -2021,9 +1897,8 @@ function RunDetail({run, onClose}) {
                 <div key={step.id} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,width:58}}>
                   <div style={{
                     width:24,height:24,borderRadius:'50%',fontSize:11,flexShrink:0,
-                    background:failed?C.red:done?C.accent:'rgba(26,25,22,0.07)',
-                    border:`1px solid ${failed?C.red:done?C.accent:C.border}`,
-                    display:'flex',alignItems:'center',justifyContent:'center',color:done?'#fff':C.textLight,
+                    background:failed?C.red:done?C.accent:C.borderSoft,
+                    display:'flex',alignItems:'center',justifyContent:'center',color:done||failed?'#fff':C.textLight,
                   }}>
                     {failed?'✕':done?'✓':''}
                   </div>
@@ -2034,59 +1909,63 @@ function RunDetail({run, onClose}) {
           </div>
         </div>
         {fields.map((item,i)=>item.text&&(
-          <div key={i} style={{background:'rgba(26,25,22,0.025)',border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
+          <div key={i} style={{background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
             <SectionLabel style={{marginBottom:5}}>{item.label}</SectionLabel>
             <p style={{fontSize:13,color:C.text,lineHeight:1.65}}>{item.text}</p>
           </div>
         ))}
         {analysis.file_to_edit&&(
-          <div style={{background:C.accentSoft,border:`1px solid ${C.accentMid}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
-            <SectionLabel style={{color:C.accent,marginBottom:5}}>📄 File edited</SectionLabel>
-            <p style={{fontSize:12,color:C.text,fontFamily:'DM Mono,monospace'}}>{analysis.file_to_edit}</p>
+          <div style={{background:C.chipBg,border:'1px solid #DDE7DA',borderRadius:9,padding:'12px 14px',marginBottom:8}}>
+            <SectionLabel style={{color:C.chipText,marginBottom:5}}>File edited</SectionLabel>
+            <p style={{fontSize:12,color:C.text,fontFamily:FONT.mono,wordBreak:'break-all'}}>{analysis.file_to_edit}</p>
           </div>
         )}
         {analysis.analytics_snapshot&&(
-          <div style={{background:'rgba(26,25,22,0.02)',border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
-            <SectionLabel style={{marginBottom:8}}>📊 Analytics snapshot</SectionLabel>
+          <div style={{background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
+            <SectionLabel style={{marginBottom:8}}>Analytics snapshot</SectionLabel>
             <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>
               {[
                 {label:'Pageviews',value:analysis.analytics_snapshot.totalPageviews},
-                {label:'Bounce Rate',value:analysis.analytics_snapshot.bounceRate!=null?`${analysis.analytics_snapshot.bounceRate}%`:null},
+                {label:'Bounce rate',value:analysis.analytics_snapshot.bounceRate!=null?`${analysis.analytics_snapshot.bounceRate}%`:null},
                 {label:'Sessions',value:analysis.analytics_snapshot.uniqueVisitors},
               ].map(({label,value})=>(
                 <div key={label}>
                   <p style={{fontSize:10,color:C.textLight}}>{label}</p>
-                  <p style={{fontFamily:'Instrument Serif,serif',fontSize:22,color:C.text}}>{value??'—'}</p>
+                  <p style={{fontFamily:FONT.serif,fontSize:22,fontWeight:500,color:C.ink}}>{value??'—'}</p>
                 </div>
               ))}
             </div>
           </div>
         )}
         {funnel&&(
-          <div style={{background:'rgba(26,25,22,0.02)',border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
-            <SectionLabel style={{marginBottom:6}}>🗺️ Funnel snapshot</SectionLabel>
+          <div style={{background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
+            <SectionLabel style={{marginBottom:6}}>Funnel snapshot</SectionLabel>
             <p style={{fontSize:12,color:C.text}}>{funnel.totalPages} pages · {Object.keys(funnel.pageTypes||{}).length} types</p>
             <div style={{display:'flex',flexWrap:'wrap',gap:5,marginTop:7}}>
               {Object.entries(funnel.pageTypes||{}).map(([type,count])=>(
-                <span key={type} style={{fontSize:10,background:C.accentSoft,border:`1px solid ${C.accentMid}`,borderRadius:5,padding:'2px 6px',color:C.accent}}>
-                  {PAGE_TYPE_EMOJI[type]||'📄'} {type}: {count}
+                <span key={type} style={{fontSize:10.5,background:C.chipBg,borderRadius:20,padding:'2px 9px',color:C.chipText,fontWeight:500}}>
+                  {type}: {count}
                 </span>
               ))}
             </div>
             {funnel.biggestDropOff&&(
-              <p style={{fontSize:11,color:C.yellow,marginTop:7}}>⚠️ Drop-off: {funnel.biggestDropOff.filePath} ({funnel.biggestDropOff.dropOffScore}%)</p>
+              <p style={{fontSize:11,color:C.yellowText,marginTop:7}}>Drop-off: {funnel.biggestDropOff.filePath} ({funnel.biggestDropOff.dropOffScore}%)</p>
             )}
           </div>
         )}
+        {run.screenshot_before&&(
+          <div style={{marginBottom:8}}>
+            <SectionLabel style={{marginBottom:6}}>Before screenshot</SectionLabel>
+            <img src={run.screenshot_before} alt="Page before the change"
+              style={{width:'100%',borderRadius:9,border:`1px solid ${C.border}`,display:'block'}}/>
+          </div>
+        )}
         {run.pr_url&&(
-          <a href={run.pr_url} target="_blank" rel="noreferrer" style={{
+          <a href={run.pr_url} target="_blank" rel="noreferrer" className="btn-primary v-press" style={{
             display:'block',textAlign:'center',marginTop:20,
-            background:C.text,color:C.bg,borderRadius:9,padding:'12px',
-            fontSize:14,fontFamily:'DM Sans,sans-serif',fontWeight:500,textDecoration:'none',transition:'background .2s',
-          }}
-            onMouseEnter={e=>e.currentTarget.style.background=C.accent}
-            onMouseLeave={e=>e.currentTarget.style.background=C.text}
-          >View Pull Request on GitHub →</a>
+            borderRadius:9,padding:'12px',
+            fontSize:14,fontFamily:FONT.sans,fontWeight:500,textDecoration:'none',
+          }}>View Pull Request on GitHub →</a>
         )}
       </div>
     </div>
@@ -2094,22 +1973,20 @@ function RunDetail({run, onClose}) {
 }
 
 // ─── DELETE CONFIRM ───────────────────────────────────────────────────────────
-// FIX #11: added `error` prop to surface failure message inside the modal
 function DeleteConfirmModal({onConfirm, onCancel, loading, error}) {
   return (
-    <div style={{position:'fixed',inset:0,zIndex:999,background:'rgba(26,25,22,0.4)',backdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:24}} onClick={onCancel}>
-      <div className="pop-in" onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:16,padding:'28px 26px',maxWidth:400,width:'100%',boxShadow:'0 20px 60px rgba(26,25,22,0.15)'}}>
-        <p style={{fontSize:26,marginBottom:12}}>⚠️</p>
-        <h3 style={{fontFamily:'Instrument Serif,serif',fontWeight:400,fontSize:22,marginBottom:8,color:C.text}}>Delete your account?</h3>
+    <div className="fade-in" style={{position:'fixed',inset:0,zIndex:999,background:'rgba(20,32,26,.45)',backdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:24}} onClick={onCancel}>
+      <div className="pop-in" onClick={e=>e.stopPropagation()} style={{background:C.bgCard,borderRadius:16,padding:'28px 26px',maxWidth:400,width:'100%',boxShadow:'0 20px 60px rgba(20,32,26,.2)'}}>
+        <h3 style={{fontFamily:FONT.serif,fontWeight:500,fontSize:22,marginBottom:8,color:C.text}}>Delete your account?</h3>
         <p style={{fontSize:13,color:C.textMuted,lineHeight:1.7,marginBottom:22}}>This permanently deletes your account, all agent runs, and all connected data. Cannot be undone.</p>
         {error && (
-          <p style={{fontSize:12,color:C.red,background:C.redSoft,border:`1px solid ${C.redMid}`,borderRadius:7,padding:'8px 12px',marginBottom:14}}>
+          <p style={{fontSize:12,color:C.redText,background:C.redBg,border:`1px solid ${C.dangerBorder}`,borderRadius:7,padding:'8px 12px',marginBottom:14}}>
             {error}
           </p>
         )}
         <div style={{display:'flex',gap:8}}>
-          <button className="btn" onClick={onCancel} style={{flex:1,background:'transparent',color:C.text,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px',fontSize:13,fontFamily:'DM Sans,sans-serif'}}>Cancel</button>
-          <button className="btn" onClick={onConfirm} disabled={loading} style={{flex:1,background:C.red,color:'#fff',border:'none',borderRadius:8,padding:'12px',fontSize:13,fontFamily:'DM Sans,sans-serif',fontWeight:500,opacity:loading?0.6:1}}>
+          <button className="btn btn-ghost" onClick={onCancel} style={{flex:1,borderRadius:8,padding:'12px',fontSize:13}}>Cancel</button>
+          <button className="btn" onClick={onConfirm} disabled={loading} style={{flex:1,background:C.red,color:'#fff',borderRadius:8,padding:'12px',fontSize:13,fontWeight:500,opacity:loading?.6:1}}>
             {loading?'Deleting…':'Yes, delete everything'}
           </button>
         </div>
@@ -2130,12 +2007,11 @@ export default function AgentDashboard({ navigate }) {
   const [triggerLoading, setTriggerLoading] = useState(false)
   const [triggerMessage, setTriggerMessage] = useState(null) // { text, error }
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [deleteError,    setDeleteError]    = useState(null)  // FIX #11: track deletion errors
+  const [deleteError,    setDeleteError]    = useState(null)
   const [activePage,     setActivePage]     = useState('overview')
   const [drawerOpen,     setDrawerOpen]     = useState(false)
   const [funnelPages,    setFunnelPages]    = useState([])
   const [learnings,      setLearnings]      = useState([])
-  const [impactMetrics,  setImpactMetrics]  = useState([])
   const [snippetDeclined, setSnippetDeclined] = useState(false)
   const [siteNetwork,     setSiteNetwork]     = useState(null)   // agent_site_network latest row
   const [structurePreview,setStructurePreview]= useState(null)   // site_structure_preview row (pre-first-run fallback)
@@ -2230,7 +2106,6 @@ export default function AgentDashboard({ navigate }) {
       setRuns(demoData.runs)
       setFunnelPages(demoData.funnelPages)
       setLearnings(demoData.learnings)
-      setImpactMetrics(demoData.impactMetrics)
       setLoading(false)
       return
     }
@@ -2289,12 +2164,10 @@ export default function AgentDashboard({ navigate }) {
     setSubscription(subs)
     if(!subs) return
 
-    const [runsRes, funnelRes, learningsRes, impactRes, connRes, snRes, previewRes] = await Promise.all([
+    const [runsRes, funnelRes, learningsRes, connRes, snRes, previewRes] = await Promise.all([
       supabase.from('agent_runs').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
       supabase.from('agent_funnel_pages').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(30),
       supabase.from('agent_learnings').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
-      // FIX #3: added .eq('subscription_id', subs.id) — previously fetched all users' metrics
-      supabase.from('impact_metrics').select('*').eq('subscription_id',subs.id).order('measured_at',{ascending:false}).limit(20),
       supabase.from('agent_connections').select('posthog_snippet_declined,website_url').eq('subscription_id',subs.id).maybeSingle(),
       // agent_site_network may not exist yet (Stage 4.5 migration); error is silently ignored
       supabase.from('agent_site_network').select('*').eq('subscription_id',subs.id).order('captured_at',{ascending:false}).limit(1).maybeSingle(),
@@ -2310,7 +2183,6 @@ export default function AgentDashboard({ navigate }) {
       setFunnelPages(funnelRes.data.filter(p=>{if(seen.has(p.page_path))return false;seen.add(p.page_path);return true}))
     }
     if(learningsRes.data) setLearnings(learningsRes.data)
-    if(impactRes.data) setImpactMetrics(impactRes.data)
     setSnippetDeclined(connRes.data?.posthog_snippet_declined === true)
     setWebsiteUrl(connRes.data?.website_url || null)
     // 42P01 = relation does not exist (table absent until Stage 4.5 migration) — expected, stay silent.
@@ -2340,8 +2212,6 @@ export default function AgentDashboard({ navigate }) {
 
   const [subscribeLoading, setSubscribeLoading] = useState(false)
   // Pre-checkout consent modal for the dashboard "Unlock your Growth Agent" CTA.
-  // Existing handleSubscribe logic preserved as doHandleSubscribe and only runs
-  // after the user explicitly confirms in the modal.
   const [unlockConfirmOpen, setUnlockConfirmOpen] = useState(false)
   async function doHandleSubscribe() {
     if (subscribeLoading || isDemo) return
@@ -2350,10 +2220,6 @@ export default function AgentDashboard({ navigate }) {
     if (!session?.user) { navigate('/agent/login'); return }
     const result = await startCheckout('subscription', session.user.id, session.user.email)
     if (!result?.redirected) setSubscribeLoading(false)
-  }
-  function handleSubscribe() {
-    if (subscribeLoading || isDemo) return
-    setUnlockConfirmOpen(true)
   }
 
   async function handleTogglePause() {
@@ -2432,7 +2298,6 @@ export default function AgentDashboard({ navigate }) {
       await supabase.auth.signOut()
       navigate('/')
     } else {
-      // FIX #11: show error in modal instead of silently closing it
       setDeleteError(data.error || 'Something went wrong. Please try again.')
       setActionLoading(false)
     }
@@ -2443,7 +2308,9 @@ export default function AgentDashboard({ navigate }) {
     navigate('/agent/login')
   }
 
-  const pending = runs.filter(isAwaitingApproval).length
+  const pending   = runs.filter(isAwaitingApproval).length
+  const isRunning = runs.some(r=>r.status==='running')
+  const isPaused  = subscription?.status==='paused'
 
   if(authLoading) return (
     <>
@@ -2466,12 +2333,12 @@ export default function AgentDashboard({ navigate }) {
       )}
 
       {checkoutCancelled && (
-        <div style={{
+        <div className="reveal-in" style={{
           position:'fixed', top:16, left:'50%', transform:'translateX(-50%)', zIndex:200,
           background:C.bgCard, border:`1px solid ${C.border}`,
-          boxShadow:'0 4px 20px rgba(28,25,23,0.12)',
+          boxShadow:'0 4px 20px rgba(20,32,26,.12)',
           borderRadius:10, padding:'10px 16px',
-          fontSize:13, color:C.text, fontFamily:'DM Sans,sans-serif',
+          fontSize:13, color:C.text, fontFamily:FONT.sans,
         }}>
           Checkout cancelled — no charge was made.
         </div>
@@ -2490,25 +2357,20 @@ export default function AgentDashboard({ navigate }) {
         {/* Mobile drawer scrim (≤900). Tap to dismiss. */}
         <div className="dash-scrim" onClick={()=>setDrawerOpen(false)} aria-hidden="true"/>
 
-        {/* ── LEFT SIDEBAR NAV ── */}
-        <div className="dash-sidebar" style={{
-          width:200,flexShrink:0,background:C.bgCard,
-          borderRight:`1px solid ${C.border}`,
+        {/* ── LEFT SIDEBAR NAV (deep green) ── */}
+        <nav className="dash-sidebar" style={{
+          width:228,flexShrink:0,background:C.sidebar,
           display:'flex',flexDirection:'column',
+          padding:'22px 14px 16px',
           position:'sticky',top:0,height:'100vh',
           overflowY:'auto',
         }}>
-          <div style={{
-            padding:'18px 16px 14px',
-            display:'flex',alignItems:'center',gap:9,
-            borderBottom:`1px solid ${C.border}`,
-            justifyContent:'space-between',
-          }}>
-            <div onClick={()=>navigate('/')} style={{display:'flex',alignItems:'center',gap:9,cursor:'pointer',minWidth:0}}>
-              <VelyrLogo size={22}/>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 8px 24px'}}>
+            <div onClick={()=>navigate('/')} style={{display:'flex',alignItems:'center',gap:11,cursor:'pointer',minWidth:0}}>
+              <VelyrLogo size={30} color="#C9E3D2"/>
               <div>
-                <p style={{fontFamily:'Instrument Serif,serif',fontSize:17,color:C.text,lineHeight:1}}>Velyr</p>
-                <p style={{fontSize:9,color:C.textLight,letterSpacing:'.06em',textTransform:'uppercase',marginTop:2}}>Growth Agent</p>
+                <p style={{fontFamily:FONT.serif,fontSize:20,lineHeight:1,color:C.sideText}}>Velyr</p>
+                <p style={{fontSize:8.5,letterSpacing:'.18em',color:C.sideFaint,marginTop:3,textTransform:'uppercase'}}>Growth Agent</p>
               </div>
             </div>
             <button
@@ -2517,232 +2379,203 @@ export default function AgentDashboard({ navigate }) {
               onClick={()=>setDrawerOpen(false)}
               style={{
                 width:36,height:36,borderRadius:8,flexShrink:0,
-                border:`1px solid ${C.border}`,background:'transparent',
+                border:'1px solid rgba(255,255,255,.15)',background:'transparent',
                 alignItems:'center',justifyContent:'center',
-                fontSize:20,color:C.textMuted,lineHeight:1,
+                fontSize:20,color:C.sideMuted,lineHeight:1,
               }}
             >×</button>
           </div>
 
-          <nav style={{padding:'10px 8px',flex:1}}>
-            {NAV_ITEMS.map(item=>(
-              <button key={item.id} className="nav-item" onClick={()=>{setActivePage(item.id); setDrawerOpen(false)}} style={{
-                display:'flex',alignItems:'center',gap:9,
-                padding:'8px 10px',borderRadius:7,marginBottom:2,
-                background:activePage===item.id?C.accentSoft:'transparent',
-                color:activePage===item.id?C.accent:C.textMuted,
-              }}>
-                <span style={{fontSize:13,flexShrink:0,opacity:activePage===item.id?1:0.6}}>{item.icon}</span>
-                <span style={{fontSize:12,fontWeight:activePage===item.id?500:400}}>{item.label}</span>
-                {item.id==='runs'&&pending>0&&(
-                  <span style={{
-                    marginLeft:'auto',fontSize:9,fontWeight:500,
-                    background:C.yellow,color:'#fff',borderRadius:10,
-                    padding:'1px 5px',minWidth:16,textAlign:'center',
-                  }}>{pending}</span>
-                )}
-              </button>
-            ))}
-          </nav>
-
-          {/* Global agent-status chip. Pause/Resume lives on Overview's sidebar +
-              Settings; it was removed from here to keep one control per surface. */}
-          <div style={{padding:'12px 16px',borderTop:`1px solid ${C.border}`}}>
-            {subscription && (
-              <div style={{display:'flex',alignItems:'center',gap:7}}>
-                <span className={runs.some(r=>r.status==='running')?'pulse-dot':''} style={{
-                  width:6,height:6,borderRadius:'50%',display:'inline-block',
-                  background:subscription.status==='paused'?C.yellow:runs.some(r=>r.status==='running')?C.blue:C.accent,
-                  flexShrink:0,
-                }}/>
-                <p style={{fontSize:11,color:C.textMuted,fontWeight:400}}>
-                  Agent {subscription.status==='paused'?'paused':runs.some(r=>r.status==='running')?'running':'active'}
-                </p>
-              </div>
-            )}
+          <div style={{flex:1}}>
+            {NAV_ITEMS.map(item=>{
+              const active = activePage===item.id
+              return (
+                <button key={item.id} className="nav-item" onClick={()=>{setActivePage(item.id); setDrawerOpen(false)}} style={{
+                  display:'flex',alignItems:'center',gap:11,
+                  padding:'9px 12px',borderRadius:8,marginBottom:2,fontSize:13,
+                  background:active?'rgba(255,255,255,.12)':'transparent',
+                  color:active?C.sideText:C.sideMuted,
+                  fontWeight:active?500:400,
+                  fontFamily:FONT.sans,
+                }}>
+                  <NavIcon path={item.icon}/>
+                  <span>{item.label}</span>
+                  {item.id==='runs'&&pending>0&&(
+                    <span className="pop-in" style={{
+                      marginLeft:'auto',fontSize:9.5,fontWeight:600,
+                      background:C.yellow,color:'#1E362B',borderRadius:10,
+                      padding:'1px 6px',minWidth:16,textAlign:'center',
+                    }}>{pending}</span>
+                  )}
+                </button>
+              )
+            })}
           </div>
-        </div>
 
-        {/* ── MAIN CONTENT ── */}
-        <div className="dash-main" style={{flex:1,minWidth:0,display:'flex',flexDirection:'column'}}>
-
-          <div style={{
-            height:52,padding:'0 24px',
-            display:'flex',alignItems:'center',justifyContent:'space-between',
-            borderBottom:`1px solid ${C.border}`,
-            background:'rgba(245,242,236,0.9)',backdropFilter:'blur(16px)',
-            position:'sticky',top:0,zIndex:50,
-          }}>
-            <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
-              <button
-                className="dash-hamburger btn"
-                aria-label="Open navigation"
-                onClick={()=>setDrawerOpen(true)}
-                style={{
-                  width:40,height:40,borderRadius:8,flexShrink:0,
-                  border:`1px solid ${C.border}`,background:C.bgCard,
-                  alignItems:'center',justifyContent:'center',
-                }}
-              >
-                <span style={{position:'relative',display:'block',width:16,height:11}}>
-                  <span style={{position:'absolute',left:0,right:0,top:0,height:1.5,background:C.text,borderRadius:1}}/>
-                  <span style={{position:'absolute',left:0,right:0,top:5,height:1.5,background:C.text,borderRadius:1}}/>
-                  <span style={{position:'absolute',left:0,right:0,top:10,height:1.5,background:C.text,borderRadius:1}}/>
-                </span>
-              </button>
-              {/* Label + pending badge stack as two lines on mobile (badge below the
-                  page title) so the header row can't overflow at ~390px. The badge
-                  here is mobile-only; the desktop badge stays in the right group. */}
-              <div style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:3,minWidth:0}}>
-                <p style={{fontSize:13,fontWeight:500,color:C.text,textTransform:'capitalize'}}>
-                  {activePage}
-                </p>
-                {pending>0&&(
-                  <div className="dash-header-badge-m" style={{alignItems:'center',gap:6,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:7,padding:'3px 9px',cursor:'pointer'}} onClick={()=>setActivePage('runs')}>
-                    <span className="pulse-dot" style={{width:5,height:5,borderRadius:'50%',background:C.yellow,display:'inline-block',flexShrink:0}}/>
-                    <span style={{fontSize:11,color:C.yellow,fontWeight:500,whiteSpace:'nowrap'}}>{pending} awaiting approval</span>
-                  </div>
-                )}
-              </div>
+          <div style={{marginTop:'auto',padding:'12px 12px 0',borderTop:'1px solid rgba(255,255,255,.09)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:C.sideFaint}}>
+              <span className={isPaused?'':'pulse-dot'} style={{
+                width:7,height:7,borderRadius:'50%',flexShrink:0,
+                background:isPaused?'#9A9E93':isRunning?C.yellow:'#7FC79A',
+              }}/>
+              <span>{isPaused?'Agent paused':isRunning?'Agent running':'Agent active'}</span>
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:12}}>
-              {pending>0&&(
-                <div className="dash-header-badge-d" style={{display:'flex',alignItems:'center',gap:6,background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:7,padding:'4px 11px',cursor:'pointer'}} onClick={()=>setActivePage('runs')}>
-                  <span className="pulse-dot" style={{width:5,height:5,borderRadius:'50%',background:C.yellow,display:'inline-block'}}/>
-                  <span style={{fontSize:11,color:C.yellow,fontWeight:500}}>{pending} awaiting approval</span>
+            <p style={{fontSize:10.5,color:C.sideDim,marginTop:6,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user?.email}</p>
+          </div>
+        </nav>
+
+        {/* ── MAIN ── */}
+        <main className="dash-main" style={{flex:1,minWidth:0,display:'flex',flexDirection:'column',overflowY:'auto',height:'100vh'}}>
+          <div className="dash-content-pad" style={{maxWidth:1160,margin:'0 auto',padding:'30px 40px 40px',width:'100%',flex:1}}>
+
+            {/* Header */}
+            <header style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:26,gap:12}}>
+              <div style={{display:'flex',alignItems:'center',gap:12,minWidth:0}}>
+                <button
+                  className="dash-hamburger btn"
+                  aria-label="Open navigation"
+                  onClick={()=>setDrawerOpen(true)}
+                  style={{
+                    width:40,height:40,borderRadius:8,flexShrink:0,
+                    border:`1px solid ${C.borderMed}`,background:C.bgCard,
+                    alignItems:'center',justifyContent:'center',
+                  }}
+                >
+                  <span style={{position:'relative',display:'block',width:16,height:11}}>
+                    <span style={{position:'absolute',left:0,right:0,top:0,height:1.5,background:C.text,borderRadius:1}}/>
+                    <span style={{position:'absolute',left:0,right:0,top:5,height:1.5,background:C.text,borderRadius:1}}/>
+                    <span style={{position:'absolute',left:0,right:0,top:10,height:1.5,background:C.text,borderRadius:1}}/>
+                  </span>
+                </button>
+                <div style={{display:'flex',flexDirection:'column',gap:4,minWidth:0}}>
+                  <h1 style={{margin:0,fontSize:21,fontWeight:600,letterSpacing:'-.01em',color:C.text}}>
+                    {PAGE_TITLES[activePage]||'Overview'}
+                  </h1>
+                  {pending>0&&(
+                    <button className="dash-header-badge-m btn" onClick={()=>setActivePage('runs')} style={{
+                      alignItems:'center',gap:6,background:C.yellowBg,borderRadius:20,padding:'3px 10px',
+                      border:'none',alignSelf:'flex-start',
+                    }}>
+                      <span className="pulse-dot" style={{width:5,height:5,borderRadius:'50%',background:C.yellow,display:'inline-block',flexShrink:0}}/>
+                      <span style={{fontSize:11,color:C.yellowText,fontWeight:500,whiteSpace:'nowrap'}}>{pending} awaiting approval</span>
+                    </button>
+                  )}
                 </div>
-              )}
-              <span className="dash-header-email" style={{fontSize:11,color:C.textLight}}>{user?.email}</span>
-              <button className="btn" onClick={handleLogout} style={{
-                background:'none',border:`1px solid ${C.border}`,borderRadius:6,
-                padding:'4px 12px',fontSize:11,fontFamily:'DM Sans,sans-serif',
-                color:C.textMuted,
-              }}
-                onMouseEnter={e=>{e.currentTarget.style.borderColor=C.red;e.currentTarget.style.color=C.red}}
-                onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.textMuted}}
-              >Log out</button>
-            </div>
-          </div>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+                {pending>0&&(
+                  <button className="dash-header-badge-d btn" onClick={()=>setActivePage('runs')} style={{
+                    display:'flex',alignItems:'center',gap:6,background:C.yellowBg,borderRadius:20,padding:'5px 12px',border:'none',
+                  }}>
+                    <span className="pulse-dot" style={{width:5,height:5,borderRadius:'50%',background:C.yellow,display:'inline-block'}}/>
+                    <span style={{fontSize:11,color:C.yellowText,fontWeight:500}}>{pending} awaiting approval</span>
+                  </button>
+                )}
+                <button className="btn" onClick={handleLogout} style={{
+                  fontSize:12,color:C.textMuted,background:'none',
+                  border:`1px solid ${C.borderMed}`,borderRadius:8,padding:'7px 14px',
+                }}
+                  onMouseEnter={e=>{e.currentTarget.style.background=C.bgCard}}
+                  onMouseLeave={e=>{e.currentTarget.style.background='transparent'}}
+                >Log out</button>
+              </div>
+            </header>
 
-          <div className="dash-content" style={{flex:1,padding:'24px',overflowY:'auto'}}>
+            {loading&&!subscription&&(
+              <div style={{padding:64,display:'flex',justifyContent:'center'}}><Spinner size={24}/></div>
+            )}
 
             {!loading&&!subscription&&stripeVerified===true&&(
-              <div className="fade-up" style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:16,padding:'48px 32px',textAlign:'center',maxWidth:480,margin:'0 auto'}}>
-                <Spinner size={28}/>
-                <h2 style={{fontFamily:'Instrument Serif,serif',fontWeight:400,fontSize:24,margin:'18px 0 10px',color:C.text}}>Setting up your Growth Agent…</h2>
+              <Card className="fade-up" style={{padding:'48px 32px',textAlign:'center',maxWidth:480,margin:'0 auto'}}>
+                <div style={{display:'flex',justifyContent:'center'}}><Spinner size={28}/></div>
+                <h2 style={{fontFamily:FONT.serif,fontWeight:500,fontSize:24,margin:'18px 0 10px',color:C.text}}>Setting up your Growth Agent…</h2>
                 <p style={{fontSize:13,color:C.textMuted,lineHeight:1.7}}>Payment confirmed. We're finalizing your account — this usually takes a few seconds.</p>
-              </div>
+              </Card>
             )}
 
             {!loading&&verifyDone&&!subscription&&stripeVerified===false&&(
-              <div className="fade-up" style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:16,padding:'48px 32px',textAlign:'center',maxWidth:480,margin:'0 auto'}}>
-                <p style={{fontSize:32,marginBottom:14}}>🤖</p>
-                <h2 style={{fontFamily:'Instrument Serif,serif',fontWeight:400,fontSize:28,marginBottom:10,color:C.text}}>Unlock your Growth Agent</h2>
+              <Card className="fade-up" style={{padding:'48px 32px',textAlign:'center',maxWidth:480,margin:'0 auto'}}>
+                <div style={{display:'flex',justifyContent:'center',marginBottom:16}}><VelyrLogo size={40}/></div>
+                <h2 style={{fontFamily:FONT.serif,fontWeight:500,fontSize:28,marginBottom:10,color:C.text}}>Unlock your Growth Agent</h2>
                 <p style={{fontSize:13,color:C.textMuted,lineHeight:1.7,marginBottom:24}}>Start your 14-day free trial — no card required. You'll connect GitHub and Telegram in onboarding.</p>
-                <button className="btn" onClick={() => navigate('/agent/onboarding')} style={{
-                  background: C.text, color:C.bg, border:'none', borderRadius:9,
-                  padding:'13px 26px', fontSize:14, fontFamily:'DM Sans,sans-serif', fontWeight:500,
-                  cursor:'pointer',
-                }}
-                  onMouseEnter={e=>{ e.currentTarget.style.background=C.accent }}
-                  onMouseLeave={e=>{ e.currentTarget.style.background=C.text }}
-                >Start free trial →</button>
+                <button className="btn btn-primary v-press" onClick={() => navigate('/agent/onboarding')} style={{
+                  borderRadius:9,padding:'13px 26px',fontSize:14,fontWeight:500,
+                }}>Start free trial →</button>
                 <div style={{ marginTop: 22 }}>
                   <button
                     onClick={() => { setDeleteError(null); setShowDeleteConfirm(true) }}
                     style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      fontSize: 12, color: C.textLight, fontFamily: 'DM Sans, sans-serif', fontWeight: 300,
-                      textDecoration: 'underline', textDecorationColor: 'rgba(160,152,144,0.35)',
+                      background:'none', border:'none', cursor:'pointer',
+                      fontSize:12, color:C.textLight, fontFamily:FONT.sans,
+                      textDecoration:'underline', textDecorationColor:'rgba(154,158,147,.4)',
                     }}
                   >Delete account</button>
                 </div>
-              </div>
+              </Card>
             )}
 
             {subscription&&!loading&&(
               <>
                 {snippetDeclined&&!isDemo&&(
-                  <div style={{
-                    marginBottom:16,padding:'10px 16px',
-                    background:C.yellowSoft,border:`1px solid ${C.yellowMid}`,borderRadius:8,
-                    display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,
+                  <div className="fade-up" style={{
+                    marginBottom:16,padding:'11px 16px',
+                    background:C.yellowBg,border:'1px solid #EADFC2',borderRadius:10,
+                    display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap',
                   }}>
-                    <span style={{fontSize:12,color:C.yellow,lineHeight:1.4}}>
-                      ⚠️ Analytics tracking declined — fix recommendations will be less accurate without visitor data.
+                    <span style={{fontSize:12,color:C.yellowText,lineHeight:1.4}}>
+                      Analytics tracking declined — fix recommendations will be less accurate without visitor data.
                     </span>
-                    <button className="btn" onClick={handleReenableSnippet} style={{
-                      fontSize:11,padding:'5px 12px',borderRadius:6,flexShrink:0,
-                      background:C.yellow,color:'#fff',border:'none',fontFamily:'DM Sans,sans-serif',
+                    <button className="btn v-press" onClick={handleReenableSnippet} style={{
+                      fontSize:11,fontWeight:500,padding:'6px 13px',borderRadius:7,flexShrink:0,
+                      background:C.ink,color:C.sideText,
                     }}>
                       Re-enable tracking →
                     </button>
                   </div>
                 )}
-                {/* Marketing hero ("Autonomous growth optimization.") removed from
-                    the logged-in Overview — the header bar already labels the view. */}
 
-                {activePage==='overview'&&(
-                  <OverviewPage
-                    runs={runs} subscription={subscription}
-                    funnelPages={funnelPages} learnings={learnings}
-                    impactMetrics={impactMetrics}
-                    onSelectRun={setSelected}
-                    onTogglePause={handleTogglePause}
-                    actionLoading={actionLoading}
-                    onTriggerRun={handleTriggerRun}
-                    triggerLoading={triggerLoading}
-                    triggerMessage={triggerMessage}
-                    siteNetwork={siteNetwork}
-                    structurePreview={structurePreview}
-                    websiteUrl={websiteUrl}
-                    onOpenNetwork={()=>setActivePage('network')}
-                  />
-                )}
+                <div key={activePage} className="page-in">
+                  {activePage==='overview'&&(
+                    <OverviewPage
+                      runs={runs} subscription={subscription} learnings={learnings}
+                      onSelectRun={setSelected}
+                      onTogglePause={handleTogglePause}
+                      actionLoading={actionLoading}
+                      onTriggerRun={handleTriggerRun}
+                      triggerLoading={triggerLoading}
+                      triggerMessage={triggerMessage}
+                      onGoRuns={()=>setActivePage('runs')}
+                      onGoGuardrails={()=>setActivePage('guardrails')}
+                      onGoDna={()=>setActivePage('dna')}
+                    />
+                  )}
 
-                {activePage==='runs'&&(
-                  <div className="fade-up">
+                  {activePage==='runs'&&(
                     <RunsPage runs={runs} loading={loading} onSelect={setSelected} learnings={learnings}/>
-                  </div>
-                )}
+                  )}
 
-                {activePage==='network'&&(
-                  <div className="fade-up">
+                  {activePage==='network'&&(
                     <NetworkPage
                       runs={runs}
                       siteNetwork={siteNetwork}
                       structurePreview={structurePreview}
                       websiteUrl={websiteUrl}
                     />
-                  </div>
-                )}
+                  )}
 
-                {activePage==='funnel'&&(
-                  <div className="fade-up">
-                    <p style={{fontSize:12,color:C.textMuted,lineHeight:1.7,marginBottom:14}}>
-                      The agent detects every page in your repo and maps the conversion funnel. Pages with visitors show live drop-off; pages with none yet are listed as detected. High-drop-off pages are prioritized on the next run.
-                    </p>
-                    {/* FIX #6: funnelPages + loading passed from parent, no second fetch */}
+                  {activePage==='funnel'&&(
                     <FunnelPage funnelPages={funnelPages} loading={loading}/>
-                  </div>
-                )}
+                  )}
 
-                {activePage==='dna'&&(
-                  <div className="fade-up">
+                  {activePage==='dna'&&(
                     <DNAPage subscriptionId={subscription?.id}/>
-                  </div>
-                )}
+                  )}
 
-                {activePage==='guardrails'&&(
-                  <div className="fade-up">
-                    {/* Intro copy lives inside GuardrailsPage; the duplicate that
-                        used to sit here was removed. */}
+                  {activePage==='guardrails'&&(
                     <GuardrailsPage subscriptionId={subscription?.id}/>
-                  </div>
-                )}
+                  )}
 
-                {activePage==='settings'&&(
-                  <div className="fade-up">
+                  {activePage==='settings'&&(
                     <SettingsPage
                       subscription={subscription} user={user}
                       onTogglePause={handleTogglePause} actionLoading={actionLoading}
@@ -2750,22 +2583,22 @@ export default function AgentDashboard({ navigate }) {
                       onSaveSettings={handleSaveSettings}
                       navigate={navigate}
                     />
-                  </div>
-                )}
+                  )}
+                </div>
               </>
             )}
           </div>
 
           {/* Legal footer (§5 TMG — Impressum must be reachable from every page) */}
-          <div style={{ borderTop: `1px solid ${C.border}`, padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, background: C.bg }}>
-            <span style={{ fontSize: 12, color: C.textLight, fontWeight: 300, fontFamily: 'DM Sans, sans-serif' }}>© 2026 Velyr</span>
-            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
-              <button onClick={() => navigate('/privacy')}   style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: C.textLight, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Privacy Policy</button>
-              <button onClick={() => navigate('/impressum')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: C.textLight, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Legal Notice (Impressum)</button>
-              <button onClick={() => navigate('/agb')}       style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: C.textLight, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>AGB</button>
+          <div style={{ borderTop:`1px solid ${C.border}`, padding:'20px 40px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+            <span style={{ fontSize:12, color:C.textLight }}>© 2026 Velyr</span>
+            <div style={{ display:'flex', gap:18, flexWrap:'wrap' }}>
+              <button onClick={() => navigate('/privacy')}   style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:C.textLight, fontFamily:FONT.sans }}>Privacy Policy</button>
+              <button onClick={() => navigate('/impressum')} style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:C.textLight, fontFamily:FONT.sans }}>Legal Notice (Impressum)</button>
+              <button onClick={() => navigate('/agb')}       style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:C.textLight, fontFamily:FONT.sans }}>AGB</button>
             </div>
           </div>
-        </div>
+        </main>
       </div>
     </>
   )
