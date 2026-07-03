@@ -92,7 +92,7 @@ export default function SubscribeButton({ type, style = {}, className = '', navi
         {loading ? 'Redirecting…' : label}
       </button>
       <p style={{ fontSize: 11, color: '#a09890', fontWeight: 300, textAlign: 'center', marginTop: 6 }}>
-        * 14-day free trial. Cancel anytime, no charge during trial. Endpreis gem. § 19 UStG — no VAT charged.
+        * 14-day free trial. Cancel anytime, no charge during trial. Final price — as a small business under § 19 UStG, no VAT is charged.
       </p>
     </>
   )

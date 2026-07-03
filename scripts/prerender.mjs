@@ -99,12 +99,12 @@ const ROUTES = [
   {
     dir: 'impressum',
     path: '/impressum',
-    title: 'Impressum — Velyr',
-    description: 'Legal notice (Impressum) for Velyr.',
+    title: 'Imprint — Velyr',
+    description: 'Imprint for Velyr.',
     robots: 'noindex, nofollow',
     fallback: legalFallback(
-      'Impressum',
-      'Legal notice and provider identification for Velyr in accordance with German law.'
+      'Imprint',
+      'Imprint and provider identification for Velyr in accordance with German law.'
     ),
   },
 ]

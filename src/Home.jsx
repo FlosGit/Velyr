@@ -925,7 +925,7 @@ function Footer({ navigate }) {
             { label:'Blog', path:'/blog' },
             { label:'FAQ', path:'/faq' },
             { label:'Privacy Policy', path:'/privacy' },
-            { label:'Legal Notice (Impressum)', path:'/impressum' },
+            { label:'Imprint', path:'/impressum' },
             { label:'AGB', path:'/agb' },
             { label:'Agent Login →', path:'/agent/login' },
           ].map(l => (

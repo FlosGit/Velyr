@@ -70,7 +70,7 @@ export default function CheckoutConfirmModal({ type, open, onCancel, onConfirm, 
           <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>
             Recurring monthly charge, billed in advance via Stripe. You can cancel anytime from your dashboard — cancellation takes effect at the end of the current billing period.
           </p>
-          <p style={{ fontSize: 11, color: C.textLight, fontWeight: 300, marginTop: 6 }}>* Endpreis gem. § 19 UStG — no VAT charged</p>
+          <p style={{ fontSize: 11, color: C.textLight, fontWeight: 300, marginTop: 6 }}>* Final price — as a small business under § 19 UStG, no VAT is charged</p>
         </div>
 
         {/* Consent checkbox */}

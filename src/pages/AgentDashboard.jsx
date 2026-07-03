@@ -2710,7 +2710,7 @@ export default function AgentDashboard({ navigate }) {
             <span style={{ fontSize:12, color:C.textLight }}>© 2026 Velyr</span>
             <div style={{ display:'flex', gap:18, flexWrap:'wrap' }}>
               <button onClick={() => navigate('/privacy')}   style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:C.textLight, fontFamily:FONT.sans }}>Privacy Policy</button>
-              <button onClick={() => navigate('/impressum')} style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:C.textLight, fontFamily:FONT.sans }}>Legal Notice (Impressum)</button>
+              <button onClick={() => navigate('/impressum')} style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:C.textLight, fontFamily:FONT.sans }}>Imprint</button>
               <button onClick={() => navigate('/agb')}       style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:C.textLight, fontFamily:FONT.sans }}>AGB</button>
             </div>
           </div>

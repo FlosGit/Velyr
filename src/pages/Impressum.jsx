@@ -39,7 +39,7 @@ function Logo({ size = 24, color = '#2a5c45' }) {
 export default function Impressum({ navigate }) {
   useEffect(() => {
     const prevTitle = document.title
-    document.title = 'Impressum — Velyr'
+    document.title = 'Imprint — Velyr'
     let robots = document.querySelector('meta[name="robots"]')
     const created = !robots
     const prevContent = robots?.getAttribute('content')
@@ -92,87 +92,87 @@ export default function Impressum({ navigate }) {
 
         <div className="legal-page-pad" style={{ maxWidth: 680, margin: '0 auto', padding: '72px 24px 96px' }}>
           <p style={{ fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: '#2a5c45', marginBottom: 16, fontWeight: 400 }}>Legal</p>
-          <h1 style={{ marginBottom: 48 }}>Impressum</h1>
+          <h1 style={{ marginBottom: 48 }}>Imprint</h1>
 
           <div style={block}>
-            <span style={label}>Angaben gemäß § 5 TMG</span>
-            <p>Florian Rappold<br />Maikäferstraße 3f<br />85551 Kirchheim bei München<br />Deutschland</p>
+            <span style={label}>Information pursuant to § 5 TMG (German Telemedia Act)</span>
+            <p>Florian Rappold<br />Maikäferstraße 3f<br />85551 Kirchheim bei München<br />Germany</p>
           </div>
 
           <div style={block}>
-            <span style={label}>Kontakt</span>
+            <span style={label}>Contact</span>
             <p>
-              Telefon: <a href="tel:+4915161893139">+49 151 61893139</a><br />
-              E-Mail: <a href="mailto:info@velyr.io">info@velyr.io</a>
+              Phone: <a href="tel:+4915161893139">+49 151 61893139</a><br />
+              Email: <a href="mailto:info@velyr.io">info@velyr.io</a>
             </p>
           </div>
 
           <div style={block}>
-            <span style={label}>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</span>
+            <span style={label}>Responsible for content pursuant to § 18 (2) MStV</span>
             <p>Florian Rappold<br />Maikäferstraße 3f<br />85551 Kirchheim bei München</p>
           </div>
 
           <div style={block}>
-            <span style={label}>Umsatzsteuer</span>
-            <p>Hinweis gemäß § 19 UStG: Als Kleinunternehmer im Sinne von § 19 UStG wird keine Umsatzsteuer erhoben und ausgewiesen.</p>
+            <span style={label}>Value Added Tax</span>
+            <p>Notice pursuant to § 19 UStG (German VAT Act): As a small business within the meaning of § 19 UStG, no value added tax is charged or shown.</p>
           </div>
 
           <div style={block}>
-            <span style={label}>EU-Streitschlichtung</span>
+            <span style={label}>EU Dispute Resolution</span>
             <p>
-              Die Europäische Kommission stellt eine Plattform zur Online-Streitbeilegung (OS) bereit:{' '}
+              The European Commission provides a platform for online dispute resolution (ODR):{' '}
               <a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener noreferrer">ec.europa.eu/consumers/odr</a>.{' '}
-              Wir sind nicht verpflichtet und nicht bereit, an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teilzunehmen. Bitte kontaktieren Sie uns zur außergerichtlichen Lösung zunächst per E-Mail an <a href="mailto:info@velyr.io">info@velyr.io</a>.
+              We are neither obliged nor willing to participate in dispute resolution proceedings before a consumer arbitration board. For an out-of-court settlement, please first contact us by email at <a href="mailto:info@velyr.io">info@velyr.io</a>.
             </p>
           </div>
 
           <div style={block}>
-            <span style={label}>Hinweis zur Dienstleistung</span>
-            <p>Velyr ist ein KI-gestützter Growth Agent, der die Website von Abonnenten wöchentlich analysiert und Verbesserungen als Pull Requests vorschlägt. Änderungen werden ausschließlich nach ausdrücklicher Freigabe durch den Nutzer übernommen. Die Ergebnisse beruhen auf automatisierten Analysen und stellen keine rechtliche, steuerliche oder geschäftliche Beratung dar. Für Entscheidungen auf Basis der Empfehlungen des Growth Agent wird keine Haftung übernommen.</p>
+            <span style={label}>Notice on the Service</span>
+            <p>Velyr is an AI-powered Growth Agent that analyzes subscribers' websites weekly and proposes improvements as pull requests. Changes are applied only after the user's explicit approval. The results are based on automated analysis and do not constitute legal, tax, or business advice. No liability is assumed for decisions made on the basis of the Growth Agent's recommendations.</p>
           </div>
 
           <div style={block}>
-            <span style={label}>Zahlungsabwicklung</span>
-            <p>Die Zahlungsabwicklung für kostenpflichtige Leistungen (Growth Agent €29/Monat) erfolgt über Stripe Payments Europe, Ltd., 1 Grand Canal Street Lower, Grand Canal Dock, Dublin, D02 H210, Irland. Zahlungsdaten werden ausschließlich von Stripe verarbeitet und nicht von Velyr gespeichert.</p>
-          </div>
-
-          <hr style={{ border: 'none', borderTop: '1px solid rgba(28,25,23,0.09)', margin: '8px 0 36px' }} />
-
-          <h2 style={{ marginBottom: 20 }}>Haftungsausschluss</h2>
-
-          <div style={block}>
-            <span style={label}>Haftung für Inhalte</span>
-            <p>Die Inhalte dieser Website wurden mit größter Sorgfalt erstellt. Für die Richtigkeit, Vollständigkeit und Aktualität der Inhalte kann jedoch keine Gewähr übernommen werden. Als Diensteanbieter sind wir gemäß § 7 Abs. 1 TMG für eigene Inhalte auf diesen Seiten nach den allgemeinen Gesetzen verantwortlich. Nach §§ 8 bis 10 TMG sind wir als Diensteanbieter jedoch nicht verpflichtet, übermittelte oder gespeicherte fremde Informationen zu überwachen.</p>
-          </div>
-
-          <div style={block}>
-            <span style={label}>KI-generierte Inhalte</span>
-            <p>Die vom Growth Agent generierten Analysen und Code-Vorschläge (Pull Requests) werden teilweise durch KI-Systeme (Anthropic Claude) erstellt. Diese stellen automatisierte Auswertungen dar und ersetzen keine fachkundige Beratung. Velyr übernimmt keine Haftung für Entscheidungen, die auf Basis dieser Analysen getroffen werden.</p>
-          </div>
-
-          <div style={block}>
-            <span style={label}>Haftung für Links</span>
-            <p>Unser Angebot enthält Links zu externen Websites Dritter, auf deren Inhalte wir keinen Einfluss haben. Für die Inhalte der verlinkten Seiten ist stets der jeweilige Anbieter oder Betreiber der Seiten verantwortlich. Eine permanente inhaltliche Kontrolle der verlinkten Seiten ist ohne konkrete Anhaltspunkte einer Rechtsverletzung nicht zumutbar.</p>
-          </div>
-
-          <div style={block}>
-            <span style={label}>Urheberrecht</span>
-            <p>Die durch die Seitenbetreiber erstellten Inhalte und Werke auf diesen Seiten unterliegen dem deutschen Urheberrecht. Die Vervielfältigung, Bearbeitung, Verbreitung und jede Art der Verwertung außerhalb der Grenzen des Urheberrechtes bedürfen der schriftlichen Zustimmung des jeweiligen Autors bzw. Erstellers.</p>
+            <span style={label}>Payment Processing</span>
+            <p>Payment processing for paid services (Growth Agent €29/month) is handled by Stripe Payments Europe, Ltd., 1 Grand Canal Street Lower, Grand Canal Dock, Dublin, D02 H210, Ireland. Payment data is processed solely by Stripe and is not stored by Velyr.</p>
           </div>
 
           <hr style={{ border: 'none', borderTop: '1px solid rgba(28,25,23,0.09)', margin: '8px 0 36px' }} />
 
-          <h2 style={{ marginBottom: 20 }}>Datenschutz</h2>
+          <h2 style={{ marginBottom: 20 }}>Disclaimer</h2>
 
           <div style={block}>
-            <span style={label}>Verantwortlicher</span>
-            <p>Verantwortlicher im Sinne der DSGVO ist Florian Rappold, Maikäferstraße 3f, 85551 Kirchheim bei München. Kontakt: <a href="mailto:info@velyr.io">info@velyr.io</a></p>
+            <span style={label}>Liability for Content</span>
+            <p>The contents of this website were created with the greatest care. However, we cannot guarantee the accuracy, completeness, or timeliness of the content. As a service provider, we are responsible for our own content on these pages in accordance with general laws pursuant to § 7 (1) TMG. However, pursuant to §§ 8 to 10 TMG, we as a service provider are not obliged to monitor transmitted or stored third-party information.</p>
           </div>
 
           <div style={block}>
-            <span style={label}>Weitere Informationen</span>
-            <p>Weitere Informationen zum Datenschutz finden Sie in unserer{' '}
-              <button onClick={() => navigate('/privacy')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#2a5c45', fontFamily: 'Jost, sans-serif', fontSize: 15, fontWeight: 300, textDecoration: 'underline', textDecorationColor: 'rgba(42,92,69,0.35)', padding: 0 }}>Datenschutzerklärung</button>.
+            <span style={label}>AI-Generated Content</span>
+            <p>The analyses and code suggestions (pull requests) generated by the Growth Agent are created in part by AI systems (Anthropic Claude). These constitute automated evaluations and are no substitute for expert advice. Velyr assumes no liability for decisions made on the basis of these analyses.</p>
+          </div>
+
+          <div style={block}>
+            <span style={label}>Liability for Links</span>
+            <p>Our offering contains links to external third-party websites over whose content we have no influence. The respective provider or operator of the linked pages is always responsible for their content. Continuous monitoring of the content of linked pages is not reasonable without concrete evidence of a legal violation.</p>
+          </div>
+
+          <div style={block}>
+            <span style={label}>Copyright</span>
+            <p>The content and works created by the site operators on these pages are subject to German copyright law. Reproduction, editing, distribution, and any kind of use beyond the limits of copyright law require the written consent of the respective author or creator.</p>
+          </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid rgba(28,25,23,0.09)', margin: '8px 0 36px' }} />
+
+          <h2 style={{ marginBottom: 20 }}>Data Protection</h2>
+
+          <div style={block}>
+            <span style={label}>Controller</span>
+            <p>The controller within the meaning of the GDPR is Florian Rappold, Maikäferstraße 3f, 85551 Kirchheim bei München, Germany. Contact: <a href="mailto:info@velyr.io">info@velyr.io</a></p>
+          </div>
+
+          <div style={block}>
+            <span style={label}>Further Information</span>
+            <p>You can find more information on data protection in our{' '}
+              <button onClick={() => navigate('/privacy')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#2a5c45', fontFamily: 'Jost, sans-serif', fontSize: 15, fontWeight: 300, textDecoration: 'underline', textDecorationColor: 'rgba(42,92,69,0.35)', padding: 0 }}>Privacy Policy</button>.
             </p>
           </div>
 
@@ -183,7 +183,7 @@ export default function Impressum({ navigate }) {
           <div className="legal-footer-links" style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
             <button onClick={() => navigate('/faq')}       style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#a09890', fontFamily: 'Jost, sans-serif', fontWeight: 300 }}>FAQ</button>
             <button onClick={() => navigate('/privacy')}   style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#a09890', fontFamily: 'Jost, sans-serif', fontWeight: 300 }}>Privacy Policy</button>
-            <button onClick={() => navigate('/impressum')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#a09890', fontFamily: 'Jost, sans-serif', fontWeight: 300 }}>Legal Notice (Impressum)</button>
+            <button onClick={() => navigate('/impressum')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#a09890', fontFamily: 'Jost, sans-serif', fontWeight: 300 }}>Imprint</button>
             <button onClick={() => navigate('/agb')}       style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#a09890', fontFamily: 'Jost, sans-serif', fontWeight: 300 }}>AGB</button>
           </div>
         </div>
