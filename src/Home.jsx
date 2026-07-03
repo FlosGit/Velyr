@@ -127,10 +127,14 @@ const CSS = `
     .why-spine-flow { transform:translateX(-50%) scaleY(1) !important; }
   }
 
-  /* ── §3 How it works — sticky 5-marker spine. The right column scrolls the
-     steps; an IntersectionObserver lights each marker as its step crosses centre,
-     so the per-step advance is clearly visible. The pin is short (~1 viewport).
-     ≤900px the rail is dropped and the steps become a plain revealed list. */
+  /* ── §3 How it works — scroll-linked parallax spine. One rAF scroll handler
+     maps the reading position (viewport centre through the steps column) onto
+     the rail: the green line fills continuously with scroll (transform-only,
+     no observer jumpiness) and lights each marker as it passes. Behind every
+     step an oversized italic serif numeral drifts on its own depth plane,
+     slightly slower than the copy — the parallax layer. ≤900px the rail is
+     dropped; ≤640px the ghosts go too (plain revealed list). Settled under
+     reduced-motion. */
   .hiw-stage { display:grid; grid-template-columns:296px 1fr; gap:48px; align-items:start; }
   .hiw-rail { position:sticky; top:104px; align-self:start; }
   .hiw-marker { display:flex; gap:16px; align-items:flex-start; }
@@ -141,8 +145,7 @@ const CSS = `
     transition:background .4s ease, border-color .4s ease, color .4s ease, transform .4s ease, box-shadow .4s ease; }
   .hiw-dot-check { display:none; }
   .hiw-seg { width:2px; flex:1; min-height:54px; background:rgba(28,25,23,0.12); position:relative; }
-  .hiw-seg::after { content:''; position:absolute; left:0; top:0; right:0; bottom:0; background:#2a5c45; transform:scaleY(0); transform-origin:top center; transition:transform .55s cubic-bezier(.22,.61,.36,1); }
-  .hiw-marker.done .hiw-seg::after { transform:scaleY(1); }
+  .hiw-seg-fill { position:absolute; left:0; top:0; right:0; bottom:0; background:#2a5c45; transform:scaleY(0); transform-origin:top center; will-change:transform; }
   .hiw-marker.lit .hiw-dot { background:#2a5c45; border-color:#2a5c45; color:#fff; }
   .hiw-marker.lit .hiw-dot-num { display:none; }
   .hiw-marker.lit .hiw-dot-check { display:block; }
@@ -150,18 +153,25 @@ const CSS = `
   .hiw-mlabel { font-size:14px; font-weight:500; color:#a09890; transition:color .4s ease; }
   .hiw-marker.lit .hiw-mlabel { color:#1c1917; }
   .hiw-msub { font-size:11.5px; color:#a09890; font-weight:300; margin-top:3px; }
-  /* each step self-reveals (opacity 0 → 1 once seen); desktop dims the steps that
-     are still ahead of the active marker. A per-step gate (not a column-level one)
-     means an anchor jump can never leave the whole column hidden. */
-  .hiw-step { opacity:0; transform:translateY(12px); transition:opacity .55s ease, transform .55s ease; }
+  /* each step self-reveals once (opacity 0 → 1); no dimming afterwards — the
+     depth cue comes from the parallax ghosts, not from fading the copy. A
+     per-step gate (not a column-level one) means an anchor jump can never
+     leave the whole column hidden. */
+  .hiw-step { position:relative; opacity:0; transform:translateY(12px); transition:opacity .55s ease, transform .55s ease; }
   .hiw-step.seen { opacity:1; transform:none; }
-  .hiw-step.seen.dim { opacity:0.36; }
+  /* the parallax plane: an oversized italic numeral behind each step, echoing
+     the hero's italic accents. JS re-writes translateY on scroll so it drifts
+     slower than the copy; the -50% keeps it centred on the step at rest. */
+  .hiw-ghost { position:absolute; right:6px; top:50%; transform:translateY(-50%); z-index:0; line-height:.8;
+    font-family:'Cormorant Garamond',serif; font-style:italic; font-weight:300; font-size:96px; letter-spacing:-.04em;
+    color:rgba(42,92,69,0.10); pointer-events:none; user-select:none; will-change:transform; }
+  .hiw-step > *:not(.hiw-ghost) { position:relative; z-index:1; }
   .hiw-below { margin-top:72px; }
   .hiw-cta { display:flex; justify-content:space-between; align-items:center; gap:22px 40px; flex-wrap:wrap; }
   @media (max-width:900px) {
     .hiw-stage { grid-template-columns:1fr; gap:0; }
     .hiw-rail { display:none; }
-    .hiw-step.seen.dim { opacity:1; }   /* mobile drops the desktop dim; plain reveal only */
+    .hiw-ghost { font-size:76px; right:2px; }
     .hiw-step { padding-bottom:32px !important; }
     .hiw-below { margin-top:48px; }
   }
@@ -169,6 +179,11 @@ const CSS = `
     .agent-stats-grid { grid-template-columns:1fr !important; }
     .hiw-cta { flex-direction:column; align-items:flex-start; }
     .hiw-step p { padding-left:0 !important; }
+    .hiw-ghost { display:none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hiw-seg-fill { transform:scaleY(1) !important; }
+    .hiw-ghost { transform:translateY(-50%) !important; }
   }
 
   /* ── §4 Showcase — the dashboard "boots up" once on scroll-enter: the chrome
@@ -514,19 +529,23 @@ function Hero({ navigate }) {
   )
 }
 
-// ─── Growth Agent Section (§3: sticky 5-marker spine) ─────────────────────────
+// ─── Growth Agent Section (§3: scroll-linked parallax spine) ──────────────────
 // The pinned left rail is the five-stage spine (detect → PR → approve → ship →
-// measure). The right column scrolls the weekly schedule mapped to those stages;
-// an IntersectionObserver lights each marker as its step crosses the viewport
-// centre, so the per-step advance reads clearly. The pin is short (~1 viewport).
-// ≤900px the rail is dropped and the steps become a plain revealed list. The
-// stats trio + green CTA sit full-width below the spine.
+// measure). A single rAF scroll handler maps the viewport centre through the
+// steps column onto a 0–1 progress: the rail's green line fills continuously
+// with scroll and lights each marker as it passes, while an oversized ghost
+// numeral behind each step drifts on its own depth plane, slower than the copy
+// — the parallax read. ≤900px the rail is dropped and the steps become a plain
+// revealed list. The stats trio + green CTA sit full-width below the spine.
 function GrowthAgentSection({ navigate }) {
   const [ref, visible] = useReveal()
   const [statsRef, statsVis] = useReveal()
   const [active, setActive] = useState(PREFERS_REDUCED ? 4 : 0)
   const [seen, setSeen] = useState(() => new Set(PREFERS_REDUCED ? [0, 1, 2, 3, 4] : []))
+  const stepsColRef = useRef(null)
   const stepEls = useRef([])
+  const segEls = useRef([])
+  const ghostEls = useRef([])
 
   const markers = [
     { label:'Detect',  sub:'reads analytics + code' },
@@ -543,14 +562,11 @@ function GrowthAgentSection({ navigate }) {
     { n:'05', label:'Measure', time:'48h later',   text:'It checks your bounce rate 48 hours after deploy. If it rose 15 points or more, the agent proposes a rollback and reverts it on your YES. A Wednesday check watches traffic and bounce too.' },
   ]
 
-  // Two observers on the step blocks: a thin centre band lights the rail markers
-  // (active = the step at centre; markers ≤ active are lit), and a normal-threshold
-  // observer marks each step "seen" so it fades in once (never un-seen).
+  // One-time per-step reveal: an observer marks each step "seen" so it fades
+  // in once (never un-seen). Marker lighting no longer lives here — it's
+  // derived from scroll progress below, so it can't jump.
   useEffect(() => {
     if (PREFERS_REDUCED || typeof IntersectionObserver === 'undefined') return
-    const bandIO = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if (e.isIntersecting) setActive(Number(e.target.dataset.idx)) })
-    }, { rootMargin: '-48% 0px -48% 0px', threshold: 0 })
     const seenIO = new IntersectionObserver((entries) => {
       entries.forEach(e => {
         if (e.isIntersecting) setSeen(prev => {
@@ -560,8 +576,49 @@ function GrowthAgentSection({ navigate }) {
         })
       })
     }, { threshold: 0.25 })
-    stepEls.current.forEach(el => { if (el) { bandIO.observe(el); seenIO.observe(el) } })
-    return () => { bandIO.disconnect(); seenIO.disconnect() }
+    stepEls.current.forEach(el => { if (el) seenIO.observe(el) })
+    return () => seenIO.disconnect()
+  }, [])
+
+  // Scroll-linked spine + parallax ghosts. progress = how far the viewport
+  // centre has travelled through the steps column (0–1). Rail segment i fills
+  // across progress [i/4, (i+1)/4], so the green line grows exactly with the
+  // reading position, and the lit marker is derived from the same progress.
+  // Each ghost numeral counter-drifts against scroll (deeper planes drift
+  // more) — transform-only writes inside one rAF, one rect read per element.
+  useEffect(() => {
+    if (PREFERS_REDUCED) return
+    let raf = 0
+    const update = () => {
+      raf = 0
+      const col = stepsColRef.current
+      if (!col) return
+      const vh = window.innerHeight || 1
+      const rect = col.getBoundingClientRect()
+      const progress = Math.min(1, Math.max(0, (vh * 0.5 - rect.top) / Math.max(rect.height, 1)))
+      segEls.current.forEach((seg, i) => {
+        if (seg) seg.style.transform = `scaleY(${Math.min(1, Math.max(0, progress * 4 - i))})`
+      })
+      const lit = Math.min(4, Math.floor(progress * 4 + 1e-4))
+      setActive(prev => (prev === lit ? prev : lit))
+      ghostEls.current.forEach((el, i) => {
+        const step = stepEls.current[i]
+        if (!el || !step) return
+        const r = step.getBoundingClientRect()
+        const fromCenter = r.top + r.height / 2 - vh / 2
+        const depth = 0.06 + (i % 3) * 0.025
+        el.style.transform = `translateY(-50%) translateY(${(-fromCenter * depth).toFixed(1)}px)`
+      })
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update) }
+    update()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+      if (raf) cancelAnimationFrame(raf)
+    }
   }, [])
 
   const stats = [
@@ -595,13 +652,13 @@ function GrowthAgentSection({ navigate }) {
         <div className="hiw-stage">
           <div className="hiw-rail" aria-hidden="true">
             {markers.map((m, i) => (
-              <div key={i} className={`hiw-marker ${i <= active ? 'lit' : ''} ${i < active ? 'done' : ''} ${i === active ? 'active' : ''}`}>
+              <div key={i} className={`hiw-marker ${i <= active ? 'lit' : ''} ${i === active ? 'active' : ''}`}>
                 <div className="hiw-dotcol">
                   <div className="hiw-dot">
                     <span className="hiw-dot-num">{i + 1}</span>
                     <span className="hiw-dot-check">✓</span>
                   </div>
-                  {i < markers.length - 1 && <div className="hiw-seg" />}
+                  {i < markers.length - 1 && <div className="hiw-seg"><div className="hiw-seg-fill" ref={el => { segEls.current[i] = el }} /></div>}
                 </div>
                 <div style={{ paddingTop:3 }}>
                   <p className="hiw-mlabel">{m.label}</p>
@@ -611,9 +668,10 @@ function GrowthAgentSection({ navigate }) {
             ))}
           </div>
 
-          <div className="hiw-steps">
+          <div className="hiw-steps" ref={stepsColRef}>
             {steps.map((s, i) => (
-              <div key={i} data-idx={i} ref={el => { stepEls.current[i] = el }} className={`hiw-step ${seen.has(i) ? 'seen' : ''} ${i > active ? 'dim' : ''}`} style={{ paddingBottom: i < steps.length - 1 ? 56 : 0 }}>
+              <div key={i} data-idx={i} ref={el => { stepEls.current[i] = el }} className={`hiw-step ${seen.has(i) ? 'seen' : ''}`} style={{ paddingBottom: i < steps.length - 1 ? 56 : 0 }}>
+                <span className="hiw-ghost" aria-hidden="true" ref={el => { ghostEls.current[i] = el }}>{s.n}</span>
                 <div style={{ display:'flex', alignItems:'baseline', gap:14, marginBottom:10 }}>
                   <span style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:34, color:C.accent, lineHeight:1, letterSpacing:'-.02em' }}>{s.n}</span>
                   <span style={{ fontSize:13, fontWeight:500, color:C.text, letterSpacing:'.02em', textTransform:'uppercase' }}>{s.label}</span>
