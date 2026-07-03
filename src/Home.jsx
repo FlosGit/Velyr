@@ -62,24 +62,6 @@ const CSS = `
      delay and stays snappy on hover. */
   .lift { transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s cubic-bezier(.4,0,.2,1), border-color .25s ease; }
   .lift:hover { transform: translateY(-3px); box-shadow: 0 16px 40px rgba(28,25,23,0.09); border-color: rgba(28,25,23,0.16); }
-  .sl-shopify { margin-top: 14px; }
-  .sl-shopify summary {
-    list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
-    font-family: 'Jost', sans-serif; font-weight: 400; font-size: 13.5px; color: #2a5c45;
-    padding: 13px 16px; border: 1px solid rgba(42,92,69,0.2); border-radius: 12px;
-    background: rgba(42,92,69,0.04); transition: background .2s, border-color .2s;
-  }
-  .sl-shopify summary::-webkit-details-marker { display: none; }
-  .sl-shopify summary:hover { background: rgba(42,92,69,0.07); border-color: rgba(42,92,69,0.32); }
-  .sl-shopify summary .sl-chev { font-size: 10px; opacity: .6; transition: transform .2s; margin-left: auto; }
-  .sl-shopify[open] summary .sl-chev { transform: rotate(90deg); }
-  .sl-shopify[open] summary { border-radius: 12px 12px 0 0; }
-  .sl-shopify-body {
-    border: 1px solid rgba(42,92,69,0.2); border-top: none; border-radius: 0 0 12px 12px;
-    padding: 16px 18px; background: #fff;
-    font-family: 'Jost', sans-serif; font-weight: 300; font-size: 13px; color: #6b6460; line-height: 1.72;
-  }
-  .sl-shopify-body ol { margin: 10px 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 
   /* "How it works" scrollytelling anchor — pins the value/CTA column while the
      schedule scrolls beside it (native sticky, no scroll-jacking). */
@@ -753,25 +735,6 @@ function AgentRequirements() {
             <strong style={{ color:C.text, fontWeight:500 }}>Wix · Squarespace · Webflow</strong> — these site builders don't expose source code the agent can edit. If your site uses one of these, the Growth Agent isn't a fit yet.
           </span>
         </div>
-
-        {/* Shopify — the store connects directly in onboarding (OAuth + theme picker);
-            approved fixes are written to the connected theme. GitHub theme sync stays
-            a supported alternative for merchants who already use it. Kept collapsed so
-            non-Shopify visitors see one extra line they can ignore. */}
-        <details className="sl-shopify">
-          <summary>
-            <span style={{ fontSize:15 }}>🛍️</span>
-            <span style={{ flex:1 }}>On Shopify? Connect your store directly. No GitHub needed.</span>
-            <span className="sl-chev">▶</span>
-          </summary>
-          <div className="sl-shopify-body">
-            During onboarding you authorize Velyr on your store and pick the theme it should work on. Each week the agent reads your live theme, finds the biggest conversion problem, and sends the fix to Telegram. Reply <strong style={{ color:C.text, fontWeight:500 }}>YES</strong> and Velyr writes the change to your theme. If a fix hurts your numbers, the agent proposes a rollback and restores the previous version on your YES. No plugins, no editing theme code by hand.
-            <div style={{ marginTop:12, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
-              <p style={{ fontWeight:400, color:C.text, margin:0 }}>Prefer pull requests?</p>
-              If your theme is already synced to a GitHub repo via Shopify’s official GitHub integration, connect that repo instead and every fix arrives as a pull request you merge yourself.
-            </div>
-          </div>
-        </details>
       </div>
     </section>
   )
