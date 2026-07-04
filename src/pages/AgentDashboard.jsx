@@ -908,8 +908,21 @@ function OverviewPage({runs, subscription, learnings, onSelectRun, onTogglePause
 }
 
 // ─── RUNS PAGE ────────────────────────────────────────────────────────────────
-function RunsPage({runs, loading, onSelect, learnings=[]}) {
+function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[]}) {
   const [filter, setFilter] = useState('all')
+  // run_id → matched-window bounce measurement. Rows arrive newest-first
+  // (measured_at desc), so first-write-wins keeps the latest measurement if a
+  // run ever has more than one row. Legacy rows predate the Stage 3.6 rename
+  // and carry metric_type 'bounce_rate' (demo data too) — same measurement.
+  const impactByRun = useMemo(() => {
+    const m = new Map()
+    for (const im of impactMetrics) {
+      if (im.metric_type !== 'site_wide_bounce_rate' && im.metric_type !== 'bounce_rate') continue
+      if (im.value_before == null || im.value_after == null) continue
+      if (!m.has(im.run_id)) m.set(im.run_id, im)
+    }
+    return m
+  }, [impactMetrics])
   // Outcomes lead; error/rejection states trail (don't headline failure).
   const filters = [
     { key:'all',              label:'All' },
@@ -974,8 +987,8 @@ function RunsPage({runs, loading, onSelect, learnings=[]}) {
           <Card style={{overflow:'hidden'}}>
             {group.runs.map((run,i)=>{
               const analysis=run.analysis_result||{}
-              const bounceDelta = (run.bounce_rate_before != null && run.bounce_rate_after != null)
-                ? run.bounce_rate_after - run.bounce_rate_before : null
+              const impact = impactByRun.get(run.id)
+              const bounceDelta = impact ? impact.value_after - impact.value_before : null
               const hasCompetitor = Array.isArray(run.competitor_changes) && run.competitor_changes.length > 0
               return (
                 <div key={run.id} className="run-row" onClick={()=>onSelect(run)} style={{
@@ -994,8 +1007,9 @@ function RunsPage({runs, loading, onSelect, learnings=[]}) {
                         <span style={{fontSize:11,color:C.accent,fontWeight:500}}>{analysis.expected_improvement}</span>
                       )}
                       {bounceDelta != null && (
-                        <span style={{fontSize:11,color:bounceDelta<0?C.greenText:bounceDelta>0?C.redText:C.textLight,fontWeight:500}}>
-                          Bounce {run.bounce_rate_before}% → {run.bounce_rate_after}%
+                        <span title="Site-wide bounce rate, matched 2-day windows immediately before and after deploy (≥100 sessions per side)"
+                              style={{fontSize:11,color:bounceDelta<0?C.greenText:bounceDelta>0?C.redText:C.textLight,fontWeight:500}}>
+                          Bounce {impact.value_before}% → {impact.value_after}% ({bounceDelta>0?'+':''}{bounceDelta}pp)
                         </span>
                       )}
                       {hasCompetitor && (
@@ -2131,6 +2145,7 @@ export default function AgentDashboard({ navigate }) {
   const [user,           setUser]           = useState(null)
   const [authLoading,    setAuthLoading]    = useState(true)
   const [runs,           setRuns]           = useState([])
+  const [impactMetrics,  setImpactMetrics]  = useState([])
   const [loading,        setLoading]        = useState(true)
   const [selected,       setSelected]       = useState(null)
   const [subscription,   setSubscription]   = useState(null)
@@ -2235,6 +2250,7 @@ export default function AgentDashboard({ navigate }) {
     if (isDemo) {
       setSubscription(demoData.subscription)
       setRuns(demoData.runs)
+      setImpactMetrics(demoData.impactMetrics)
       setFunnelPages(demoData.funnelPages)
       setLearnings(demoData.learnings)
       setLoading(false)
@@ -2295,7 +2311,7 @@ export default function AgentDashboard({ navigate }) {
     setSubscription(subs)
     if(!subs) return
 
-    const [runsRes, funnelRes, learningsRes, connRes, snRes, previewRes] = await Promise.all([
+    const [runsRes, funnelRes, learningsRes, connRes, snRes, previewRes, imRes] = await Promise.all([
       supabase.from('agent_runs').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
       supabase.from('agent_funnel_pages').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(30),
       supabase.from('agent_learnings').select('*').eq('subscription_id',subs.id).order('created_at',{ascending:false}).limit(50),
@@ -2306,9 +2322,17 @@ export default function AgentDashboard({ navigate }) {
       // subscription. Network surfaces fall back to it before the first run populates
       // agent_site_network. Table may be absent on older deploys (42P01) — same silent handling.
       supabase.from('site_structure_preview').select('*').eq('subscription_id',subs.id).maybeSingle(),
+      // Matched-window bounce pairs (deploy±2d, both sides ≥100 sessions) written
+      // by the 48h rollback check — the only per-run before/after that compares
+      // like with like. The Runs tab chip renders from this, never from
+      // agent_runs.bounce_rate_before/after (those mix a 7-day pre-analysis
+      // snapshot with a 48h post-deploy window).
+      supabase.from('impact_metrics').select('run_id,metric_type,value_before,value_after,measured_at').eq('subscription_id',subs.id).order('measured_at',{ascending:false}).limit(100),
     ])
 
     if(runsRes.data) setRuns(runsRes.data)
+    if (imRes.error) console.warn('[fetchData] impact_metrics:', imRes.error.message)
+    setImpactMetrics(imRes.data || [])
     if(funnelRes.data){
       const seen=new Set()
       setFunnelPages(funnelRes.data.filter(p=>{if(seen.has(p.page_path))return false;seen.add(p.page_path);return true}))
@@ -2702,7 +2726,7 @@ export default function AgentDashboard({ navigate }) {
                   )}
 
                   {activePage==='runs'&&(
-                    <RunsPage runs={runs} loading={loading} onSelect={setSelected} learnings={learnings}/>
+                    <RunsPage runs={runs} loading={loading} onSelect={setSelected} learnings={learnings} impactMetrics={impactMetrics}/>
                   )}
 
                   {activePage==='network'&&(
