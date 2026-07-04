@@ -968,7 +968,7 @@ function Step4({ onNext, onBack, loading, stepLabel = 'Step 6 of 6' }) {
 // with the C2 "your network sharpens on Monday" beat and routes to the dashboard
 // Overview. Honest: structure-only, neutral nodes, NO verdicts. Failure-safe: on
 // status:'error' / timeout / empty it skips the build beat and still closes clean.
-function OnboardingBuild({ subscriptionId, websiteUrl, navigate, connectionType }) {
+function OnboardingBuild({ subscriptionId, websiteUrl, navigate, connectionType, trialDenied }) {
   const isShopifyDirect = connectionType === 'shopify_direct'
   const [phase, setPhase] = useState('polling')   // polling | building | skip
   const [data, setData]   = useState(null)
@@ -1066,6 +1066,12 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate, connectionType 
               : <>This is your site’s structure. On your first run Monday, the agent maps how your
             pages actually connect — and ships its first conversion fix.</>}
           </p>
+          {trialDenied && (
+            <p style={{ fontSize: 12.5, color: '#8A6D1A', lineHeight: 1.6, marginBottom: 6 }}>
+              One note: this website already used a Velyr free trial, so a second trial isn’t available.
+              Activate your agent from the dashboard — €29/mo, cancel anytime.
+            </p>
+          )}
           <button className="ob-btn" onClick={() => navigate('/agent/dashboard')} style={{ width: 'auto', padding: '12px 24px', marginTop: 12 }}>
             Enter your dashboard →
           </button>
@@ -1378,6 +1384,9 @@ export default function AgentOnboarding({ navigate }) {
   // effect below before the wizard re-renders its branch.
   const [connectionType, setConnectionType] = useState(null)
   const [shopifyErr, setShopifyErr]         = useState('')
+  // Anti-abuse: start_trial answered 403 trial_already_used (this site's
+  // identity already consumed a free trial) — the finale swaps its caption.
+  const [trialDenied, setTrialDenied]       = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1572,11 +1581,16 @@ export default function AgentOnboarding({ navigate }) {
       // Onboarding is complete → START THE 14-DAY TRIAL now (Stripe-native, NO
       // card). Best-effort: if it fails, the dashboard has an idempotent fallback
       // that starts the trial on next load, so we never block the finale on it.
+      // Exception worth surfacing: a 403 trial_already_used means this site's
+      // identity already consumed a trial (anti-abuse ledger) — no retry will
+      // change that, so the finale tells the user honestly.
       try {
-        await fetch('/api/stripe?action=start_trial', {
+        const trialRes = await fetch('/api/stripe?action=start_trial', {
           method: 'POST',
           headers: { Authorization: `Bearer ${session?.access_token}` },
         })
+        const trialJson = await trialRes.json().catch(() => ({}))
+        if (trialJson?.denied) setTrialDenied(true)
       } catch (e) {
         console.warn('[onboarding/step4] start_trial failed (dashboard fallback will retry):', e?.message)
       }
@@ -1623,7 +1637,7 @@ export default function AgentOnboarding({ navigate }) {
     return (
       <>
         <style>{CSS + MOTION_CSS}</style>
-        <OnboardingBuild subscriptionId={subscriptionId} websiteUrl={formData.websiteUrl} navigate={navigate} connectionType={connectionType} />
+        <OnboardingBuild subscriptionId={subscriptionId} websiteUrl={formData.websiteUrl} navigate={navigate} connectionType={connectionType} trialDenied={trialDenied} />
       </>
     )
   }

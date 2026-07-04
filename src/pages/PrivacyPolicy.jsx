@@ -190,6 +190,7 @@ export default function PrivacyPolicy({ navigate }) {
               <li><strong style={{ fontWeight: 500 }}>Email addresses</strong> associated with Growth Agent subscriptions are kept for the duration of the active subscription plus 12 months for compliance purposes.</li>
               <li><strong style={{ fontWeight: 500 }}>Growth Agent account data</strong> (GitHub token, PostHog token, Telegram chat ID, Brand Guardrails) is stored for the duration of your active subscription and deleted within 30 days of cancellation.</li>
               <li><strong style={{ fontWeight: 500 }}>Payment records</strong> are retained for 10 years as required by German tax law (§ 147 AO). These records are held by Stripe.</li>
+              <li><strong style={{ fontWeight: 500 }}>Trial-abuse prevention</strong> — when you start a free trial, we store a salted cryptographic hash of your site identifiers (website domain, repository name, store domain, Telegram chat ID) for up to 12 months, including after account deletion. These hashes cannot be reversed into the original values and are used solely to prevent repeated free trials for the same website (legitimate interest, Art. 6(1)(f) GDPR).</li>
             </ul>
             <p style={{ marginTop: 12 }}>You can request deletion of your data at any time by contacting us at <a href="mailto:info@velyr.io">info@velyr.io</a>. Note that payment records required by law cannot be deleted early.</p>
           </div>

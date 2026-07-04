@@ -1,5 +1,6 @@
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
+import { computeFingerprintsForSubscription } from './_lib/trial-fingerprint.js'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2026-04-22.dahlia',
@@ -115,6 +116,44 @@ async function handleStartTrial(req, res) {
     return res.status(200).json({ ok: true, alreadyStarted: true })
   }
 
+  // Anti-abuse (trial_fingerprints ledger): one free trial per site identity,
+  // surviving account deletion — otherwise delete-account + re-signup mints a
+  // fresh trial for the same website. Fails OPEN on infra errors (missing
+  // table/secret, query failure): this is a cost gate, not a security control
+  // (contrast: the verify_telegram_code limiter fails closed by design).
+  let fingerprints = []
+  try {
+    fingerprints = await computeFingerprintsForSubscription(supabase, sub.id)
+    if (fingerprints.length === 0) {
+      console.error('start_trial: no fingerprints computable for sub', sub.id, '(failing open)')
+    } else {
+      const { data: hits, error: fpErr } = await supabase
+        .from('trial_fingerprints')
+        .select('fingerprint_type')
+        .in('fingerprint_hash', fingerprints.map(f => f.hash))
+      if (fpErr) {
+        console.error('start_trial: ledger lookup failed (failing open):', fpErr.message)
+      } else if (hits?.length > 0) {
+        // Persist the denial so the dashboard's trial-start fallback (which
+        // re-fires while subscription_status is null) stops retrying.
+        // Conditional on NULL so a racing sibling call that just landed
+        // 'trialing' is never stomped. The value is inert everywhere else —
+        // every run/telegram/edge eligibility gate allowlists
+        // ('active','trialing') — and a later paid checkout's webhook upsert
+        // overwrites it.
+        await supabase
+          .from('agent_subscriptions')
+          .update({ subscription_status: 'trial_denied' })
+          .eq('id', sub.id)
+          .is('subscription_status', null)
+        console.warn('start_trial: denied for sub', sub.id, '— identity already trialed:', hits.map(h => h.fingerprint_type).join(','))
+        return res.status(403).json({ ok: false, denied: true, code: 'trial_already_used' })
+      }
+    }
+  } catch (e) {
+    console.error('start_trial: fingerprint check crashed (failing open):', e?.message)
+  }
+
   try {
     // Idempotency keys make a retry return the SAME customer/sub (no duplicates)
     // for 24h; within that window the customer.subscription.created webhook also
@@ -160,6 +199,17 @@ async function handleStartTrial(req, res) {
       // The Stripe sub exists; the webhook will reconcile the row. Surface ok so
       // the user proceeds — the dashboard shows 'trialing' once either write lands.
       console.error('start_trial: row update failed (webhook will reconcile):', updErr.message)
+    }
+
+    // Burn the fingerprints into the deletion-surviving ledger. ignoreDuplicates
+    // = ON CONFLICT DO NOTHING (first trial's timestamp wins). Non-fatal but
+    // loud — a lost insert re-opens this identity for one more trial.
+    if (fingerprints.length > 0) {
+      const { error: fpInsErr } = await supabase.from('trial_fingerprints').upsert(
+        fingerprints.map(f => ({ fingerprint_type: f.type, fingerprint_hash: f.hash })),
+        { onConflict: 'fingerprint_hash,fingerprint_type', ignoreDuplicates: true },
+      )
+      if (fpInsErr) console.error('start_trial: fingerprint record failed:', fpInsErr.message)
     }
 
     return res.status(200).json({ ok: true })

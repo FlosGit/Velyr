@@ -1716,6 +1716,9 @@ function StripeSubscriptionPanel({ navigate }) {
   const isTrialing = subStatus === 'trialing'
   const isPastDue = subStatus === 'past_due'
   const isCancelled = subStatus === 'cancelled' || subStatus === 'canceled'
+  // Anti-abuse denial: this site's identity already consumed a free trial
+  // (trial_fingerprints ledger) — no trial, but the paid path is open.
+  const isDenied = subStatus === 'trial_denied'
   const trialDaysLeft = trialEnd
     ? Math.max(0, Math.ceil((new Date(trialEnd).getTime() - Date.now()) / 86400000))
     : null
@@ -1756,7 +1759,13 @@ function StripeSubscriptionPanel({ navigate }) {
               <span style={{fontSize:12.5,color:C.textMuted}}>Subscription ended — your agent is paused.</span>
             </div>
           )}
-          {!isActive && !isTrialing && !isPastDue && !isCancelled && (
+          {isDenied && (
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:C.yellow}}/>
+              <span style={{fontSize:12.5,color:C.yellowText,fontWeight:500}}>Free trial not available — this site already used one. Subscribe to activate your agent.</span>
+            </div>
+          )}
+          {!isActive && !isTrialing && !isPastDue && !isCancelled && !isDenied && (
             <p style={{fontSize:12.5,color:C.textMuted,marginTop:6}}>No active subscription yet — finish setup to start your 14-day free trial, no card required.</p>
           )}
         </div>
@@ -1779,7 +1788,15 @@ function StripeSubscriptionPanel({ navigate }) {
             {subscribeLoading ? 'Opening Stripe…' : 'Restart subscription →'}
           </button>
         )}
-        {!isActive && !isTrialing && !isPastDue && !isCancelled && (
+        {isDenied && (
+          <button className="btn btn-primary v-press" onClick={subscribeNow} disabled={subscribeLoading} style={{
+            fontSize:12.5,fontWeight:500,borderRadius:9,padding:'10px 18px',
+            opacity:subscribeLoading?.7:1,cursor:subscribeLoading?'not-allowed':'pointer',whiteSpace:'nowrap',
+          }}>
+            {subscribeLoading ? 'Opening Stripe…' : 'Activate — €29/mo →'}
+          </button>
+        )}
+        {!isActive && !isTrialing && !isPastDue && !isCancelled && !isDenied && (
           <button className="btn btn-primary v-press" onClick={() => navigate('/agent/onboarding')} style={{
             fontSize:12.5,fontWeight:500,borderRadius:9,padding:'10px 18px',whiteSpace:'nowrap',
           }}>
@@ -1822,7 +1839,8 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
   const isPaused    = subscription?.status==='paused'
   const slugValid   = !slug || /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/.test(slug)
   const publicUrl   = (subscription?.is_public && subscription?.public_slug) ? `/agent/${subscription.public_slug}` : null
-  const hasBilling  = !!subscription?.subscription_status && !['cancelled','canceled'].includes(subscription.subscription_status)
+  // 'trial_denied' has no Stripe customer — offering the billing portal would 400.
+  const hasBilling  = !!subscription?.subscription_status && !['cancelled','canceled','trial_denied'].includes(subscription.subscription_status)
 
   async function savePublic() {
     setPublicError(null); setPublicSaved(false)
@@ -2645,6 +2663,24 @@ export default function AgentDashboard({ navigate }) {
                       background:C.ink,color:C.sideText,
                     }}>
                       Re-enable tracking →
+                    </button>
+                  </div>
+                )}
+
+                {subscription.subscription_status==='trial_denied'&&!isDemo&&(
+                  <div className="fade-up" style={{
+                    marginBottom:16,padding:'11px 16px',
+                    background:C.yellowBg,border:'1px solid #EADFC2',borderRadius:10,
+                    display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap',
+                  }}>
+                    <span style={{fontSize:12,color:C.yellowText,lineHeight:1.4}}>
+                      This website already used a Velyr free trial, so a second trial isn't available. Subscribe to activate your Growth Agent — €29/mo, cancel anytime.
+                    </span>
+                    <button className="btn v-press" onClick={()=>setUnlockConfirmOpen(true)} style={{
+                      fontSize:11,fontWeight:500,padding:'6px 13px',borderRadius:7,flexShrink:0,
+                      background:C.ink,color:C.sideText,
+                    }}>
+                      Activate — €29/mo →
                     </button>
                   </div>
                 )}

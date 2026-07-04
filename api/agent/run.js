@@ -244,6 +244,18 @@ async function handleEnforceSubscriptions(res) {
     .lt('created_at', startTokenCutoff)
   if (stGcError) console.warn('[enforce-subscriptions] start-token GC failed:', stGcError.message)
 
+  // Trial-abuse ledger retention: hashed identity fingerprints are kept ≤365
+  // days (GDPR legitimate-interest fraud prevention, data minimization) — a
+  // domain dormant for a year may trial again, accepted trade-off. Same
+  // best-effort, daily-cron piggyback as the GCs above; tolerate 42P01
+  // (table not yet migrated).
+  const fpCutoff = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString()
+  const { error: fpGcError } = await supabase
+    .from('trial_fingerprints')
+    .delete()
+    .lt('created_at', fpCutoff)
+  if (fpGcError && fpGcError.code !== '42P01') console.warn('[enforce-subscriptions] trial-fingerprint GC failed:', fpGcError.message)
+
   // Capture any missing public-timeline "after" screenshots. Piggybacked on this
   // daily cron (in addition to the weekly rollback_check) so a deployed run's
   // after-shot lands within ~24h instead of waiting up to a week for Wednesday.
@@ -329,6 +341,9 @@ export default async function handler(req, res) {
       const subIds = subs?.map(s => s.id) || []
       if (subIds.length > 0) {
         // Children first (parent delete would otherwise hit a RESTRICT FK).
+        // trial_fingerprints is deliberately NOT in this list — it's the
+        // deletion-surviving anti-abuse ledger (one free trial per site
+        // identity); wiping it here would re-open the delete-and-retrial loop.
         const childTables = [
           'agent_runs', 'agent_connections', 'agent_learnings', 'agent_business_dna',
           'agent_competitor_urls', 'agent_competitor_snapshots', 'agent_funnel_pages',
