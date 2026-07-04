@@ -178,20 +178,56 @@ async function recordDNA(subscriptionId, runId, fixType, outcome, notes) {
   })
 }
 
-// Promote DNA entries with outcome='pending' to 'success' after 7 days
-// if their run is still in 'deployed' status (not rolled back).
-async function promotePendingDNAToSuccess() {
+// A pending DNA entry earns 'measured_win' only when the run's matched-window
+// bounce measurement (impact_metrics, deploy±2d, ≥100 sessions/side) improved
+// by at least this many percentage points. Matches the positive-notification
+// band in handleRollbackCheck (bounceDelta <= -5).
+const MEASURED_WIN_MIN_PP = 5
+
+// Promote 7-day-old 'pending' DNA entries to their honest terminal outcome:
+// 'measured_win' when a matched-window measurement shows a real improvement,
+// else 'survived' (still deployed, nothing measurably better). The old single
+// 'success' label conflated the two — "didn't break anything" was fed back
+// into the agent's prompt as "what works", rewarding innocuous edits.
+async function promotePendingDNA() {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
   const { data: pending } = await supabase
-    .from('agent_business_dna').select('id, run_id, fix_type')
+    .from('agent_business_dna').select('id, run_id, fix_type, notes')
     .eq('outcome', 'pending').lte('created_at', sevenDaysAgo)
   if (!pending?.length) return
+  const runIds = [...new Set(pending.map(p => p.run_id).filter(Boolean))]
+  if (!runIds.length) return
+  const [{ data: runsData }, { data: metrics }] = await Promise.all([
+    supabase.from('agent_runs').select('id, status').in('id', runIds),
+    supabase.from('impact_metrics')
+      .select('run_id, metric_type, value_before, value_after, measured_at')
+      .in('run_id', runIds)
+      .in('metric_type', ['site_wide_bounce_rate', 'route_scoped_bounce_rate', 'bounce_rate'])
+      .order('measured_at', { ascending: false }),
+  ])
+  const statusById  = new Map((runsData || []).map(r => [r.id, r.status]))
+  const metricByRun = new Map()
+  for (const m of (metrics || [])) if (!metricByRun.has(m.run_id)) metricByRun.set(m.run_id, m)
+
   for (const p of pending) {
     if (!p.run_id) continue
-    const { data: run } = await supabase.from('agent_runs').select('status').eq('id', p.run_id).single()
-    if (run?.status === 'deployed') {
-      await supabase.from('agent_business_dna').update({ outcome: 'success' }).eq('id', p.id)
-    }
+    const status = statusById.get(p.run_id)
+    // shopify_deployed included: the old 'deployed'-only check silently left
+    // every Shopify-direct entry pending forever.
+    if (status !== 'deployed' && status !== 'shopify_deployed') continue
+    const m = metricByRun.get(p.run_id)
+    const improvementPp = (m && m.value_before != null && m.value_after != null)
+      ? m.value_before - m.value_after : null
+    const isWin   = improvementPp != null && improvementPp >= MEASURED_WIN_MIN_PP
+    const outcome = isWin ? 'measured_win' : 'survived'
+    const verdict = isWin
+      ? ` | 7d verdict: measured win — bounce −${Math.round(improvementPp)}pp (${m.metric_type === 'route_scoped_bounce_rate' ? 'affected pages' : 'site-wide'}, deploy±2d)`
+      : improvementPp != null
+        ? ` | 7d verdict: survived — bounce ${improvementPp >= 0 ? '−' : '+'}${Math.abs(Math.round(improvementPp))}pp, under the ${MEASURED_WIN_MIN_PP}pp win bar`
+        : ' | 7d verdict: survived — impact unmeasured'
+    await supabase.from('agent_business_dna')
+      .update({ outcome, notes: `${p.notes || ''}${verdict}`.slice(0, 500) })
+      .eq('id', p.id)
   }
 }
 
@@ -519,7 +555,9 @@ async function handleEvaluateAB(res) {
       // 3d/3i: also write to agent_business_dna so the DNA tab and Claude prompt see this
       await recordDNA(
         test.subscription_id, test.run_id, test.change_type || 'other',
-        winner === 'treatment' ? 'success' : 'rollback',
+        // An A/B winner IS a measured result — the one DNA writer that earns
+        // measured_win directly rather than via the 7-day promotion.
+        winner === 'treatment' ? 'measured_win' : 'rollback',
         winner === 'treatment'
           ? `A/B winner (treatment): ${test.summary} (+${delta}% conversion)`
           : `A/B loser (control won): ${test.summary} (${delta}% vs control)`
@@ -746,8 +784,8 @@ async function handleRollbackCheck(res) {
   const ROLLBACK_BOUNCE_PP_THRESHOLD = 15
   const handlerStart = Date.now()
 
-  // Promote DNA entries that have stayed deployed for 7+ days to 'success'.
-  await promotePendingDNAToSuccess().catch(e => console.error('DNA promote error:', e))
+  // Promote 7-day-old pending DNA entries to measured_win / survived.
+  await promotePendingDNA().catch(e => console.error('DNA promote error:', e))
 
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 
@@ -1483,11 +1521,14 @@ async function handlePublicTimeline(req, res) {
     }
   })
 
-  // Group DNA by fix_type with success/rollback counts
+  // Group DNA by fix_type with per-outcome counts. Legacy 'success' rows
+  // (pre-vocabulary migration) fold into 'survived' — they were never
+  // measured. Unknown outcomes are skipped, never ++'d into NaN.
   const dnaByType = {}
   for (const d of (dnaRes.data || [])) {
-    if (!dnaByType[d.fix_type]) dnaByType[d.fix_type] = { fix_type: d.fix_type, success: 0, rollback: 0, pending: 0, latest_note: null }
-    dnaByType[d.fix_type][d.outcome]++
+    const outcome = d.outcome === 'success' ? 'survived' : d.outcome
+    if (!dnaByType[d.fix_type]) dnaByType[d.fix_type] = { fix_type: d.fix_type, measured_win: 0, survived: 0, rollback: 0, pending: 0, latest_note: null }
+    if (dnaByType[d.fix_type][outcome] != null) dnaByType[d.fix_type][outcome]++
     if (!dnaByType[d.fix_type].latest_note) dnaByType[d.fix_type].latest_note = d.notes
   }
 

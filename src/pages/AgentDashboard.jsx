@@ -869,7 +869,7 @@ function AgentLearningStrip({learnings, onGoDna}) {
           <div key={l.id||i} style={{display:'flex',alignItems:'center',gap:10,fontSize:11.5,padding:'7px 0',borderTop:`1px solid ${C.borderSoft}`}}>
             <span style={{color:l.outcome==='positive'?C.green:C.red,flexShrink:0,fontWeight:600}}>{l.outcome==='positive'?'✓':'✕'}</span>
             <span style={{color:C.text,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.summary}</span>
-            {l.delta&&<span style={{color:l.outcome==='positive'?C.greenText:C.redText,flexShrink:0,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}%</span>}
+            {l.delta&&<span style={{color:l.outcome==='positive'?C.greenText:C.redText,flexShrink:0,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}{/bounce/.test(l.metric_type||'')?'pp':'%'}</span>}
           </div>
         ))}
       </div>
@@ -1056,7 +1056,7 @@ function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[]}) {
                   <p style={{fontSize:12.5,color:C.text,marginBottom:3,lineHeight:1.5}}>{l.summary}</p>
                   <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
                     <span style={{fontSize:10.5,color:C.textMuted}}>{l.change_type}</span>
-                    {l.delta&&<span style={{fontSize:10.5,color:l.outcome==='positive'?C.greenText:C.redText,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}% {l.metric_type}</span>}
+                    {l.delta&&<span style={{fontSize:10.5,color:l.outcome==='positive'?C.greenText:C.redText,fontWeight:500}}>{l.outcome==='positive'?'+':''}{l.delta}{/bounce/.test(l.metric_type||'')?'pp':'%'} {l.metric_type}</span>}
                     <span style={{fontSize:10.5,color:C.textLight}}>{l.confidence} confidence</span>
                   </div>
                 </div>
@@ -1444,8 +1444,13 @@ function DNAPage({ subscriptionId }) {
   }
 
   const grouped = useMemo(() => {
-    const out = { success: [], rollback: [], pending: [] }
-    for (const d of dna) if (out[d.outcome]) out[d.outcome].push(d)
+    const out = { measured_win: [], survived: [], rollback: [], pending: [] }
+    // Legacy 'success' rows (pre-vocabulary migration) were never measured —
+    // fold them into survived.
+    for (const d of dna) {
+      const key = d.outcome === 'success' ? 'survived' : d.outcome
+      if (out[key]) out[key].push(d)
+    }
     return out
   }, [dna])
 
@@ -1463,9 +1468,10 @@ function DNAPage({ subscriptionId }) {
   )
 
   const GROUPS = [
-    { key:'success',  title:'What works for this site', sub:'Doubled down on in future runs',       mark:{sym:'✓', color:C.green,  label:'Success'} },
-    { key:'rollback', title:'Never do again',           sub:'Rolled back — the agent avoids these', mark:{sym:'✕', color:C.red,    label:'Rolled back'} },
-    { key:'pending',  title:'Pending',                  sub:'Deployed, awaiting the 7-day verdict', mark:{sym:'·', color:C.yellow, label:'Pending'} },
+    { key:'measured_win', title:'Measured wins',    sub:'Bounce measurably improved after deploy — doubled down on', mark:{sym:'✓', color:C.green,     label:'Measured win'} },
+    { key:'survived',     title:'Survived 7 days',  sub:'Still live, but no measured improvement — weak signal',     mark:{sym:'✓', color:C.textMuted, label:'Survived'} },
+    { key:'rollback',     title:'Never do again',   sub:'Rolled back — the agent avoids these',                      mark:{sym:'✕', color:C.red,       label:'Rolled back'} },
+    { key:'pending',      title:'Pending',          sub:'Deployed, awaiting the 7-day verdict',                      mark:{sym:'·', color:C.yellow,    label:'Pending'} },
   ]
 
   return (
@@ -1552,7 +1558,8 @@ function DNAPage({ subscriptionId }) {
         <Card className="fade-up" style={{padding:'20px 26px',animationDelay:'.18s'}}>
           <p style={{fontSize:13.5,fontWeight:600,color:C.text,marginBottom:8}}>Timeline</p>
           {dna.slice(0, 30).map((d,i) => {
-            const s = d.outcome==='success' ? {color:C.greenText,bg:C.greenBg}
+            const s = d.outcome==='measured_win' ? {color:C.greenText,bg:C.greenBg}
+                    : (d.outcome==='survived'||d.outcome==='success') ? {color:C.textMuted,bg:C.bgCard}
                     : d.outcome==='rollback' ? {color:C.redText,bg:C.redBg}
                     : {color:C.yellowText,bg:C.yellowBg}
             return (
@@ -1562,7 +1569,7 @@ function DNAPage({ subscriptionId }) {
                 </span>
                 <span style={{fontSize:12.5,color:C.text,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.fix_type.replace(/_/g,' ')}</span>
                 <span style={{fontSize:10.5,color:s.color,background:s.bg,borderRadius:20,padding:'3px 10px',fontWeight:500,textTransform:'capitalize'}}>
-                  {d.outcome}
+                  {(d.outcome==='success'?'survived':d.outcome).replace(/_/g,' ')}
                 </span>
               </div>
             )
@@ -1570,7 +1577,7 @@ function DNAPage({ subscriptionId }) {
         </Card>
       )}
 
-      <p style={{fontSize:11.5,color:C.label,padding:'14px 4px 0'}}>The agent reads this log on every run — successes are doubled down on, rollbacks avoided.</p>
+      <p style={{fontSize:11.5,color:C.label,padding:'14px 4px 0'}}>The agent reads this log on every run — measured wins are doubled down on, rollbacks avoided; “survived” alone is treated as weak evidence.</p>
     </div>
   )
 }

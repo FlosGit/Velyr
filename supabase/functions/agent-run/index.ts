@@ -2709,20 +2709,32 @@ async function loadBusinessDNA(subscriptionId: string) {
   const active = data.filter((d: any) => d.user_verdict !== 'rejected')
   if (active.length === 0) return null
 
-  const grouped: Record<string, { success: number; rollback: number; pending: number }> = {}
+  const grouped: Record<string, { measured_win: number; survived: number; rollback: number; pending: number }> = {}
   for (const d of active) {
-    if (!grouped[d.fix_type]) grouped[d.fix_type] = { success: 0, rollback: 0, pending: 0 }
-    grouped[d.fix_type][d.outcome as 'success'|'rollback'|'pending']++
+    // Legacy 'success' (pre-vocabulary migration) folds into 'survived' — that
+    // label never required a measured improvement. Unknown outcomes are
+    // skipped, never ++'d into NaN.
+    const outcome = d.outcome === 'success' ? 'survived' : d.outcome
+    if (!grouped[d.fix_type]) grouped[d.fix_type] = { measured_win: 0, survived: 0, rollback: 0, pending: 0 }
+    if ((grouped[d.fix_type] as Record<string, number>)[outcome] != null) (grouped[d.fix_type] as Record<string, number>)[outcome]++
   }
   const dnaLine = (d: any) => `- ${d.fix_type}: ${d.notes || 'no note'}${d.user_verdict === 'confirmed' ? ' (owner-confirmed)' : ''}`
   const neverDoAgain = active.filter((d: any) => d.outcome === 'rollback').slice(0, 8)
     .map(dnaLine).join('\n')
-  const whatWorks = active.filter((d: any) => d.outcome === 'success').slice(0, 8)
-    .map(dnaLine).join('\n')
+  // whatWorks is prompt-facing on every pipeline path (Pass-1 signal digest +
+  // Pass-2 fix prompt). Measured wins lead and say so; survived-only entries
+  // are explicitly weak signal, so the model stops reading "didn't break
+  // anything for 7 days" as evidence that a fix type works.
+  const measuredWins = active.filter((d: any) => d.outcome === 'measured_win')
+  const survivedOnly = active.filter((d: any) => d.outcome === 'survived' || d.outcome === 'success')
+  const whatWorks = [
+    ...measuredWins.slice(0, 8).map((d: any) => `${dnaLine(d)} [measured win]`),
+    ...survivedOnly.slice(0, Math.max(0, 8 - measuredWins.length)).map((d: any) => `${dnaLine(d)} [survived 7 days only — no measured improvement, weak signal]`),
+  ].join('\n')
   return { grouped, neverDoAgain, whatWorks, entries: active }
 }
 
-async function recordDNA(subscriptionId: string, runId: string | null, fixType: string, outcome: 'success'|'rollback'|'pending', notes: string) {
+async function recordDNA(subscriptionId: string, runId: string | null, fixType: string, outcome: 'measured_win'|'survived'|'rollback'|'pending', notes: string) {
   // Best-effort + bounded: a DNA-write hang must not zombie the run after the
   // PR already exists; the entry is reconstructable, the wall-clock is not.
   await dbWrite(

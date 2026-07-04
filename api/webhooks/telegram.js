@@ -904,14 +904,18 @@ async function handleDNA(chatId) {
 
   const wins = learnings.filter(l => l.outcome === 'positive')
   const losses = learnings.filter(l => l.outcome === 'negative')
-  const fmtDelta = d => (d > 0 ? `+${d}%` : `${d}%`)
+  // Bounce-type learnings store percentage-POINT deltas, not percentages.
+  const fmtDelta = (d, metricType) => {
+    const unit = /bounce/.test(metricType || '') ? 'pp' : '%'
+    return d > 0 ? `+${d}${unit}` : `${d}${unit}`
+  }
 
   const winsText = wins.length
-    ? wins.map(l => `✅ ${escapeHtml(l.change_type)}: ${escapeHtml(l.summary)} (${fmtDelta(l.delta)} ${escapeHtml(l.metric_type)})`).join('\n')
+    ? wins.map(l => `✅ ${escapeHtml(l.change_type)}: ${escapeHtml(l.summary)} (${fmtDelta(l.delta, l.metric_type)} ${escapeHtml(l.metric_type)})`).join('\n')
     : '<i>None yet</i>'
 
   const lossesText = losses.length
-    ? losses.map(l => `❌ ${escapeHtml(l.change_type)}: ${escapeHtml(l.summary)} (${fmtDelta(l.delta)} ${escapeHtml(l.metric_type)})`).join('\n')
+    ? losses.map(l => `❌ ${escapeHtml(l.change_type)}: ${escapeHtml(l.summary)} (${fmtDelta(l.delta, l.metric_type)} ${escapeHtml(l.metric_type)})`).join('\n')
     : '<i>None yet</i>'
 
   await sendMessage(

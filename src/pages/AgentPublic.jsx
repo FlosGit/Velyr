@@ -283,14 +283,19 @@ export default function AgentPublic({ navigate, slug }) {
             <div className="ap-dna-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: '20px 24px' }}>
                 <p style={{ fontSize: 12, fontWeight: 500, color: C.green, marginBottom: 12 }}>What works</p>
-                {data.business_dna.filter(d => d.success > 0).length === 0
+                {data.business_dna.filter(d => (d.measured_win || 0) + (d.survived || 0) > 0).length === 0
                   ? <p style={{ fontSize: 12, color: C.textFaint, fontWeight: 300 }}>None recorded yet</p>
-                  : data.business_dna.filter(d => d.success > 0).map(d => (
-                      <p key={d.fix_type} style={{ fontSize: 13, color: C.text, marginBottom: 6 }}>
-                        <span style={{ fontWeight: 500 }}>{d.fix_type}</span>
-                        <span style={{ color: C.textLight, fontWeight: 300 }}> · {d.success} success{d.success > 1 ? 'es' : ''}</span>
-                      </p>
-                    ))}
+                  : data.business_dna.filter(d => (d.measured_win || 0) + (d.survived || 0) > 0).map(d => {
+                      const parts = []
+                      if (d.measured_win > 0) parts.push(`${d.measured_win} measured win${d.measured_win > 1 ? 's' : ''}`)
+                      if (d.survived > 0) parts.push(`${d.survived} survived (no measured lift)`)
+                      return (
+                        <p key={d.fix_type} style={{ fontSize: 13, color: C.text, marginBottom: 6 }}>
+                          <span style={{ fontWeight: 500 }}>{d.fix_type}</span>
+                          <span style={{ color: C.textLight, fontWeight: 300 }}> · {parts.join(' · ')}</span>
+                        </p>
+                      )
+                    })}
               </div>
               <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: '20px 24px' }}>
                 <p style={{ fontSize: 12, fontWeight: 500, color: C.red, marginBottom: 12 }}>What was rolled back</p>
