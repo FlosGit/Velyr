@@ -5,6 +5,7 @@ import { Octokit } from '@octokit/rest'
 import { throttling } from '@octokit/plugin-throttling'
 import crypto from 'node:crypto'
 import { decryptSecret } from '../_lib/secret-crypto.js'
+import { resolveAffectedScope, sessionize, bounceFromSessions } from '../_lib/route-scope.js'
 
 // Stage 5.D: Octokit with automatic GitHub rate-limit / secondary-rate-limit
 // backoff (honors Retry-After). Mirrors the Edge Function.
@@ -708,7 +709,7 @@ async function backfillAfterScreenshots(handlerStart) {
 // the run via telegram_message_id so the reply resolves it, and flips the run to
 // shopify_rollback_pending (off shopify_deployed, so the candidate query won't re-pick
 // it). The merchant's YES executes the re-upsert/delete (telegram.js); NO keeps it.
-async function proposeShopifyDirectRollback(run, bounceBefore, bounceAfter, bounceDelta) {
+async function proposeShopifyDirectRollback(run, bounceBefore, bounceAfter, bounceDelta, scopeLabel = 'Site-wide bounce rate') {
   const { data: subRow } = await supabase
     .from('agent_subscriptions').select('telegram_chat_id').eq('id', run.subscription_id).single()
   let messageId = null
@@ -718,7 +719,7 @@ async function proposeShopifyDirectRollback(run, bounceBefore, bounceAfter, boun
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: subRow.telegram_chat_id,
-          text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Site-wide bounce rate: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\nReply <b>YES</b> to undo this change on your live theme, or <b>NO</b> to keep it.`,
+          text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 ${escapeHtml(scopeLabel)}: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\nReply <b>YES</b> to undo this change on your live theme, or <b>NO</b> to keep it.`,
           parse_mode: 'HTML',
         }),
       })
@@ -776,9 +777,9 @@ async function handleRollbackCheck(res) {
     .gte('completed_at', lookbackStart)
     .lte('completed_at', fortyEightHoursAgo)
 
-  // Idempotency: a site_wide_bounce_rate learning is written for both a real
-  // measurement AND the insufficient_data outcome, so its presence means this
-  // run was already processed. Re-measuring is pointless (the deploy±2d windows
+  // Idempotency: a bounce-rate learning (site-wide or route-scoped) is written
+  // for both a real measurement AND the insufficient_data outcome, so its
+  // presence means this run was already processed. Re-measuring is pointless (the deploy±2d windows
   // are fixed, so the result is identical) and would spam duplicate learnings /
   // impact_metrics rows — skip those runs. One query for the whole candidate set.
   const candidateRunIds = (deployedRuns || []).map(r => r.id)
@@ -787,7 +788,7 @@ async function handleRollbackCheck(res) {
     const { data: priorLearnings } = await supabase
       .from('agent_learnings')
       .select('run_id')
-      .eq('metric_type', 'site_wide_bounce_rate')
+      .in('metric_type', ['site_wide_bounce_rate', 'route_scoped_bounce_rate'])
       .in('run_id', candidateRunIds)
     for (const l of (priorLearnings || [])) measuredRunIds.add(l.run_id)
   }
@@ -841,11 +842,11 @@ async function handleRollbackCheck(res) {
       const [beforeRes, afterRes] = await Promise.all([
         fetch(`${host}/api/projects/${projectId}/query/`, {
           method: 'POST', headers,
-          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'count()'], event: '$pageview', after: twoDaysBefore, before: deployedDate, limit: 2000, where: hostWhere } }),
+          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'properties.$pathname'], event: '$pageview', after: twoDaysBefore, before: deployedDate, limit: 2000, where: hostWhere } }),
         }),
         fetch(`${host}/api/projects/${projectId}/query/`, {
           method: 'POST', headers,
-          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'count()'], event: '$pageview', after: deployedDate, before: twoDaysAfter, limit: 2000, where: hostWhere } }),
+          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'properties.$pathname'], event: '$pageview', after: deployedDate, before: twoDaysAfter, limit: 2000, where: hostWhere } }),
         }),
       ])
       const [before, after] = await Promise.all([beforeRes.json(), afterRes.json()])
@@ -856,24 +857,57 @@ async function handleRollbackCheck(res) {
       // either side is below that, record an "insufficient_data" learning
       // and skip the rollback decision rather than fabricate a result.
       const MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION = Number(process.env.MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION || '100')
-      const calcBounceRate = (results) => {
-        const counts = {}
-        results?.forEach(row => { counts[row[0]] = (counts[row[0]] || 0) + 1 })
-        const total   = Object.keys(counts).length
-        const bounced = Object.values(counts).filter(c => c === 1).length
-        if (total < MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION) return { rate: null, sessions: total }
-        return { rate: Math.round((bounced / total) * 100), sessions: total }
-      }
 
-      const beforeMeasure = calcBounceRate(before.results)
-      const afterMeasure  = calcBounceRate(after.results)
-      const bounceBefore  = beforeMeasure.rate
-      const bounceAfter   = afterMeasure.rate
+      // Route scoping (api/_lib/route-scope.js, pure + unit-tested): when EVERY
+      // file the run touched confidently maps to a route class, compare bounce
+      // for sessions that viewed those routes; any layout/section/snippet/
+      // component/unknown file → site-wide, exactly the pre-scoping behavior
+      // (guard a). Both aggregations come from the same two EventsQuery
+      // responses — no extra PostHog calls. The fire threshold and the ±2d
+      // windows are untouched; only the measured population changes. This
+      // supersedes the older audit-§2 rejection of route mapping: a file the
+      // resolver can't map no longer risks mislabeling the run "no data" — it
+      // falls back to the site-wide comparison.
+      const touchedFiles = (Array.isArray(run.pages_fixed) && run.pages_fixed.length > 0)
+        ? run.pages_fixed
+        : [run.analysis_result?.file_to_edit].filter(Boolean)
+      const scope = resolveAffectedScope(touchedFiles, { fileToRoute: fileToRoutePath })
+
+      const beforeSessions = sessionize(before.results)
+      const afterSessions  = sessionize(after.results)
+
+      // Site-wide first: it is both the insufficient-data gate and the
+      // fallback population (guard b) when the scoped sample is under the floor.
+      const siteBefore = bounceFromSessions(beforeSessions, null, MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION)
+      const siteAfter  = bounceFromSessions(afterSessions,  null, MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION)
+
+      let beforeMeasure = siteBefore
+      let afterMeasure  = siteAfter
+      let scopeUsed     = 'site_wide'
+      if (siteBefore.rate !== null && siteAfter.rate !== null && scope.kind === 'route') {
+        const scopedBefore = bounceFromSessions(beforeSessions, scope.matchers, MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION)
+        const scopedAfter  = bounceFromSessions(afterSessions,  scope.matchers, MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION)
+        if (scopedBefore.rate !== null && scopedAfter.rate !== null) {
+          beforeMeasure = scopedBefore
+          afterMeasure  = scopedAfter
+          scopeUsed     = 'route'
+        }
+      }
+      const bounceBefore = beforeMeasure.rate
+      const bounceAfter  = afterMeasure.rate
+      const metricType   = scopeUsed === 'route' ? 'route_scoped_bounce_rate' : 'site_wide_bounce_rate'
+      const scopeLabel   = scopeUsed === 'route'
+        ? `Bounce rate on the affected page(s) (${scope.routesLabel})`
+        : 'Site-wide bounce rate'
 
       if (bounceBefore === null || bounceAfter === null) {
         // Record the honest "we couldn't measure" outcome so the user sees it
-        // in DNA / learnings rather than silently nothing-happened.
-        await supabase.from('agent_learnings').insert({
+        // in DNA / learnings rather than silently nothing-happened. This row
+        // is also the idempotency marker (measuredRunIds above) — a failed
+        // insert means the run is re-queried every cron, so surface it.
+        // Requires 'insufficient_data' in agent_learnings_outcome_check
+        // (migration 20260705) — the insert failed silently before that.
+        const { error: learnErr } = await supabase.from('agent_learnings').insert({
           subscription_id: run.subscription_id, run_id: run.id,
           change_type: run.analysis_result?.change_type || 'other',
           summary: `Insufficient data to attribute outcome to this fix (before=${beforeMeasure.sessions} sessions, after=${afterMeasure.sessions} sessions, floor=${MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION}).`,
@@ -882,6 +916,7 @@ async function handleRollbackCheck(res) {
           delta: 0,
           confidence: 'none',
         })
+        if (learnErr) console.warn(`[rollback_check] insufficient_data learning insert failed for run=${run.id}: ${learnErr.message}`)
         continue
       }
 
@@ -891,37 +926,38 @@ async function handleRollbackCheck(res) {
       // (after-screenshot is captured separately by backfillAfterScreenshots,
       // decoupled from this bounce gate — see top of handleRollbackCheck.)
 
-      // Stage 3.6: the metric is the SITE-WIDE bounce rate (PostHog $pageview
-      // counts across every route, not filtered to the edited page). Storing
-      // it under metric_type='bounce_rate' previously let the weekly summary
-      // claim "bounce rate −X% after agent change" — false attribution. We
-      // now label it as site_wide so downstream consumers state it honestly.
-      // Filtering PostHog events to the edited page's route was considered
-      // and rejected per audit §2: route mapping from file_to_edit to URL is
-      // unreliable (Next.js dynamic routes, basename rewrites, SPA history,
-      // etc.) and would silently mislabel many runs as "no data".
+      // Stage 3.6 + route scoping: label the metric by the population that was
+      // actually measured. site_wide_bounce_rate = every route on the
+      // customer's $host; route_scoped_bounce_rate = only sessions that viewed
+      // the routes the change touched (resolveAffectedScope above — falls back
+      // to site-wide whenever mapping isn't confident or the scoped sample is
+      // under the floor). Downstream consumers (weekly summary, dashboard
+      // chip, public timeline) must accept both types and state the scope.
       // FINAL/Flag 2: stamp subscription_id so the dashboard query
       // (.eq('subscription_id', …)) works and the RLS policy can key on it
       // directly like every other child table. run_id is kept as the
       // authoritative FK; subscription_id is a denormalized convenience.
       await supabase.from('impact_metrics').insert({
         run_id: run.id, subscription_id: run.subscription_id,
-        metric_type: 'site_wide_bounce_rate',
+        metric_type: metricType,
         value_before: bounceBefore, value_after: bounceAfter,
         measured_at: new Date().toISOString(),
       })
 
-      await supabase.from('agent_learnings').insert({
+      // Also the idempotency marker for measured runs — surface a failure.
+      const { error: measureLearnErr } = await supabase.from('agent_learnings').insert({
         subscription_id: run.subscription_id, run_id: run.id,
         change_type: run.analysis_result?.change_type || 'other',
         summary: run.analysis_result?.problem || 'Unknown change',
         outcome: shouldRollback ? 'negative' : 'positive',
-        metric_type: 'site_wide_bounce_rate',
+        metric_type: metricType,
         delta: -bounceDelta,
-        // High confidence on the measurement (sessions >= floor), low
-        // confidence on attribution — the metric is site-wide.
+        // High confidence on the measurement (sessions >= floor); attribution
+        // confidence stays medium — route-scoped narrows the population but
+        // still can't isolate this change from everything else that week.
         confidence: 'medium',
       })
+      if (measureLearnErr) console.warn(`[rollback_check] measurement learning insert failed for run=${run.id}: ${measureLearnErr.message}`)
 
       // Persist new agent_runs columns (Part 1) for the public timeline + dashboard
       await supabase.from('agent_runs').update({
@@ -947,7 +983,7 @@ async function handleRollbackCheck(res) {
         // (api/webhooks/telegram.js executeShopifyDirectRollback). Fully separate from
         // the GitHub revert-PR path below — selected by connection_source, no interleaved
         // if(hasPR) conditionals.
-        await proposeShopifyDirectRollback(run, bounceBefore, bounceAfter, bounceDelta)
+        await proposeShopifyDirectRollback(run, bounceBefore, bounceAfter, bounceDelta, scopeLabel)
       } else if (shouldRollback) {
         const octokit = await getOctokit(conn.github_installation_id)
         const owner   = conn.github_repo_owner
@@ -1013,14 +1049,14 @@ async function handleRollbackCheck(res) {
 
               await octokit.rest.repos.createOrUpdateFileContents({
                 owner, repo, path: run.analysis_result.file_to_edit,
-                message: `revert: rollback agent change (bounce rate +${bounceDelta}%)`,
+                message: `revert: rollback agent change (bounce rate +${bounceDelta}pp)`,
                 content: originalFile.content, sha: currentFile.sha, branch: branchName,
               })
 
               const { data: pr } = await octokit.rest.pulls.create({
                 owner, repo,
                 title: `🔄 Auto-Rollback: ${run.analysis_result?.problem}`,
-                body: `## Automatic Rollback (awaiting approval)\n\n_**Site-wide** bounce rate rose by **+${bounceDelta}pp** in the 48h after this PR merged (correlation, not proven causation — the metric covers every page, not just \`${run.analysis_result?.file_to_edit || 'the edited file'}\`)._\n\n- Site-wide bounce before merge: ${bounceBefore}%\n- Site-wide bounce after merge:  ${bounceAfter}%\n- Sessions sampled per side: ≥ ${Number(process.env.MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION || '100')}\n\n_Reply *YES* in Telegram to merge this rollback, *NO* to keep the change live and accept the bounce trend._`,
+                body: `## Automatic Rollback (awaiting approval)\n\n_**${scopeLabel}** rose by **+${bounceDelta}pp** in the 48h after this PR merged (correlation, not proven causation — ${scopeUsed === 'route' ? `measured over sessions that viewed ${scope.routesLabel}` : `the metric covers every page, not just \`${run.analysis_result?.file_to_edit || 'the edited file'}\``})._\n\n- Bounce before merge: ${bounceBefore}%\n- Bounce after merge:  ${bounceAfter}%\n- Sessions sampled per side: ≥ ${Number(process.env.MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION || '100')}\n\n_Reply *YES* in Telegram to merge this rollback, *NO* to keep the change live and accept the bounce trend._`,
                 head: branchName, base: baseBranch,
               })
               // Stage 4.8: do NOT auto-merge. Mark the run waiting_approval and
@@ -1039,7 +1075,7 @@ async function handleRollbackCheck(res) {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     chat_id: ownerChatId,
-                    text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Site-wide bounce rate: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\n🔍 Review PR: ${escapeHtml(pr.html_url)}\n\nReply <b>YES</b> to merge the rollback, or <b>NO</b> to keep the change live.`,
+                    text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 ${escapeHtml(scopeLabel)}: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\n🔍 Review PR: ${escapeHtml(pr.html_url)}\n\nReply <b>YES</b> to merge the rollback, or <b>NO</b> to keep the change live.`,
                     parse_mode: 'HTML',
                   }),
                 })
@@ -1053,7 +1089,7 @@ async function handleRollbackCheck(res) {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 chat_id: ownerChatId,
-                text: `⚠️ <b>Velyr Rollback Alert</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Bounce rate +${bounceDelta}% — ❌ auto-rollback failed, please revert manually.`,
+                text: `⚠️ <b>Velyr Rollback Alert</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 Bounce rate +${bounceDelta}pp — ❌ auto-rollback failed, please revert manually.`,
                 parse_mode: 'HTML',
               }),
             })
@@ -1065,7 +1101,7 @@ async function handleRollbackCheck(res) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: ownerChatId,
-              text: `📈 <b>Velyr Impact Check — Positive</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n✅ Bounce rate: ${bounceBefore}% → ${bounceAfter}% (${bounceDelta}%)`,
+              text: `📈 <b>Velyr Impact Check — Positive</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n✅ ${escapeHtml(scopeLabel)}: ${bounceBefore}% → ${bounceAfter}% (${bounceDelta}pp)`,
               parse_mode: 'HTML',
             }),
           })
@@ -1149,21 +1185,24 @@ async function handleWeeklySummary(res) {
         : a.bounceRate > 50 ? `🟡 ${a.bounceRate}%`
         : `✅ ${a.bounceRate}%`
 
-      // Stage 3.6: weekly summary now reports SITE-WIDE bounce delta in the
-      // week of each change, explicitly labeled as correlation rather than
-      // attribution. Old text ("Best result: bounce rate −X% after agent
-      // change") was fabrication — the agent edits one page, the metric is
-      // every page. Matches both the new and legacy metric_type strings so
-      // historical rows still surface.
+      // Stage 3.6: weekly summary reports the measured bounce delta around each
+      // change, explicitly labeled as correlation rather than attribution, and
+      // scoped honestly (site-wide vs the routes the change touched). Matches
+      // legacy metric_type strings so historical rows still surface. Sort is
+      // DESCENDING by improvement — ascending here once picked the worst row
+      // and labeled it the best result.
       let bestMetricLine = ''
       const bounceMetrics = impactMetrics.filter(m =>
-        (m.metric_type === 'site_wide_bounce_rate' || m.metric_type === 'bounce_rate') &&
+        (m.metric_type === 'site_wide_bounce_rate' || m.metric_type === 'route_scoped_bounce_rate' || m.metric_type === 'bounce_rate') &&
         m.value_before && m.value_after
       )
       if (bounceMetrics.length > 0) {
-        const best        = bounceMetrics.sort((a, b) => (a.value_before - a.value_after) - (b.value_before - b.value_after))[0]
+        const best        = bounceMetrics.sort((a, b) => (b.value_before - b.value_after) - (a.value_before - a.value_after))[0]
         const improvement = Math.round(best.value_before - best.value_after)
-        if (improvement > 0) bestMetricLine = `\n📉 Site-wide bounce rate dropped ${improvement}% in the week of an agent change (correlation, not attribution — the metric covers every page)`
+        const scopeText   = best.metric_type === 'route_scoped_bounce_rate'
+          ? 'on the pages an agent change touched'
+          : 'site-wide in the week of an agent change'
+        if (improvement > 0) bestMetricLine = `\n📉 Bounce rate dropped ${improvement}pp ${scopeText} (correlation, not attribution)`
       }
 
       let abSummary = ''
@@ -1392,7 +1431,7 @@ async function handlePublicTimeline(req, res) {
   // replace snippets, internal confidence reasoning) into any future code
   // path that touched the response. Now we project `problem_description`
   // (already denormalized at run time) and use it directly.
-  const [runsRes, dnaRes] = await Promise.all([
+  const [runsRes, dnaRes, imRes] = await Promise.all([
     supabase.from('agent_runs')
       .select('id, status, created_at, completed_at, problem_description, screenshot_before, screenshot_after, bounce_rate_before, bounce_rate_after, score_before, score_after, pr_url, competitor_changes, ab_test_variants, pages_fixed')
       .eq('subscription_id', sub.id)
@@ -1401,7 +1440,22 @@ async function handlePublicTimeline(req, res) {
       .select('fix_type, outcome, notes, created_at')
       .eq('subscription_id', sub.id)
       .order('created_at', { ascending: false }).limit(100),
+    // Matched-window bounce pairs (deploy±2d, handleRollbackCheck). The public
+    // pair renders from these — never from agent_runs.bounce_rate_before/after,
+    // which mix a 7-day pre-analysis snapshot with the 48h post-deploy window.
+    supabase.from('impact_metrics')
+      .select('run_id, metric_type, value_before, value_after, measured_at')
+      .eq('subscription_id', sub.id)
+      .in('metric_type', ['site_wide_bounce_rate', 'route_scoped_bounce_rate', 'bounce_rate'])
+      .order('measured_at', { ascending: false }).limit(100),
   ])
+
+  // run_id → latest matched-window measurement (rows arrive newest-first).
+  const impactByRun = new Map()
+  for (const im of (imRes.data || [])) {
+    if (im.value_before == null || im.value_after == null) continue
+    if (!impactByRun.has(im.run_id)) impactByRun.set(im.run_id, im)
+  }
 
   // Strip A/B variants details to "winner only if resolved" — withhold the
   // raw find/replace strings so visitors don't see the unchanged-from-control
@@ -1409,12 +1463,18 @@ async function handlePublicTimeline(req, res) {
   const runs = (runsRes.data || []).map(r => {
     const ab = r.ab_test_variants
     const abPublic = ab && ab.winner ? { winner: ab.winner, change_type: ab.change_type } : null
+    const im = impactByRun.get(r.id)
     return {
       id: r.id, status: r.status,
       date: r.completed_at || r.created_at,
       problem: r.problem_description || null,
       screenshot_before: r.screenshot_before, screenshot_after: r.screenshot_after,
-      bounce_rate_before: r.bounce_rate_before, bounce_rate_after: r.bounce_rate_after,
+      // bounce_rate_after feeds the trend chart (every point shares the same
+      // 48h-post-deploy methodology). The BEFORE column is deliberately not
+      // exposed: pairing it with bounce_rate_after implied a like-for-like
+      // comparison across two different windows. The honest pair is `impact`.
+      bounce_rate_after: r.bounce_rate_after,
+      impact: im ? { metric_type: im.metric_type, bounce_before: im.value_before, bounce_after: im.value_after } : null,
       score_before: r.score_before, score_after: r.score_after,
       pr_url: r.pr_url,
       competitor_changes: r.competitor_changes,

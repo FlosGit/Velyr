@@ -82,8 +82,10 @@ function LineChart({ data, label, color = C.accent, suffix = '', invertColor = f
 function RunCard({ run }) {
   const [showCompetitor, setShowCompetitor] = useState(false)
   const badge = STATUS_BADGE[run.status] || { label: run.status, color: C.textLight, bg: 'rgba(28,25,23,0.06)' }
-  const bounceDelta = (run.bounce_rate_before != null && run.bounce_rate_after != null)
-    ? run.bounce_rate_after - run.bounce_rate_before : null
+  // Matched deploy±2d pair from impact_metrics (run.impact), never the
+  // mixed-window agent_runs columns — the API no longer exposes that pair.
+  const impact = run.impact
+  const bounceDelta = impact ? impact.bounce_after - impact.bounce_before : null
   const bounceArrow = bounceDelta == null ? null : (bounceDelta < 0 ? '↓' : bounceDelta > 0 ? '↑' : '→')
   const bounceColor = bounceDelta == null ? C.textLight : (bounceDelta < 0 ? C.green : bounceDelta > 0 ? C.red : C.textLight)
 
@@ -127,10 +129,9 @@ function RunCard({ run }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', marginBottom: 4 }}>
         {bounceDelta != null && (
           <p style={{ fontSize: 13, color: C.text, fontWeight: 400 }}>
-            {/* Stage 5: honest labeling — this is the SITE-WIDE bounce rate
-                measured around the change, not attributable to this single
-                edit. See api/agent/run.js handleRollbackCheck. */}
-            Site-wide bounce rate: <span style={{ color: bounceColor, fontWeight: 500 }}>{run.bounce_rate_before}% {bounceArrow} {run.bounce_rate_after}%</span>
+            {/* Honest labeling: matched 2-day windows around deploy, scoped
+                site-wide or to the touched routes — see handleRollbackCheck. */}
+            {impact.metric_type === 'route_scoped_bounce_rate' ? 'Bounce rate on the affected page(s)' : 'Site-wide bounce rate'}: <span style={{ color: bounceColor, fontWeight: 500 }}>{impact.bounce_before}% {bounceArrow} {impact.bounce_after}%</span>
             <span style={{ color: C.textLight, fontWeight: 300 }}> (correlation, not attributed to this change)</span>
           </p>
         )}

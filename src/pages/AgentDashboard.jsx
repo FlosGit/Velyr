@@ -914,10 +914,13 @@ function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[]}) {
   // (measured_at desc), so first-write-wins keeps the latest measurement if a
   // run ever has more than one row. Legacy rows predate the Stage 3.6 rename
   // and carry metric_type 'bounce_rate' (demo data too) — same measurement.
+  // route_scoped_bounce_rate = same windows, population narrowed to sessions
+  // that viewed the routes the change touched.
+  const BOUNCE_METRIC_TYPES = ['site_wide_bounce_rate', 'route_scoped_bounce_rate', 'bounce_rate']
   const impactByRun = useMemo(() => {
     const m = new Map()
     for (const im of impactMetrics) {
-      if (im.metric_type !== 'site_wide_bounce_rate' && im.metric_type !== 'bounce_rate') continue
+      if (!BOUNCE_METRIC_TYPES.includes(im.metric_type)) continue
       if (im.value_before == null || im.value_after == null) continue
       if (!m.has(im.run_id)) m.set(im.run_id, im)
     }
@@ -1007,7 +1010,7 @@ function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[]}) {
                         <span style={{fontSize:11,color:C.accent,fontWeight:500}}>{analysis.expected_improvement}</span>
                       )}
                       {bounceDelta != null && (
-                        <span title="Site-wide bounce rate, matched 2-day windows immediately before and after deploy (≥100 sessions per side)"
+                        <span title={`${impact.metric_type==='route_scoped_bounce_rate'?'Bounce rate on the pages this change touched':'Site-wide bounce rate'}, matched 2-day windows immediately before and after deploy (≥100 sessions per side)`}
                               style={{fontSize:11,color:bounceDelta<0?C.greenText:bounceDelta>0?C.redText:C.textLight,fontWeight:500}}>
                           Bounce {impact.value_before}% → {impact.value_after}% ({bounceDelta>0?'+':''}{bounceDelta}pp)
                         </span>
