@@ -60,7 +60,11 @@ const LLM_CAPS = {
   // RA3 Pass-1 component ranker. Authoritative home for the ranker cap — the
   // ranker module delegates max_tokens to the injected callAI closure, which
   // applies this value (single source of truth, no duplicated magic number).
-  MAX_TOKENS_RANKER:   Number(Deno.env.get('LLM_MAX_TOKENS_RANKER')   || '600'),   // callAI JSON (Pass 1)
+  // 2000, not 600: the ranked/skipped/unsure-with-reasons JSON for a ~50-node
+  // graph overflows 600 output tokens → finish_reason 'length' → silent
+  // heuristic fallback on exactly the sites where LLM ranking matters most.
+  // Worst-case added cost ≈ €0.02/run at current output pricing.
+  MAX_TOKENS_RANKER:   Number(Deno.env.get('LLM_MAX_TOKENS_RANKER')   || '2000'),  // callAI JSON (Pass 1)
   // Hard ceiling on the JSON body we POST to OpenRouter. 500 KB ≈ 125 K
   // tokens — well under Sonnet 4.5's 200 K context, leaves room for output.
   // If exceeded, abort the run rather than send a giant prompt.
@@ -2875,6 +2879,39 @@ async function callLLMCapped(subscriptionId: string, system: string, user: strin
   return text
 }
 
+// ─── PASS-1 SIGNAL DIGEST (shared by all three pipeline paths) ───────────────
+// The ranker decides which files even reach Pass 2, so it needs the same
+// conversion evidence Pass 2 grounds on — scroll/click engagement, per-file
+// funnel traffic, learned outcomes — not just a traffic one-liner. Kept
+// compact (~1-2 KB; the ranker prompt also carries the 30 KB graph summary).
+// funnelAnalysis is honestly null on the two Shopify theme paths.
+function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any): string {
+  const a = analytics?.last7Days
+  const lines: string[] = []
+  if (a) {
+    const top = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
+    lines.push(`Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate${a.mobilePercent != null ? `, ${a.mobilePercent}% mobile` : ''}. Top pages: ${top || '—'}.`)
+    const eng = a.engagement
+    const scroll = (eng?.scrollByPage || []).slice(0, 5).map((s: any) => `${s.path} → ${s.avgMaxScrollPct}% (${s.samples} leaves)`).join('; ')
+    if (scroll) lines.push(`Scroll depth (avg max-scroll % per page — low % = visitors never see the lower sections): ${scroll}`)
+    const clicks = (eng?.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks})`).join(', ')
+    if (clicks) lines.push(`Most-clicked elements (autocapture): ${clicks}`)
+  } else {
+    lines.push('No analytics data available.')
+  }
+  if (funnelAnalysis) {
+    const pages = (funnelAnalysis.funnelPages || []).filter((p: any) => p.views > 0).slice(0, 8)
+      .map((p: any) => `${p.filePath} (${p.pageType}) → ${p.views} views${p.dropOffScore ? `, ${p.dropOffScore}% drop-off` : ''}`).join('; ')
+    if (pages) lines.push(`Funnel pages (file → traffic): ${pages}`)
+    if (funnelAnalysis.biggestDropOff) lines.push(`Biggest funnel drop-off: ${funnelAnalysis.biggestDropOff.filePath} (${funnelAnalysis.biggestDropOff.dropOffScore}%).`)
+  }
+  const dnaWins   = String(dna?.whatWorks    || dna?.winsText   || '').trim().slice(0, 400)
+  const dnaLosses = String(dna?.neverDoAgain || dna?.lossesText || '').trim().slice(0, 400)
+  if (dnaWins)   lines.push(`Learned — what worked on this site before: ${dnaWins}`)
+  if (dnaLosses) lines.push(`Learned — never do again on this site: ${dnaLosses}`)
+  return lines.join('\n')
+}
+
 // ─── AI CONVERSION FIX — PASS 2 (Stage RA5) ──────────────────────────────────
 // Consumes RA4's deepContext (real component source) instead of the old
 // enrichedRepoContent. Returns a lean, honesty-first schema: problem +
@@ -3569,18 +3606,16 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   // serving the pinned page, then rides into Pass 2 (consumed there).
   const focusPagePath = await loadFocusPage(conn.subscription_id)
   const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank files serving that page higher.` : ''
-  const rankerAnalyticsContext = (() => {
-    const a = analytics?.last7Days
-    if (!a) return 'No analytics data available.'
-    const top = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
-    return `Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate. Top pages: ${top || '—'}.`
-  })() + focusHint
+  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
   const rankerCallAI = (args: { system: string; user: string }) =>
     callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
   const rankerResult: RankerResult = await rankComponentsForConversion(
     graph, rankerAnalyticsContext, rankerCallAI,
     { framework: shopMap.framework, cssApproach: shopMap.cssApproach },
   )
+  if (rankerResult.pass1_fallback) {
+    slog('warn', 'ranker_pass1_fallback', { runId: run.id, subscriptionId: conn.subscription_id, nodeCount: rankerResult.node_count, reason: rankerResult.fallback_reason })
+  }
   if (rankerResult.insufficient_graph) {
     await dbWrite(
       supabase.from('agent_runs').update({
@@ -3851,18 +3886,16 @@ async function processGithubThemeConnection(
   // Owner focus pin ("Fix in next run") — same threading as the other paths.
   const focusPagePath = await loadFocusPage(conn.subscription_id)
   const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank files serving that page higher.` : ''
-  const rankerAnalyticsContext = (() => {
-    const a = analytics?.last7Days
-    if (!a) return 'No analytics data available.'
-    const top = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
-    return `Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate. Top pages: ${top || '—'}.`
-  })() + focusHint
+  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
   const rankerCallAI = (args: { system: string; user: string }) =>
     callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
   const rankerResult: RankerResult = await rankComponentsForConversion(
     graph, rankerAnalyticsContext, rankerCallAI,
     { framework: shopMap.framework, cssApproach: shopMap.cssApproach },
   )
+  if (rankerResult.pass1_fallback) {
+    slog('warn', 'ranker_pass1_fallback', { runId: run.id, subscriptionId: conn.subscription_id, nodeCount: rankerResult.node_count, reason: rankerResult.fallback_reason })
+  }
   if (rankerResult.insufficient_graph) {
     await dbWrite(
       supabase.from('agent_runs').update({
@@ -4271,14 +4304,7 @@ async function processConnection(conn: any) {
     // serving the pinned page, then rides into Pass 2 (consumed there).
     const focusPagePath = await loadFocusPage(conn.subscription_id)
     const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank components serving that page higher.` : ''
-    const rankerAnalyticsContext = (() => {
-      const a = analytics?.last7Days
-      if (!a) return 'No analytics data available.'
-      const top  = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
-      const drop = funnelAnalysis?.biggestDropOff
-        ? ` Biggest funnel drop-off: ${funnelAnalysis.biggestDropOff.filePath} (${funnelAnalysis.biggestDropOff.dropOffScore}%).` : ''
-      return `Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate. Top pages: ${top || '—'}.${drop}`
-    })() + focusHint
+    const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
     const rankerCallAI = (args: { system: string; user: string }) =>
       callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
 
@@ -4286,6 +4312,9 @@ async function processConnection(conn: any) {
       graph, rankerAnalyticsContext, rankerCallAI,
       { framework: mapResult.framework, cssApproach: mapResult.cssApproach },
     )
+    if (rankerResult.pass1_fallback) {
+      slog('warn', 'ranker_pass1_fallback', { runId: run.id, subscriptionId: conn.subscription_id, nodeCount: rankerResult.node_count, reason: rankerResult.fallback_reason })
+    }
 
     // Sparse-graph gate: too few components to rank honestly. Pass 2 would
     // fabricate against an empty context — skip cleanly instead. New status

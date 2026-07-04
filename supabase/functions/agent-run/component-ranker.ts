@@ -10,8 +10,9 @@
 //      resolution failure) can't be ranked honestly; Pass-1 on it is a casino
 //      and Pass-2 would fabricate against an empty context. We bail with
 //      insufficient_graph and the caller skips RA4/RA5 entirely.
-//   2. LLM Pass 1 — ranks/ skips/ flags-unsure. On parse failure we fall back
-//      to a deterministic heuristic and set pass1_fallback.
+//   2. LLM Pass 1 — ranks/ skips/ flags-unsure. On call/parse failure we fall
+//      back to a deterministic heuristic, set pass1_fallback + fallback_reason,
+//      and warn (a heuristic-only ranking silently caps the whole pipeline).
 //   3. Sanity override — ALWAYS applied after Pass 1. Force-includes any
 //      component whose name matches the conversion-vocabulary regex. Pass-1 is
 //      the single point of failure this backstop mitigates, so the vocabulary
@@ -46,6 +47,7 @@ export interface RankerResult {
   skipped: Array<{ path: string; reason: string }>
   unsure: Array<{ path: string; reason: string }>
   pass1_fallback: boolean
+  fallback_reason?: string      // why Pass 1 fell back (call/parse error message)
   insufficient_graph: boolean   // true → caller skips RA4/RA5
   node_count: number
 }
@@ -168,6 +170,7 @@ export async function rankComponentsForConversion(
   let skipped: Array<{ path: string; reason: string }> = []
   let unsure: Array<{ path: string; reason: string }> = []
   let pass1_fallback = false
+  let fallback_reason: string | undefined
 
   // Per-call injection sentinel: the graph summary embeds untrusted customer
   // code (component names + first 300 chars of source). Wrap it so a hostile
@@ -184,7 +187,7 @@ ${openTag}
 FRAMEWORK: ${meta.framework}
 CSS APPROACH: ${meta.cssApproach}
 
-ANALYTICS CONTEXT:
+CONVERSION SIGNALS (real visitor analytics, scroll/click engagement, funnel traffic, learned outcomes):
 ${analyticsContext}
 
 COMPONENT GRAPH (reachable from the site's entry points):
@@ -192,6 +195,7 @@ ${summary}
 ${closeTag}
 
 Rank these components by how likely an edit to them is to improve conversion.
+Ground the ranking in the CONVERSION SIGNALS wherever they point at specific pages or elements (a high-traffic page with low scroll depth or a big funnel drop-off outranks an unvisited one); fall back to structural judgment only where no signal exists.
 Return JSON only (no markdown):
 {
   "ranked":  [{ "path": "<exact path from the graph>", "reason": "<why it matters for conversion>" }],
@@ -213,12 +217,16 @@ Up to ${LLM_RANKED_CAP} in "ranked". Use "skipped" for components clearly not co
     ranked = clean(parsed.ranked).slice(0, LLM_RANKED_CAP).map(r => ({ ...r, source: 'llm' as const }))
     skipped = clean(parsed.skipped)
     unsure = clean(parsed.unsure)
-  } catch {
-    // 2b. Heuristic fallback.
+  } catch (err: any) {
+    // 2b. Heuristic fallback. Loud, not silent: a heuristic-only ranking caps
+    // everything downstream (Pass 2 can only pick from the ranked set), so the
+    // cause must be visible in the logs, not swallowed.
+    console.warn(`[ranker] pass1 fallback to heuristic (${graph.nodes.length} nodes): ${err?.message || err}`)
     ranked = heuristicRank(graph.nodes)
     skipped = []
     unsure = []
     pass1_fallback = true
+    fallback_reason = String(err?.message || err)
   }
 
   // 3. Sanity override — ALWAYS applied after Pass 1. Force-include any node
@@ -240,5 +248,5 @@ Up to ${LLM_RANKED_CAP} in "ranked". Use "skipped" for components clearly not co
   }
   ranked = ranked.slice(0, FINAL_RANKED_CAP)
 
-  return { ranked, skipped, unsure, pass1_fallback, insufficient_graph: false, node_count: nodeCount }
+  return { ranked, skipped, unsure, pass1_fallback, fallback_reason, insufficient_graph: false, node_count: nodeCount }
 }
