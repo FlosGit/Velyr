@@ -101,11 +101,14 @@ export function buildReceipt(input: ReceiptInput): string {
     : ''
 
   // ── Environment checks ──
-  const ext = extOf(fixResult.file_to_edit || '')
-  const parseable = ['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx'].includes(ext)
-  const syntaxLine = parseable
-    ? 'Syntax (Babel parse of modified file): ✓ passed'
-    : `Syntax: not verified — Velyr can't parse .${ext || '?'} (no Babel grammar); verify your CI`
+  // Item 4: a fix may carry additional_edits — the syntax verdict must cover
+  // every modified file, not just the primary.
+  const editedPaths = [fixResult.file_to_edit || '', ...(fixResult.additional_edits || []).map(e => e.file_to_edit)].filter(Boolean)
+  const PARSEABLE = ['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx']
+  const unparseable = editedPaths.filter(p => !PARSEABLE.includes(extOf(p)))
+  const syntaxLine = unparseable.length === 0
+    ? `Syntax (Babel parse of ${editedPaths.length > 1 ? `all ${editedPaths.length} modified files` : 'modified file'}): ✓ passed`
+    : `Syntax: not verified for ${unparseable.join(', ')} — Velyr can't Babel-parse ${[...new Set(unparseable.map(p => `.${extOf(p) || '?'}`))].join('/')}; verify your CI`
   const lintLine = lintInfo.eslint
     ? 'Lint config detected: yes — not run in this environment, verify your CI'
     : 'Lint config detected: no'

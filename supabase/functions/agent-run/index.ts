@@ -3046,6 +3046,11 @@ export interface FixResult {
   ranked_higher_than?: string
   file_to_edit?: string
   code_change?: { find: string; replace: string }
+  // Item 4: bounded multi-file. OPTIONAL companion edits (max 2) the primary
+  // change REQUIRES to function (component + its CSS module, constant + call
+  // site). Each passes the same per-file guards (forbidden path, extension,
+  // find-uniqueness, syntax) as the primary; never used to bundle unrelated fixes.
+  additional_edits?: Array<{ file_to_edit: string; code_change: { find: string; replace: string } }>
   expected_metric?: { metric: 'bounce_rate' | 'conversion_rate' | 'form_completion'; direction: 'decrease' | 'increase'; magnitude_pp: number; caveat: string }
   confidence?: 'low' | 'medium' | 'high'
   confidence_reason?: string
@@ -3179,6 +3184,7 @@ Identify the single highest-impact conversion problem visible in this material. 
   "ranked_higher_than": "what other candidate problems you considered and why you ranked them lower",
   "file_to_edit": "exact path from the ranked components list",
   "code_change": { "find": "exact substring from the file, copy-paste accurate", "replace": "new substring" },
+  "additional_edits": [ { "file_to_edit": "<path>", "code_change": { "find": "...", "replace": "..." } } ],
   "expected_metric": { "metric": "bounce_rate" | "conversion_rate" | "form_completion", "direction": "decrease" | "increase", "magnitude_pp": <number>, "caveat": "site-wide measurement, not page-level attribution" },
   "confidence": "low" | "medium" | "high",
   "confidence_reason": "what about the inputs makes this more or less confident",
@@ -3188,6 +3194,7 @@ Identify the single highest-impact conversion problem visible in this material. 
 CONSTRAINTS:
 - file_to_edit MUST be one of: ${allowedPaths.join(', ') || '(none)'}. Do not invent paths.
 - code_change.find MUST appear EXACTLY ONCE in the chosen file, copied verbatim.
+- additional_edits is OPTIONAL and capped at 2. Use it ONLY for edits the primary change REQUIRES to function (e.g. the component AND its CSS module, or a constant AND its call site) — never to bundle unrelated improvements. Same rules per entry: path from the list above, find appears exactly once in that file. Omit it (or use []) for a normal single-file fix.
 - Respect all BRAND GUARDRAILS above; never re-attempt anything on the NEVER DO AGAIN list.
 - If you cannot find a confident #1 problem, return { "skip": true, "reason": "..." } and we will not open a PR this week.`
 
@@ -3231,6 +3238,16 @@ CONSTRAINTS:
   if (!parsed.skip && (!parsed.problem || !parsed.file_to_edit || !parsed.code_change?.find || typeof parsed.code_change?.replace !== 'string')) {
     throw new Error(`Pass 2 response missing required fields: ${JSON.stringify(parsed).slice(0, 200)}`)
   }
+  // Item 4: sanitize additional_edits — max 2, well-formed, never duplicating
+  // the primary (or each other). Malformed entries are DROPPED, not fatal: the
+  // primary edit stands alone, which was the only behavior before item 4.
+  if (!parsed.skip) {
+    const seen = new Set([parsed.file_to_edit])
+    parsed.additional_edits = (Array.isArray(parsed.additional_edits) ? parsed.additional_edits : [])
+      .filter((e: any) => e && typeof e.file_to_edit === 'string' && e.code_change?.find && typeof e.code_change?.replace === 'string')
+      .filter((e: any) => !seen.has(e.file_to_edit) && seen.add(e.file_to_edit))
+      .slice(0, 2)
+  }
   return parsed
 }
 
@@ -3262,36 +3279,38 @@ interface ReceiptCtx {
 }
 
 async function createPR(octokit: any, owner: string, repo: string, fixResult: FixResult, receipt: ReceiptCtx): Promise<CreatePRResult> {
-  const filePath = fixResult.file_to_edit!
-  const change   = fixResult.code_change!
+  // Item 4: bounded multi-file. The primary edit leads; additional_edits (max 2,
+  // sanitized in callAIForFix) follow. EVERY per-file guard below runs for EVERY
+  // file BEFORE the branch cut, so a failure in file 3 can never leave an orphan
+  // branch or a partial commit set.
+  const edits = [
+    { path: fixResult.file_to_edit!, change: fixResult.code_change! },
+    ...(fixResult.additional_edits || []).map(e => ({ path: e.file_to_edit, change: e.code_change })),
+  ]
 
-  // Editable-path allowlist (Stage 4.3) — refuse CI/secret/dependency/config
-  // files even if the AI selected one. Throw → generic failed.
-  const forbidden = isForbiddenEditPath(filePath)
-  if (forbidden) {
-    throw new Error(`AI selected a forbidden file path: "${filePath}" matched denylist pattern ${forbidden}. Refusing to commit.`)
-  }
-
-  // Verifiable-type guard (P2-4): validateSyntax only parses the JS/TS family —
-  // for any other extension it returns ok:true WITHOUT checking, so a broken edit
-  // to a compiled template (.vue/.svelte/.astro) or markup could reach the
-  // customer's PR and break their build if merged. The supported frameworks
-  // (Next/Vite/CRA) keep conversion targets in JS/TS, so refuse out-of-family
-  // paths rather than open an unchecked edit. Keep this set in sync with
-  // validateSyntax. Throw → generic failed (honest no-PR).
-  // SG2: theme runs (Shopify-via-GitHub; mapResult.framework === 'shopify-liquid')
-  // edit Liquid/JSON, validated below by validateThemeSyntax. Non-theme runs stay
-  // JS/TS-only (Babel-checked). Detected from the threaded mapResult so createPR
-  // needs no new parameter.
   const isThemeRun = receipt.mapResult.framework === 'shopify-liquid'
-  const editExt = filePath.split('.').pop()?.toLowerCase() || ''
   const VERIFIABLE_EDIT_EXTENSIONS = ['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx']
   const THEME_EDIT_EXTENSIONS = ['liquid', 'json']
   const allowedEditExtensions = isThemeRun
     ? [...VERIFIABLE_EDIT_EXTENSIONS, ...THEME_EDIT_EXTENSIONS]
     : VERIFIABLE_EDIT_EXTENSIONS
-  if (!allowedEditExtensions.includes(editExt)) {
-    throw new Error(`AI selected a non-verifiable file type ".${editExt}" (${filePath}); only ${allowedEditExtensions.join('/')} edits are syntax-checked before commit. Refusing to open an unverified PR.`)
+
+  for (const e of edits) {
+    // Editable-path allowlist (Stage 4.3) — refuse CI/secret/dependency/config
+    // files even if the AI selected one. Throw → generic failed.
+    const forbidden = isForbiddenEditPath(e.path)
+    if (forbidden) {
+      throw new Error(`AI selected a forbidden file path: "${e.path}" matched denylist pattern ${forbidden}. Refusing to commit.`)
+    }
+    // Verifiable-type guard (P2-4): validateSyntax only parses the JS/TS family —
+    // refuse out-of-family paths rather than open an unchecked edit. Theme runs
+    // (SG2; mapResult.framework === 'shopify-liquid') additionally allow
+    // Liquid/JSON, validated below by validateThemeSyntax. Keep in sync with
+    // validateSyntax. Throw → generic failed (honest no-PR).
+    const ext = e.path.split('.').pop()?.toLowerCase() || ''
+    if (!allowedEditExtensions.includes(ext)) {
+      throw new Error(`AI selected a non-verifiable file type ".${ext}" (${e.path}); only ${allowedEditExtensions.join('/')} edits are syntax-checked before commit. Refusing to open an unverified PR.`)
+    }
   }
 
   // SG3b: a theme run must target the branch Shopify actually syncs to its live
@@ -3303,44 +3322,53 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
   const baseBranch = (isThemeRun && receipt.connectedBranch)
     ? receipt.connectedBranch
     : await getDefaultBranch(octokit, owner, repo)
-  // Re-fetch the file right before write (the find guard runs against THIS).
-  const { data: fileData } = await octokit.rest.repos.getContent({ owner, repo, path: filePath, ref: baseBranch })
-  const currentContent = base64Decode(fileData.content)
 
-  // Whitespace-normalized find guard (Stage RA5 #4 / RA6).
-  const found = validateFindReplaceSafe(currentContent, change.find, change.replace)
-  if (!found.ok) {
-    if (found.reason === 'find_mismatch') {
-      return { ok: false, status: 'find_mismatch', message: `code_change.find not found in ${filePath} (whitespace-normalized match)`, aiFind: change.find, closestCandidates: found.closestCandidates }
+  // Prepare EVERY file — re-fetch, find-guard, splice, syntax-check — before any
+  // branch exists. A find problem on ANY file fails the whole fix honestly (the
+  // edits were declared interdependent; applying a subset could break the site).
+  const prepared: Array<{ path: string; newContent: string; sha: string }> = []
+  for (const e of edits) {
+    // Re-fetch the file right before write (the find guard runs against THIS).
+    const { data: fileData } = await octokit.rest.repos.getContent({ owner, repo, path: e.path, ref: baseBranch })
+    const currentContent = base64Decode(fileData.content)
+
+    // Whitespace-normalized find guard (Stage RA5 #4 / RA6).
+    const found = validateFindReplaceSafe(currentContent, e.change.find, e.change.replace)
+    if (!found.ok) {
+      if (found.reason === 'find_mismatch') {
+        return { ok: false, status: 'find_mismatch', message: `code_change.find not found in ${e.path} (whitespace-normalized match)`, aiFind: e.change.find, closestCandidates: found.closestCandidates }
+      }
+      return { ok: false, status: 'find_ambiguous', message: `code_change.find matched ${found.matchPositions.length} places in ${e.path}`, aiFind: e.change.find, snippets: found.snippets }
     }
-    return { ok: false, status: 'find_ambiguous', message: `code_change.find matched ${found.matchPositions.length} places in ${filePath}`, aiFind: change.find, snippets: found.snippets }
+
+    // Replace the ACTUAL file bytes at the anchor (never the AI's copy).
+    const newContent = currentContent.slice(0, found.anchorPos) + e.change.replace + currentContent.slice(found.anchorPos + found.actualFind.length)
+
+    // Syntax-validate before committing (Stage 3 / SG2), dispatched per-file:
+    // Liquid+JSON → validateThemeSyntax; everything else → the Babel check. The
+    // extension guard above already restricts .liquid/.json to theme runs.
+    const ext = e.path.split('.').pop()?.toLowerCase() || ''
+    const validation = (ext === 'liquid' || ext === 'json')
+      ? validateThemeSyntax(e.path, newContent)
+      : validateSyntax(e.path, newContent)
+    if (!validation.ok) {
+      throw new Error(`Generated code has a syntax error in ${e.path}: ${validation.reason}`)
+    }
+    prepared.push({ path: e.path, newContent, sha: fileData.sha })
   }
 
-  // Replace the ACTUAL file bytes at the anchor (never the AI's copy).
-  const newContent = currentContent.slice(0, found.anchorPos) + change.replace + currentContent.slice(found.anchorPos + found.actualFind.length)
-
-  // Syntax-validate before committing (Stage 3 / SG2). Theme Liquid+JSON go
-  // through validateThemeSyntax (delimiter balance / JSON.parse); everything else
-  // through the JS/TS Babel check. The extension guard above already restricts
-  // .liquid/.json to theme runs, so dispatching by extension is safe. Throw →
-  // generic failed.
-  const validation = (editExt === 'liquid' || editExt === 'json')
-    ? validateThemeSyntax(filePath, newContent)
-    : validateSyntax(filePath, newContent)
-  if (!validation.ok) {
-    throw new Error(`Generated code has a syntax error in ${filePath}: ${validation.reason}`)
-  }
-
-  // Only now create the branch + commit (validation passed → no orphan branch).
+  // Only now create the branch + commits (all validation passed → no orphan branch).
   const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${baseBranch}` })
   const branchName = `agent/fix-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
   await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: ref.object.sha })
-  await octokit.rest.repos.createOrUpdateFileContents({
-    owner, repo, path: filePath,
-    message: `fix: ${fixResult.problem}`,
-    content: base64Encode(newContent),
-    sha: fileData.sha, branch: branchName,
-  })
+  for (const p of prepared) {
+    await octokit.rest.repos.createOrUpdateFileContents({
+      owner, repo, path: p.path,
+      message: prepared.length > 1 ? `fix: ${fixResult.problem} (${p.path})` : `fix: ${fixResult.problem}`,
+      content: base64Encode(p.newContent),
+      sha: p.sha, branch: branchName,
+    })
+  }
 
   // RA7: receipt-first PR body — honest record of what was/wasn't inspected,
   // forced-included, unresolved, and NOT verified in this environment. Syntax
@@ -3360,7 +3388,7 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
   const { data: pr } = await octokit.rest.pulls.create({
     owner, repo, title: `🤖 Agent: ${fixResult.problem}`, body: prBody, head: branchName, base: baseBranch,
   })
-  return { ok: true, pr, filesEdited: [filePath] }
+  return { ok: true, pr, filesEdited: prepared.map(p => p.path) }
 }
 
 // ─── TELEGRAM: PR-APPROVAL NOTIFICATION (Stage RA5; wording finalized in RA7) ──
@@ -3381,7 +3409,7 @@ async function sendTelegramNotification(fixResult: FixResult, pr: any, _runId: s
 
 📊 <b>Hypothesis:</b> ${escapeHtml(fixResult.problem)}
 🎯 <b>Expected:</b> ${escapeHtml(expected)}
-📁 <b>File:</b> ${escapeHtml(fixResult.file_to_edit)}
+📁 <b>File${(fixResult.additional_edits?.length || 0) > 0 ? 's' : ''}:</b> ${escapeHtml([fixResult.file_to_edit, ...(fixResult.additional_edits || []).map(e => e.file_to_edit)].join(', '))}
 ⚠️ <b>Blind spots:</b> ${escapeHtml(blindSpot)}
 
 🔗 <a href="${escapeHtml(pr.html_url)}">View PR</a>
@@ -3803,11 +3831,14 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     await notifyInsufficientData(chatId, fixResult.reason || 'no confident high-impact fix this week')
     return
   }
-  // file_to_edit must be one of the ranked files (no invented paths) — mirrors the
-  // GitHub invariant; a violation throws to processConnection's shared catch.
+  // Every edited file (primary + additional_edits, item 4) must be one of the
+  // ranked files (no invented paths) — mirrors the GitHub invariant; a violation
+  // throws to processConnection's shared catch.
   const rankedPaths = rankerResult.ranked.map(r => r.path)
-  if (!fixResult.file_to_edit || !rankedPaths.includes(fixResult.file_to_edit)) {
-    throw new Error(`Shopify: AI selected file outside ranked list: "${fixResult.file_to_edit}"`)
+  for (const p of [fixResult.file_to_edit, ...(fixResult.additional_edits || []).map(e => e.file_to_edit)]) {
+    if (!p || !rankedPaths.includes(p)) {
+      throw new Error(`Shopify: AI selected file outside ranked list: "${p}"`)
+    }
   }
 
   // ── MIGRATION NOTE (handled separately, NOT in this change): the new run status
@@ -3815,43 +3846,63 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   // CHECK constraint, or the final dbWrite will be rejected. This code does not touch
   // any migration. ──
 
-  // 5. LOCATE + APPLY — find the exact file the AI chose in the bytes we ALREADY read
-  // (read.files), then reconstruct the FULL new file content via the shared
-  // whitespace-normalized guard. themeFilesUpsert overwrites the whole file (no patch
-  // mode), so we must persist complete newContent — the live-theme write happens later
-  // on the YES reply (writeShopifyThemeFile), never here.
-  const change = fixResult.code_change!
-  const target = files.find(f => f.filename === fixResult.file_to_edit)
-  if (!target) {
-    // file_to_edit was in the ranked list but isn't in the read bytes (same source —
-    // shouldn't happen). Never approve/write a phantom file; honest terminal instead.
-    const msg = `Selected theme file not found in the read theme: ${fixResult.file_to_edit}`
-    slog('warn', 'shopify_target_file_missing', { subscriptionId: conn.subscription_id, file: fixResult.file_to_edit })
-    await dbWrite(
-      supabase.from('agent_runs').update({
-        status: 'shopify_theme_read_failed', current_step: 'done',
-        completed_at: new Date().toISOString(), error_message: msg,
-      }).eq('id', run.id),
-      DB_TIMEOUT_MS, 'shopify_target_missing_update',
-    )
-    await sendShopifyTelegram(chatId, `⚠️ <b>Velyr — couldn't prepare your Shopify theme fix</b>\n\n<i>${escapeHtml(msg)}</i>\n\nThe agent will retry on the next run.`)
-    return
-  }
+  // 5. LOCATE + APPLY — find each file the AI chose (primary + additional_edits,
+  // item 4) in the bytes we ALREADY read (read.files), then reconstruct the FULL
+  // new file content via the shared whitespace-normalized guard. themeFilesUpsert
+  // overwrites the whole file (no patch mode), so we must persist complete
+  // newContent — the live-theme write happens later on the YES reply
+  // (writeShopifyThemeFile), never here. ANY missing file or find problem fails
+  // the WHOLE fix honestly: the edits are interdependent by contract, and
+  // staging a subset could break the theme.
+  const editList = [
+    { file: fixResult.file_to_edit!, change: fixResult.code_change! },
+    ...(fixResult.additional_edits || []).map(e => ({ file: e.file_to_edit, change: e.code_change })),
+  ]
+  const stagedFiles: Array<{ filename: string; op: 'modified'; newContent: string; priorContent: string; checksumMd5: string | null }> = []
+  for (const ed of editList) {
+    const target = files.find(f => f.filename === ed.file)
+    if (!target) {
+      // The file was in the ranked list but isn't in the read bytes (same source —
+      // shouldn't happen). Never approve/write a phantom file; honest terminal instead.
+      const msg = `Selected theme file not found in the read theme: ${ed.file}`
+      slog('warn', 'shopify_target_file_missing', { subscriptionId: conn.subscription_id, file: ed.file })
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status: 'shopify_theme_read_failed', current_step: 'done',
+          completed_at: new Date().toISOString(), error_message: msg,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'shopify_target_missing_update',
+      )
+      await sendShopifyTelegram(chatId, `⚠️ <b>Velyr — couldn't prepare your Shopify theme fix</b>\n\n<i>${escapeHtml(msg)}</i>\n\nThe agent will retry on the next run.`)
+      return
+    }
 
-  // Reconstruct the full new file content (SAME guard the GitHub createPR uses).
-  const applied = applyCodeChangeToContent(target.content, change)
-  if (!applied.ok) {
-    // find_mismatch / find_ambiguous — same honest no-write statuses as the GitHub
-    // path. NO write, NO approval.
-    await dbWrite(
-      supabase.from('agent_runs').update({
-        status: applied.status, current_step: 'done',
-        completed_at: new Date().toISOString(), error_message: applied.message,
-      }).eq('id', run.id),
-      DB_TIMEOUT_MS, 'shopify_find_problem_update',
-    )
-    await notifyFindProblem(chatId, applied.status, applied)
-    return
+    // Reconstruct the full new file content (SAME guard the GitHub createPR uses).
+    const applied = applyCodeChangeToContent(target.content, ed.change)
+    if (!applied.ok) {
+      // find_mismatch / find_ambiguous — same honest no-write statuses as the GitHub
+      // path. NO write, NO approval.
+      await dbWrite(
+        supabase.from('agent_runs').update({
+          status: applied.status, current_step: 'done',
+          completed_at: new Date().toISOString(), error_message: `${applied.message} (${ed.file})`,
+        }).eq('id', run.id),
+        DB_TIMEOUT_MS, 'shopify_find_problem_update',
+      )
+      await notifyFindProblem(chatId, applied.status, applied)
+      return
+    }
+
+    // Syntax gate (item 4 — closes a pre-existing gap: this staging path never
+    // ran validateThemeSyntax; only the GitHub createPR did). Delimiter balance,
+    // block-tag pairing, {% schema %} JSON — a provably broken staged file must
+    // never reach the YES prompt. Throw → processConnection's shared catch.
+    const v = validateThemeSyntax(ed.file, applied.newContent)
+    if (!v.ok) {
+      throw new Error(`Staged theme content failed validation in ${ed.file}: ${v.reason}`)
+    }
+
+    stagedFiles.push({ filename: ed.file, op: 'modified', newContent: applied.newContent, priorContent: target.content, checksumMd5: target.checksumMd5 })
   }
 
   // 6. APPROVAL — persist the pending write under 'shopify_awaiting_approval' FIRST,
@@ -3870,24 +3921,19 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
         ...fixResult,
         analytics_snapshot: analytics?.last7Days,
         revenue:            revenue || null,
-        // Stage 3: per-file pending write. The forward analysis only ever edits an
-        // EXISTING theme file (op:'modified'), capturing priorContent (rollback
+        // Stage 3: per-file pending write. The forward analysis only ever edits
+        // EXISTING theme files (op:'modified'), capturing priorContent (rollback
         // re-upsert basis) and the analysis-time checksumMd5 (optimistic-concurrency
-        // basis). The files[] shape lets a future created file (Stage-4 snippet)
-        // carry op:'created' + a delete-on-rollback without reshaping this.
+        // basis) per file. Item 4: up to 3 files (primary + 2 additional_edits) —
+        // the apply/rollback machinery (classifyConcurrency, planRollbackOps) was
+        // already files[]-native.
         pending_write:      {
           themeId: conn.shopify_main_theme_id,
-          files: [{
-            filename:     fixResult.file_to_edit,
-            op:           'modified',
-            newContent:   applied.newContent,
-            priorContent: target.content,
-            checksumMd5:  target.checksumMd5,
-          }],
+          files: stagedFiles,
         },
       },
       problem_description: fixResult.problem,
-      pages_fixed:         [fixResult.file_to_edit],
+      pages_fixed:         stagedFiles.map(f => f.filename),
     }).eq('id', run.id),
     DB_TIMEOUT_MS, 'shopify_awaiting_approval_update',
   )
@@ -3895,12 +3941,14 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   // Inline the sendMessage fetch here (mirrors sendTelegramNotification) so we can
   // capture the message_id — attached best-effort AFTER the persist (swallowed, NOT
   // dbWrite: a failed message_id follow-up must not roll the staged run back to failed).
+  const primaryChange = editList[0].change
   const approvalMsg =
     `🤖 <b>Velyr — Shopify theme fix ready for approval</b>\n\n` +
     `<b>Problem:</b> ${escapeHtml(fixResult.problem || '—')}\n` +
-    `<b>File:</b> <code>${escapeHtml(fixResult.file_to_edit || '—')}</code>` +
+    `<b>File${stagedFiles.length > 1 ? 's' : ''}:</b> <code>${escapeHtml(stagedFiles.map(f => f.filename).join(', '))}</code>` +
     (fixResult.confidence ? `\n<b>Confidence:</b> ${escapeHtml(fixResult.confidence)}` : '') +
-    `\n\n<b>Find:</b>\n<pre>${escapeHtml(change.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(change.replace.slice(0, 600))}</pre>` +
+    `\n\n<b>Find:</b>\n<pre>${escapeHtml(primaryChange.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(primaryChange.replace.slice(0, 600))}</pre>` +
+    (stagedFiles.length > 1 ? `\n<i>(primary change shown; ${stagedFiles.length - 1} companion edit${stagedFiles.length > 2 ? 's' : ''} the fix requires ride${stagedFiles.length > 2 ? '' : 's'} along — YES applies all, NO skips all)</i>` : '') +
     `\n\nReply <b>YES</b> to apply this change to your live theme / <b>NO</b> to skip.`
   const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4086,10 +4134,13 @@ async function processGithubThemeConnection(
     await notifyInsufficientData(chatId, fixResult.reason || 'no confident high-impact fix this week')
     return
   }
-  // file_to_edit must be one of the ranked files — mirrors the GitHub/Shopify invariant.
+  // Every edited file (primary + additional_edits, item 4) must be one of the
+  // ranked files — mirrors the GitHub/Shopify invariant.
   const rankedPaths = rankerResult.ranked.map(r => r.path)
-  if (!fixResult.file_to_edit || !rankedPaths.includes(fixResult.file_to_edit)) {
-    throw new Error(`Shopify-GitHub: AI selected file outside ranked list: "${fixResult.file_to_edit}"`)
+  for (const p of [fixResult.file_to_edit, ...(fixResult.additional_edits || []).map(e => e.file_to_edit)]) {
+    if (!p || !rankedPaths.includes(p)) {
+      throw new Error(`Shopify-GitHub: AI selected file outside ranked list: "${p}"`)
+    }
   }
 
   // 3. OPEN A REAL PR (SG2). The find/replace apply + theme validation + commit
@@ -4540,10 +4591,13 @@ async function processConnection(conn: any) {
       return
     }
 
-    // file_to_edit must be one of the ranked components (no invented paths).
+    // Every edited file (primary + additional_edits, item 4) must be one of the
+    // ranked components (no invented paths).
     const rankedPaths = rankerResult.ranked.map(r => r.path)
-    if (!fixResult.file_to_edit || !rankedPaths.includes(fixResult.file_to_edit)) {
-      throw new Error(`AI selected file outside ranked list: "${fixResult.file_to_edit}"`)
+    for (const p of [fixResult.file_to_edit, ...(fixResult.additional_edits || []).map(e => e.file_to_edit)]) {
+      if (!p || !rankedPaths.includes(p)) {
+        throw new Error(`AI selected file outside ranked list: "${p}"`)
+      }
     }
 
     // Step 5: Writing fix — createPR re-fetches the file and runs the

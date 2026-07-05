@@ -1114,22 +1114,34 @@ async function handleRollbackCheck(res) {
             // superset so a future layout/ edit can't silently roll back to the wrong
             // branch. config/ stays out — it's forbidden-edit; assets/ is compiled.
             const defaultBranch = await getDefaultBranch(octokit, owner, repo)
-            const isThemeRun    = /^(layout|templates|sections|snippets)\/.+\.(liquid|json)$/i.test(run.analysis_result?.file_to_edit || '')
+            // Item 4: a fix may have touched multiple files (pages_fixed holds
+            // them all); revert every one — a partial revert of an
+            // interdependent edit set could break the site worse than the
+            // original change. Legacy runs without pages_fixed fall back to
+            // the single file_to_edit.
+            const revertFiles   = (Array.isArray(run.pages_fixed) && run.pages_fixed.length > 0)
+              ? run.pages_fixed
+              : [run.analysis_result?.file_to_edit].filter(Boolean)
+            const isThemeRun    = revertFiles.some(f => /^(layout|templates|sections|snippets)\/.+\.(liquid|json)$/i.test(f || ''))
             const baseBranch    = (isThemeRun && conn?.shopify_connected_branch) ? conn.shopify_connected_branch : defaultBranch
             const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${baseBranch}` })
             const branchName    = `agent/rollback-${run.id.slice(0, 8)}`
             await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: ref.object.sha })
 
             const parentSha = agentCommit.parents[0]?.sha
-            if (parentSha && run.analysis_result?.file_to_edit) {
-              const { data: originalFile } = await octokit.rest.repos.getContent({ owner, repo, path: run.analysis_result.file_to_edit, ref: parentSha })
-              const { data: currentFile  } = await octokit.rest.repos.getContent({ owner, repo, path: run.analysis_result.file_to_edit, ref: baseBranch })
+            if (parentSha && revertFiles.length > 0) {
+              // The squash-merge's parent predates ALL of the fix's file
+              // commits, so it is the correct restore point for every file.
+              for (const filePath of revertFiles) {
+                const { data: originalFile } = await octokit.rest.repos.getContent({ owner, repo, path: filePath, ref: parentSha })
+                const { data: currentFile  } = await octokit.rest.repos.getContent({ owner, repo, path: filePath, ref: baseBranch })
 
-              await octokit.rest.repos.createOrUpdateFileContents({
-                owner, repo, path: run.analysis_result.file_to_edit,
-                message: `revert: rollback agent change (bounce rate +${bounceDelta}pp)`,
-                content: originalFile.content, sha: currentFile.sha, branch: branchName,
-              })
+                await octokit.rest.repos.createOrUpdateFileContents({
+                  owner, repo, path: filePath,
+                  message: `revert: rollback agent change (bounce rate +${bounceDelta}pp)${revertFiles.length > 1 ? ` (${filePath})` : ''}`,
+                  content: originalFile.content, sha: currentFile.sha, branch: branchName,
+                })
+              }
 
               const { data: pr } = await octokit.rest.pulls.create({
                 owner, repo,
