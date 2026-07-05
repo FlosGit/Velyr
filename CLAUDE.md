@@ -101,7 +101,7 @@ What the staged build shipped:
 - **Bug-guards + UX (SG4)**: a `agent_connections_single_type_check` CHECK forbids a row having **both** `github_repo_name` and `shopify_shop_domain` (both-NULL still allowed) so `processConnection` routing can't be ambiguous. The rollback theme-detection regex (`api/agent/run.js`) is `/^(layout|templates|sections|snippets)\/.+\.(liquid|json)$/i`. The React PostHog snippet message provably can't reach a theme run (the SG1 fork returns before `maybeRunSnippetSetup`; `setupPostHogForConnection` only writes the DB), so no gating was needed. The post-merge Telegram says "Shopify is syncing the change to your connected theme" for a theme run (`handleApprove`), byte-identical otherwise.
 
 **Deliberately deferred (not built, by decision):**
-- `liquidDelimitersBalanced` `{% raw %}` / inline-`<script>`-brace edge-case hardening — the validator is intentionally conservative (flags only dropped opens, never stray closes) and the merchant reviews every PR.
+- ~~`liquidDelimitersBalanced` hardening~~ — **built 2026-07-05**: `validateThemeSyntax` now runs a second layer, `validateLiquidBlocks` (`liquid-block-validate.ts`, provable-only block-tag pairing + `{% schema %}` JSON parse; a `{% liquid %}` tag opts the file out; node-tested via `scripts/test-liquid-blocks.mjs`). The delimiter layer itself keeps its original conservative asymmetry (flags only dropped opens, never stray closes).
 - `subscription_id` text-vs-uuid schema unification (the Stripe webhook keys on `user_id`, the agent on `auth_user_id`; a pre-existing inconsistency, not Shopify-specific).
 
 ### Shopify-direct path (`shopify_direct`, Stages 1–4)

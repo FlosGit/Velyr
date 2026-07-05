@@ -30,18 +30,36 @@ eq('concurrency: matching checksum → ok',
 
 eq('concurrency: changed checksum → conflict (merchant edited)',
   classifyConcurrency([mod('sections/hero.liquid', 'abc')], { 'sections/hero.liquid': 'DEF' }),
-  { ok: false, conflicts: ['sections/hero.liquid'] })
+  { ok: false, conflicts: ['sections/hero.liquid'], unverifiable: [] })
 
 eq('concurrency: file vanished (current null) → conflict',
   classifyConcurrency([mod('sections/hero.liquid', 'abc')], { 'sections/hero.liquid': null }),
-  { ok: false, conflicts: ['sections/hero.liquid'] })
+  { ok: false, conflicts: ['sections/hero.liquid'], unverifiable: [] })
 
 eq('concurrency: file missing from map → conflict',
   classifyConcurrency([mod('sections/hero.liquid', 'abc')], {}),
-  { ok: false, conflicts: ['sections/hero.liquid'] })
+  { ok: false, conflicts: ['sections/hero.liquid'], unverifiable: [] })
 
-eq('concurrency: null stored checksum (legacy) → not blocked',
+eq('concurrency: null stored checksum, LENIENT default (rollback path) → not blocked',
   classifyConcurrency([mod('sections/hero.liquid', null)], { 'sections/hero.liquid': 'whatever' }),
+  { ok: true })
+
+eq('concurrency: null stored checksum, STRICT (forward write) → unverifiable, blocked',
+  classifyConcurrency([mod('sections/hero.liquid', null)], { 'sections/hero.liquid': 'whatever' }, { strictNullChecksum: true }),
+  { ok: false, conflicts: [], unverifiable: ['sections/hero.liquid'] })
+
+eq('concurrency: strict, ALL files null (previously bypassed the whole check) → blocked',
+  classifyConcurrency([mod('sections/a.liquid', null), mod('sections/b.liquid', null)], {}, { strictNullChecksum: true }),
+  { ok: false, conflicts: [], unverifiable: ['sections/a.liquid', 'sections/b.liquid'] })
+
+eq('concurrency: strict, mixed changed + unverifiable → both reported',
+  classifyConcurrency(
+    [mod('sections/a.liquid', 'a1'), mod('sections/b.liquid', null)],
+    { 'sections/a.liquid': 'EDITED' }, { strictNullChecksum: true }),
+  { ok: false, conflicts: ['sections/a.liquid'], unverifiable: ['sections/b.liquid'] })
+
+eq('concurrency: strict does not touch clean verified files',
+  classifyConcurrency([mod('sections/hero.liquid', 'abc')], { 'sections/hero.liquid': 'abc' }, { strictNullChecksum: true }),
   { ok: true })
 
 eq('concurrency: created file is skipped (no prior checksum)',
@@ -52,7 +70,7 @@ eq('concurrency: mixed — one clean, one edited → only the edited conflicts',
   classifyConcurrency(
     [mod('sections/a.liquid', 'a1'), mod('sections/b.liquid', 'b1')],
     { 'sections/a.liquid': 'a1', 'sections/b.liquid': 'b2' }),
-  { ok: false, conflicts: ['sections/b.liquid'] })
+  { ok: false, conflicts: ['sections/b.liquid'], unverifiable: [] })
 
 // ── resolveAppliedFiles (partial-batch) ──────────────────────────────────────
 eq('partial-batch: only upserted files are returned',

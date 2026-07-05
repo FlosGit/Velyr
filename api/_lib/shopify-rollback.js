@@ -35,19 +35,35 @@
 //
 // A file is a CONFLICT when its current checksum differs from the stored one, OR the
 // file has vanished (current == null) — in both cases the live theme no longer matches
-// what we analyzed, so overwriting would clobber a merchant edit. A null STORED checksum
-// (created file, or a legacy pending_write) is unverifiable and is NOT treated as a
-// conflict here (created files get an existence guard at write time via
-// classifyCreatedCollisions).
-export function classifyConcurrency(files, currentChecksumByFilename) {
+// what we analyzed, so overwriting would clobber a merchant edit.
+//
+// A null STORED checksum on a MODIFIED file is unverifiable, and the two callers need
+// opposite defaults (opts.strictNullChecksum):
+//   • FORWARD WRITE (applyShopifyDirectWrite) passes strict: true — an unverifiable
+//     file cannot be concurrency-checked at all, so writing it could silently clobber
+//     a merchant edit made since analysis. Reported in `unverifiable` (kept separate
+//     from `conflicts` so the caller can phrase the abort honestly).
+//   • ROLLBACK (executeShopifyDirectRollback) uses the lenient default — its null
+//     means the post-apply checksum re-query failed, and blocking a rollback (leaving
+//     a bounce-raising change live) is worse than an unguarded restore.
+// Created files are always skipped here; they get an existence guard at write time
+// via classifyCreatedCollisions.
+export function classifyConcurrency(files, currentChecksumByFilename, opts = {}) {
+  const strict = opts.strictNullChecksum === true
   const conflicts = []
+  const unverifiable = []
   for (const f of files) {
     if (f.op !== 'modified') continue          // only modified files carry a prior checksum
-    if (f.checksumMd5 == null) continue         // unverifiable (legacy) → do not block
+    if (f.checksumMd5 == null) {
+      if (strict) unverifiable.push(f.filename)
+      continue
+    }
     const current = currentChecksumByFilename ? currentChecksumByFilename[f.filename] : undefined
     if (current == null || current !== f.checksumMd5) conflicts.push(f.filename)
   }
-  return conflicts.length === 0 ? { ok: true } : { ok: false, conflicts }
+  return (conflicts.length === 0 && unverifiable.length === 0)
+    ? { ok: true }
+    : { ok: false, conflicts, unverifiable }
 }
 
 // ── 1b. CREATED-FILE EXISTENCE GUARD ─────────────────────────────────────────

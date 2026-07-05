@@ -386,25 +386,43 @@ async function applyShopifyDirectWrite(run, conn, chatId) {
   const shop = conn.shopify_shop_domain
 
   // 1. Optimistic concurrency — re-query the CURRENT checksum of every modified file.
-  const modifiedFilenames = pending.files
-    .filter(f => f.op === 'modified' && f.checksumMd5 != null)
-    .map(f => f.filename)
-  if (modifiedFilenames.length > 0) {
-    const cks = await queryThemeChecksums(shop, token, pending.themeId, modifiedFilenames)
-    if (!cks.ok) {
-      // Couldn't read the live state → never overwrite blind.
-      await supabase.from('agent_runs').update({
-        status: 'failed', error_message: `Pre-write checksum re-query failed: ${cks.message}`.slice(0, 500),
-      }).eq('id', run.id)
-      return sendMessage(chatId, `❌ I couldn't verify your theme's current state, so I applied nothing. The agent will retry on the next run.`)
+  //    STRICT here (item 7): a modified file staged with a null analysis-time checksum
+  //    (absent on the Shopify payload, or a legacy pending_write) cannot be
+  //    concurrency-checked at all, so it must ABORT — writing it blind could clobber a
+  //    merchant edit made between analysis and YES. Previously null-checksum files were
+  //    skipped, and if ALL files were null the entire check was bypassed. The rollback
+  //    path below deliberately keeps the lenient default (blocking a rollback is worse
+  //    than an unguarded restore — see executeShopifyDirectRollback).
+  const modifiedFiles     = pending.files.filter(f => f.op === 'modified')
+  const checkableFilenames = modifiedFiles.filter(f => f.checksumMd5 != null).map(f => f.filename)
+  if (modifiedFiles.length > 0) {
+    let byFilename = {}
+    if (checkableFilenames.length > 0) {
+      const cks = await queryThemeChecksums(shop, token, pending.themeId, checkableFilenames)
+      if (!cks.ok) {
+        // Couldn't read the live state → never overwrite blind.
+        await supabase.from('agent_runs').update({
+          status: 'failed', error_message: `Pre-write checksum re-query failed: ${cks.message}`.slice(0, 500),
+        }).eq('id', run.id)
+        return sendMessage(chatId, `❌ I couldn't verify your theme's current state, so I applied nothing. The agent will retry on the next run.`)
+      }
+      byFilename = cks.byFilename
     }
-    const concurrency = classifyConcurrency(pending.files, cks.byFilename)
+    const concurrency = classifyConcurrency(pending.files, byFilename, { strictNullChecksum: true })
     if (!concurrency.ok) {
+      const changed      = concurrency.conflicts || []
+      const unverifiable = concurrency.unverifiable || []
+      const parts = []
+      if (changed.length)      parts.push(`changed since analysis: ${changed.join(', ')}`)
+      if (unverifiable.length) parts.push(`unverifiable (no analysis-time checksum): ${unverifiable.join(', ')}`)
       await supabase.from('agent_runs').update({
         status: 'shopify_concurrency_abort', completed_at: new Date().toISOString(),
-        error_message: `Theme changed since analysis: ${concurrency.conflicts.join(', ')}`.slice(0, 500),
+        error_message: `Theme write aborted — ${parts.join('; ')}`.slice(0, 500),
       }).eq('id', run.id)
-      return sendMessage(chatId, `🛑 Your theme changed since we analyzed it (<code>${concurrency.conflicts.map(escapeHtml).join(', ')}</code>), so I did <b>not</b> apply this — I won't overwrite your edit. Re-run the agent to analyze the current version.`)
+      const msg = changed.length
+        ? `🛑 Your theme changed since we analyzed it (<code>${changed.map(escapeHtml).join(', ')}</code>), so I did <b>not</b> apply this — I won't overwrite your edit. Re-run the agent to analyze the current version.`
+        : `🛑 I couldn't verify that your theme is unchanged since analysis (<code>${unverifiable.map(escapeHtml).join(', ')}</code>), so I did <b>not</b> apply this — safer than risking an overwrite. Re-run the agent to analyze the current version.`
+      return sendMessage(chatId, msg)
     }
   }
 

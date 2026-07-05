@@ -10,6 +10,7 @@ import { readDeepContext, type DeepContext, type DeepComponent } from './deep-re
 import { buildReceipt } from './receipt-builder.ts'
 import { fileToRoutePath } from './route-map.ts'
 import { decidePostHogInjection, buildMarkerBlock } from './posthog-inject.mjs'
+import { validateLiquidBlocks } from './liquid-block-validate.ts'
 
 // Stage 5.D: Octokit with automatic rate-limit + secondary-rate-limit
 // handling. Honors GitHub's Retry-After header and retries a bounded number
@@ -181,14 +182,17 @@ function validateSyntax(filePath: string, content: string): { ok: true } | { ok:
   }
 }
 
-// ─── THEME (LIQUID / JSON) VALIDATION (SG2) ──────────────────────────────────
-// validateSyntax's analogue for the Shopify-via-GitHub path. DELIBERATELY
-// delimiter-level only for Liquid — we do NOT attempt full block-tag pairing
-// (if/endif, for/endfor, case, capture, form, paginate, schema, style, javascript,
-// comment, raw …): Liquid has many block tags and a naive checker would
-// FALSE-REJECT valid markup (e.g. a bare for-loop), which is worse than letting a
-// rare edge through (the merchant still reviews the PR). So for .liquid we only
-// confirm {{ }} / {% %} delimiters are properly paired — this catches the common
+// ─── THEME (LIQUID / JSON) VALIDATION (SG2 + item-7 hardening) ───────────────
+// validateSyntax's analogue for the Shopify theme paths. Two layers for .liquid:
+// 1. Delimiter pairing (below) — catches a dropped `}}` / `%}`.
+// 2. validateLiquidBlocks (liquid-block-validate.ts) — provable-only block-tag
+//    pairing (a dropped {% endif %}, a stray {% endfor %}, bad interleaving)
+//    plus {% schema %} JSON parsing. The original SG2 false-positive concern is
+//    preserved by contract: unknown tags are ignored, raw/comment/schema bodies
+//    are excluded, and a file containing {% liquid %} opts out of block checks
+//    entirely — only certainly-broken markup is rejected.
+// For layer 1 we confirm {{ }} / {% %} delimiters are properly paired — this
+// catches the common
 // LLM error of dropping a closing brace WITHOUT flagging the bare `}}` / `}` that
 // legitimately appears in inline <script>/<style> blocks (see liquidDelimitersBalanced).
 // For .json (templates) we JSON.parse and reject on a parse error.
@@ -238,9 +242,12 @@ function validateThemeSyntax(filePath: string, content: string): { ok: true } | 
     }
   }
   if (ext === 'liquid') {
-    return liquidDelimitersBalanced(content)
-      ? { ok: true }
-      : { ok: false, reason: 'unbalanced Liquid delimiters ({{ }} / {% %}) in the modified file' }
+    if (!liquidDelimitersBalanced(content)) {
+      return { ok: false, reason: 'unbalanced Liquid delimiters ({{ }} / {% %}) in the modified file' }
+    }
+    // Layer 2 assumes delimiter balance (its tag scan relies on every {% being
+    // terminated), so it must run after the check above.
+    return validateLiquidBlocks(content)
   }
   // Any other extension: nothing theme-specific to check.
   return { ok: true }
@@ -772,8 +779,10 @@ async function readShopifyTheme(
       if (!SHOPIFY_KEEP_RE.test(node.filename)) continue   // authoritative client-side re-filter
       const content = node.body?.content
       if (typeof content === 'string') {
-        // checksumMd5 may be absent on some payloads — null is fine (concurrency
-        // re-check treats a null stored checksum as "can't verify", see Stage 3).
+        // checksumMd5 may be absent on some payloads — stored as null. Item 7:
+        // the YES-time forward write treats a null analysis-time checksum as
+        // UNVERIFIABLE and aborts (strictNullChecksum in applyShopifyDirectWrite)
+        // rather than writing blind; only the rollback path stays lenient.
         files.push({ filename: node.filename, content, size: Number(node.size) || 0, checksumMd5: node.checksumMd5 ?? null })
       } else {
         // A non-Text body (Base64 / Url) or an EMPTY body on a kept liquid file
