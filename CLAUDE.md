@@ -205,7 +205,7 @@ See `.env.example`. Note the **inconsistent prefixes** — Supabase uses `NEXT_P
 Required:
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` — frontend Supabase client
 - `SUPABASE_SERVICE_ROLE_KEY` — backend API operations (never expose)
-- `OPENROUTER_API_KEY` — Claude AI for the agent's analysis passes (model: `anthropic/claude-sonnet-4-5`)
+- `OPENROUTER_API_KEY` — Claude AI for the agent's analysis passes (model: `anthropic/claude-sonnet-4.6` — OpenRouter slugs use a dot, not the native dash)
 - `GOOGLE_PAGESPEED_API_KEY` — PageSpeed/Core Web Vitals signal for the agent run
 - `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY_BASE64` / `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` / `GITHUB_OAUTH_STATE_SECRET` — GitHub App + OAuth onboarding
 - `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` / `SHOPIFY_OAUTH_STATE_SECRET` — Shopify-direct OAuth (Supabase Edge Function secrets, read by `supabase/functions/shopify-oauth`; app config in `shopify.app.toml`)

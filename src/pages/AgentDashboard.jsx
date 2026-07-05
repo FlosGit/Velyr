@@ -527,7 +527,9 @@ function PendingApprovalCard({run}) {
           )}
           <div style={{display:'flex',justifyContent:'space-between',fontSize:10}}>
             <span style={{color:C.textLight}}>Auto-rollback</span>
-            <span style={{color:C.textMuted}}>48h if no uplift</span>
+            {/* Honest trigger: proposed when bounce RISES ≥15pp in the 48h
+                window — absence of uplift alone never triggers a rollback. */}
+            <span style={{color:C.textMuted}}>if bounce +15pp in 48h</span>
           </div>
         </div>
       </div>
@@ -2108,11 +2110,21 @@ function RunDetail({run, onClose}) {
             )}
           </div>
         )}
-        {run.screenshot_before&&(
+        {(run.screenshot_before||run.screenshot_after)&&(
           <div style={{marginBottom:8}}>
-            <SectionLabel style={{marginBottom:6}}>Before screenshot</SectionLabel>
-            <img src={run.screenshot_before} alt="Page before the change"
-              style={{width:'100%',borderRadius:9,border:`1px solid ${C.border}`,display:'block'}}/>
+            <SectionLabel style={{marginBottom:6}}>
+              {run.screenshot_before&&run.screenshot_after?'Before / after':run.screenshot_before?'Before screenshot':'After screenshot'}
+            </SectionLabel>
+            <div style={{display:'grid',gridTemplateColumns:run.screenshot_before&&run.screenshot_after?'1fr 1fr':'1fr',gap:8}}>
+              {run.screenshot_before&&(
+                <img src={run.screenshot_before} alt="Page before the change"
+                  style={{width:'100%',borderRadius:9,border:`1px solid ${C.border}`,display:'block'}}/>
+              )}
+              {run.screenshot_after&&(
+                <img src={run.screenshot_after} alt="Page after the change"
+                  style={{width:'100%',borderRadius:9,border:`1px solid ${C.border}`,display:'block'}}/>
+              )}
+            </div>
           </div>
         )}
         {run.pr_url&&(

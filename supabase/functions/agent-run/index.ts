@@ -71,9 +71,12 @@ const LLM_CAPS = {
   MAX_PROMPT_BYTES: Number(Deno.env.get('LLM_MAX_PROMPT_BYTES') || String(500 * 1024)),
 } as const
 
-// Pricing for anthropic/claude-sonnet-4-5 via OpenRouter, in EUR per million
-// tokens. Set conservative-high so the spend counter trips a hair early. Re-
-// tune via env vars if OpenRouter pricing moves.
+// Pricing for anthropic/claude-sonnet-4.6 via OpenRouter (the model string in
+// callLLMCapped + generateMonthlyRoast — keep in sync), in EUR per million
+// tokens. Verified against live GET /models 2026-07-05: $3/$15 per M, same as
+// 4.5. EUR numbers deliberately mirror the USD price 1:1, i.e. conservative-
+// high by the FX gap, so the spend counter trips a hair early. Re-tune via
+// env vars if OpenRouter pricing moves.
 const LLM_PRICING_EUR_PER_M = {
   INPUT:  Number(Deno.env.get('LLM_INPUT_EUR_PER_M')  || '3.0'),
   OUTPUT: Number(Deno.env.get('LLM_OUTPUT_EUR_PER_M') || '15.0'),
