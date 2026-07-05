@@ -1484,22 +1484,56 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
     let engagement: any = null
     if (uniqueSessions >= NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D) {
       try {
+        // Item 3b: group by $device_type too (higher limits compensate for the
+        // extra group key), then merge client-side into per-page overall values
+        // (sample-weighted — identical numbers to the pre-split query) plus a
+        // Mobile/Desktop breakdown. Mobile dominates conversion problems, and
+        // an aggregate scroll depth hides "mobile users never see the CTA".
         const [scrollRes, clicksRes] = await Promise.all([
-          query({ kind: 'EventsQuery', event: '$pageleave',   after: sevenDaysAgo, before: today, limit: 10, orderBy: ['count() DESC'],
-                  select: ['properties.$prev_pageview_pathname', 'avg(toFloat(properties.$prev_pageview_max_scroll_percentage))', 'count()'],
+          query({ kind: 'EventsQuery', event: '$pageleave',   after: sevenDaysAgo, before: today, limit: 24, orderBy: ['count() DESC'],
+                  select: ['properties.$prev_pageview_pathname', 'properties.$device_type', 'avg(toFloat(properties.$prev_pageview_max_scroll_percentage))', 'count()'],
                   where:  ['properties.$prev_pageview_max_scroll_percentage is not null', 'properties.$prev_pageview_pathname is not null'] }),
-          query({ kind: 'EventsQuery', event: '$autocapture', after: sevenDaysAgo, before: today, limit: 8,  orderBy: ['count() DESC'],
-                  select: ['properties.$el_text', 'count()'],
+          query({ kind: 'EventsQuery', event: '$autocapture', after: sevenDaysAgo, before: today, limit: 16,  orderBy: ['count() DESC'],
+                  select: ['properties.$el_text', 'properties.$device_type', 'count()'],
                   where:  ["properties.$event_type = 'click'", "properties.$el_text != ''"] }),
         ])
         const [scroll, clicks] = await Promise.all([scrollRes.json(), clicksRes.json()])
-        const scrollByPage = (scroll.results || [])
-          .filter((r: any) => r[0] && typeof r[1] === 'number')
-          .map((r: any) => ({ path: r[0], avgMaxScrollPct: Math.max(0, Math.min(100, Math.round(r[1] * 100))), samples: r[2] || 0 }))
-        const topClicks = (clicks.results || [])
-          .filter((r: any) => r[0])
-          .map((r: any) => ({ text: String(r[0]).replace(/\s+/g, ' ').trim().slice(0, 60), clicks: r[1] || 0 }))
-          .filter((c: any) => c.text)
+        const pctOf = (sum: number, n: number) => Math.max(0, Math.min(100, Math.round((sum / n) * 100)))
+        const scrollAgg = new Map<string, any>()
+        for (const r of (scroll.results || [])) {
+          const path = r[0], device = String(r[1] || ''), avg = r[2], n = Number(r[3]) || 0
+          if (!path || typeof avg !== 'number' || n <= 0) continue
+          let e = scrollAgg.get(path)
+          if (!e) { e = { path, sum: 0, samples: 0, byDevice: {} }; scrollAgg.set(path, e) }
+          e.sum += avg * n; e.samples += n
+          if (device === 'Mobile' || device === 'Desktop') {
+            const d = e.byDevice[device] || { sum: 0, samples: 0 }
+            d.sum += avg * n; d.samples += n
+            e.byDevice[device] = d
+          }
+        }
+        const scrollByPage = [...scrollAgg.values()]
+          .sort((a: any, b: any) => b.samples - a.samples).slice(0, 10)
+          .map((e: any) => ({
+            path: e.path, avgMaxScrollPct: pctOf(e.sum, e.samples), samples: e.samples,
+            byDevice: Object.fromEntries(Object.entries(e.byDevice).map(([k, v]: [string, any]) =>
+              [k, { avgMaxScrollPct: pctOf(v.sum, v.samples), samples: v.samples }])),
+          }))
+        const clickAgg = new Map<string, any>()
+        for (const r of (clicks.results || [])) {
+          const text = String(r[0] || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+          const device = String(r[1] || ''), n = Number(r[2]) || 0
+          if (!text || n <= 0) continue
+          let e = clickAgg.get(text)
+          if (!e) { e = { text, clicks: 0, mobile: 0, deviced: 0 }; clickAgg.set(text, e) }
+          e.clicks += n
+          if (device) { e.deviced += n; if (device === 'Mobile') e.mobile += n }
+        }
+        const topClicks = [...clickAgg.values()]
+          .sort((a: any, b: any) => b.clicks - a.clicks).slice(0, 8)
+          // mobileShare only when device data exists on the rows (older events
+          // may lack $device_type) — null must render as "unknown", never 0%.
+          .map((e: any) => ({ text: e.text, clicks: e.clicks, mobileShare: e.deviced > 0 ? Math.round((e.mobile / e.deviced) * 100) : null }))
         if (scrollByPage.length || topClicks.length) engagement = { scrollByPage, topClicks }
       } catch (err) {
         console.warn('PostHog engagement signals skipped (core analytics unaffected):', err)
@@ -2973,9 +3007,13 @@ function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any)
     const top = (a.topPages || []).slice(0, 5).map((p: any) => `${p.path} (${p.views} views)`).join(', ')
     lines.push(`Last 7 days: ${a.totalPageviews} pageviews, ${a.uniqueVisitors} sessions, ${a.bounceRate}% bounce rate${a.mobilePercent != null ? `, ${a.mobilePercent}% mobile` : ''}. Top pages: ${top || '—'}.`)
     const eng = a.engagement
-    const scroll = (eng?.scrollByPage || []).slice(0, 5).map((s: any) => `${s.path} → ${s.avgMaxScrollPct}% (${s.samples} leaves)`).join('; ')
+    const scroll = (eng?.scrollByPage || []).slice(0, 5).map((s: any) => {
+      const m = s.byDevice?.Mobile, d = s.byDevice?.Desktop
+      const split = (m || d) ? ` [mob ${m ? `${m.avgMaxScrollPct}%` : '—'} / desk ${d ? `${d.avgMaxScrollPct}%` : '—'}]` : ''
+      return `${s.path} → ${s.avgMaxScrollPct}%${split} (${s.samples} leaves)`
+    }).join('; ')
     if (scroll) lines.push(`Scroll depth (avg max-scroll % per page — low % = visitors never see the lower sections): ${scroll}`)
-    const clicks = (eng?.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks})`).join(', ')
+    const clicks = (eng?.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks}${c.mobileShare != null ? `, ${c.mobileShare}% mob` : ''})`).join(', ')
     if (clicks) lines.push(`Most-clicked elements (autocapture): ${clicks}`)
   } else {
     lines.push('No analytics data available.')
@@ -3050,9 +3088,13 @@ async function callAIForFix(
 
   const eng = a?.engagement
   const engagementLines = eng ? `
-- Scroll depth (avg max-scroll % per page, from $pageleave — low % = visitors stop before seeing the rest): ${(eng.scrollByPage || []).slice(0, 5).map((s: any) => `${s.path} → ${s.avgMaxScrollPct}% (${s.samples} leaves)`).join('; ') || 'n/a'}
-- Most-clicked elements (autocapture, by visible label): ${(eng.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks})`).join(', ') || 'n/a'}
-  Use scroll % to judge whether a section/CTA is actually seen, and clicks to see what visitors engage with vs ignore. This is real behavior — prefer it over assumptions from code layout.` : ''
+- Scroll depth (avg max-scroll % per page, from $pageleave — low % = visitors stop before seeing the rest; [mob/desk] = per-device split): ${(eng.scrollByPage || []).slice(0, 5).map((s: any) => {
+    const m = s.byDevice?.Mobile, d = s.byDevice?.Desktop
+    const split = (m || d) ? ` [mob ${m ? `${m.avgMaxScrollPct}%` : '—'} / desk ${d ? `${d.avgMaxScrollPct}%` : '—'}]` : ''
+    return `${s.path} → ${s.avgMaxScrollPct}%${split} (${s.samples} leaves)`
+  }).join('; ') || 'n/a'}
+- Most-clicked elements (autocapture, by visible label; % mob = share of clicks from mobile): ${(eng.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks}${c.mobileShare != null ? `, ${c.mobileShare}% mob` : ''})`).join(', ') || 'n/a'}
+  Use scroll % to judge whether a section/CTA is actually seen, and clicks to see what visitors engage with vs ignore. When the mobile scroll depth is much lower than desktop, pair it with the attached mobile screenshot — the highest-impact fixes are usually above-the-fold on mobile. This is real behavior — prefer it over assumptions from code layout.` : ''
   const analyticsContext = a ? `REAL ANALYTICS (last 7 days):
 - Pageviews: ${a.totalPageviews} · Sessions: ${a.uniqueVisitors} · Bounce: ${a.bounceRate}%
 - Mobile: ${a.mobilePercent != null ? `${a.mobilePercent}%` : 'unknown'} · vs last week: ${a.trafficChange != null ? `${a.trafficChange > 0 ? '+' : ''}${a.trafficChange}%` : 'first week'}
