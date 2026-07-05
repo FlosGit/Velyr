@@ -63,7 +63,7 @@ Auth: cron requests must carry either Vercel's `x-vercel-cron` header or `x-cron
 2. **RA2 `import-graph.ts`** — BFS over local imports from the entry points (bounded by `AGENT_GRAPH_MAX_DEPTH` / `_MAX_FILES`), one `getBlob` per file via the tree's SHAs. Nodes cache `firstChars` only.
 3. **RA3 `component-ranker.ts`** — LLM Pass 1 ranks graph components by conversion impact (reads `firstChars`, never re-fetches), with a sparse-graph gate and a conversion-vocabulary safety override.
 4. **RA4 `deep-reader.ts`** — reads full source of the ranked components (+ supporting files) within a byte budget.
-5. **RA5 (in `index.ts` `callAIForFix`)** — LLM Pass 2 returns one `file_to_edit` + `code_change` + honesty fields (`confidence`, `blind_spots`, `rollback_signal`, …) or `{ skip }`.
+5. **RA5 (in `index.ts` `callAIForFix`)** — LLM Pass 2 returns one `file_to_edit` + `code_change` + honesty fields (`confidence`, `blind_spots`, `rollback_signal`, …) or `{ skip }`. Since item 3a it also receives desktop+mobile screenshots of the live target page (site root, or the focus-pinned PostHog-real path) as `image_url` input: captures start before Pass 1 so they overlap LLM latency, the model-input wait is hard-budgeted (`AGENT_FIX_SCREENSHOT_BUDGET_MS`, default 20s — budget miss ⇒ Pass 2 runs without images), an image-bearing call failure retries once without images, and the desktop shot is reused as the `screenshot_before` artifact (the old serial post-createPR capture — the WallClockTimeout culprit — is gone).
 6. **createPR** — forbidden-path allowlist → whitespace-normalized find guard → Babel syntax check, all before branching.
 7. **RA7 `receipt-builder.ts`** — the PR body is a "receipt" of what was/wasn't inspected.
 

@@ -2545,20 +2545,21 @@ async function maybeRunSnippetSetup(
 // channel and identifies the recipient by telegram_chat_id.)
 
 // ─── SCREENSHOTS (3a) ─────────────────────────────────────────────────────────
-async function captureScreenshot(url: string): Promise<string | null> {
+async function captureScreenshot(url: string, viewport: { width?: number; height?: number; scale?: number } = {}): Promise<string | null> {
   const apiKey = Deno.env.get('SCREENSHOTONE_API_KEY')
   if (!apiKey) { console.warn('SCREENSHOTONE_API_KEY not set — skipping screenshot'); return null }
   if (!url) return null
   try {
     const params = new URLSearchParams({
-      access_key: apiKey, url, viewport_width: '1280', viewport_height: '800',
+      access_key: apiKey, url,
+      viewport_width: String(viewport.width ?? 1280), viewport_height: String(viewport.height ?? 800),
       // No block_ads/block_cookie_banners: ScreenshotOne's ad-blocker blocks
       // analytics endpoints (e.g. PostHog), which throws during a customer
       // SPA's boot and leaves the page blank — only the CSS background paints.
       // cache 'false' (not 'true' + cache_ttl): an early broken run cached a solid
       // black frame under the shared cache-key, and every later run was served that
       // stale image with NO error. Render fresh every time so it can't recur.
-      device_scale_factor: '1', format: 'png', cache: 'false',
+      device_scale_factor: String(viewport.scale ?? 1), format: 'png', cache: 'false',
       // No wait_for_selector / error_on_selector_not_found: '#root > *' never
       // matched in ScreenshotOne's headless and caused FALSE timeouts even though
       // the page renders perfectly (proven by a manual load + delay + no-selector
@@ -2602,16 +2603,63 @@ async function captureScreenshot(url: string): Promise<string | null> {
   }
 }
 
-// Best-effort before-screenshot for the two Shopify paths (parity with the
-// GitHub path's inline screenshot_before). Deliberately runs AFTER the
-// approval-status persist + Telegram send — the fix only goes live on the
-// later YES, so this is still a true "before", and a slow/failed capture
-// (ScreenshotOne waits up to ~35s) can never strand a run in 'running' with a
-// PR/staged write already created, or delay the YES prompt. Every failure mode
-// degrades to "no screenshot in the dashboard" (exactly today's behavior).
-async function attachBeforeScreenshot(runId: string, websiteUrl: string | null) {
-  if (!websiteUrl) return
-  const url = await captureScreenshot(websiteUrl)
+// ─── ITEM 3a: PRE-PASS-2 SCREENSHOT GROUNDING ────────────────────────────────
+// Start desktop+mobile captures of the page the fix will most likely target
+// BEFORE Pass 1/2, so (a) the model can ground visual claims in the real
+// rendering instead of inferring layout from code, and (b) the capture latency
+// overlaps the ranker/deep-read/Pass-2 LLM calls instead of adding a serial
+// wait after createPR (the old inline capture — the WallClockTimeout culprit —
+// is replaced by awaiting these already-in-flight promises).
+// Target page: the owner's focus pin when set — a REAL, PostHog-derived path
+// (agent_funnel_pages.page_path: visitors actually loaded it) — else the site
+// root. NEVER a fileToRoutePath-derived guess (the black-frame root cause).
+type FixShots = { pagePath: string; desktop: Promise<string | null>; mobile: Promise<string | null> }
+type FixScreenshots = { pagePath: string; desktopUrl: string | null; mobileUrl: string | null }
+
+function startFixScreenshots(websiteUrl: string | null, focusPagePath: string | null): FixShots | null {
+  if (!websiteUrl) return null
+  const pinned = focusPagePath && /^\/[A-Za-z0-9\-._~!$&'()*+,;=:@%/]*$/.test(focusPagePath) ? focusPagePath : null
+  const target = pinned ? websiteUrl.replace(/\/+$/, '') + pinned : websiteUrl
+  return {
+    pagePath: pinned || '/',
+    desktop: captureScreenshot(target),
+    mobile:  captureScreenshot(target, { width: 390, height: 844, scale: 2 }),
+  }
+}
+
+// HARD model-input budget (option 1, 2026-07-05): if the captures haven't both
+// settled by here, Pass 2 runs without images — exactly the pre-3a behavior.
+// The promises keep running; the desktop one is still awaited later as the
+// screenshot_before artifact, so a budget miss costs the model input only.
+const FIX_SCREENSHOT_BUDGET_MS = Number(Deno.env.get('AGENT_FIX_SCREENSHOT_BUDGET_MS') || '20000')
+
+async function awaitShotsForModel(shots: FixShots | null, runId: string): Promise<FixScreenshots | null> {
+  if (!shots) return null
+  let timer: number | undefined
+  const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), FIX_SCREENSHOT_BUDGET_MS) as unknown as number })
+  const both = Promise.allSettled([shots.desktop, shots.mobile])
+  const raced = await Promise.race([both, timeout])
+  clearTimeout(timer)
+  if (raced === 'timeout') {
+    slog('warn', 'fix_screenshot_budget_exceeded', { runId, budgetMs: FIX_SCREENSHOT_BUDGET_MS })
+    return null
+  }
+  const [d, m] = raced as PromiseSettledResult<string | null>[]
+  const desktopUrl = d.status === 'fulfilled' ? d.value : null
+  const mobileUrl  = m.status === 'fulfilled' ? m.value : null
+  if (!desktopUrl && !mobileUrl) return null
+  return { pagePath: shots.pagePath, desktopUrl, mobileUrl }
+}
+
+// Best-effort before-screenshot artifact for the two Shopify paths (parity with
+// the GitHub path's inline screenshot_before). Still runs AFTER the
+// approval-status persist + Telegram send — but since 3a it AWAITS the desktop
+// capture already started before Pass 2 (usually settled by now) instead of
+// firing a fresh one. Every failure mode degrades to "no screenshot in the
+// dashboard" (exactly the old behavior).
+async function attachBeforeScreenshot(runId: string, shot: Promise<string | null> | null) {
+  if (!shot) return
+  const url = await shot
   if (!url) return
   await dbWrite(
     supabase.from('agent_runs').update({ screenshot_before: url }).eq('id', runId),
@@ -2871,13 +2919,22 @@ Make it sound like a smart friend being honest. Direct second person. No headers
 // closure; intentionally generic so future light LLM calls reuse it. The
 // monthly-spend ceiling is enforced once per run in processConnection's
 // pre-flight (before this is ever reached).
-async function callLLMCapped(subscriptionId: string, system: string, user: string, maxTokens: number, callerLabel: string): Promise<string> {
+async function callLLMCapped(subscriptionId: string, system: string, user: string, maxTokens: number, callerLabel: string, imageUrls: string[] = []): Promise<string> {
   const requestBody = JSON.stringify({
     model: 'anthropic/claude-sonnet-4.6',
     max_tokens: maxTokens,
     messages: [
       { role: 'system', content: system },
-      { role: 'user',   content: user },
+      // Multimodal (item 3a): screenshot URLs ride as image_url blocks in the
+      // OpenRouter schema. Plain string content when no images — byte-identical
+      // to the pre-3a wire format for every non-fix caller.
+      {
+        role: 'user',
+        content: imageUrls.length === 0 ? user : [
+          { type: 'text', text: user },
+          ...imageUrls.map(u => ({ type: 'image_url', image_url: { url: u } })),
+        ],
+      },
     ],
   })
   assertPromptSize(requestBody, callerLabel)
@@ -2972,6 +3029,7 @@ async function callAIForFix(
   previousFixes: string[],
   guardrails: any,
   focusPagePath: string | null = null,
+  screenshots: FixScreenshots | null = null,
 ): Promise<FixResult> {
   const a = analytics?.last7Days
 
@@ -3023,6 +3081,17 @@ ${funnelAnalysis.funnelPages.filter((p: any) => p.views > 0).map((p: any) => `- 
     ? `OWNER PRIORITY: the site owner explicitly asked THIS run to focus on the page "${focusPagePath}". If a credible conversion problem exists on that page (or in a component that renders it), choose it as the #1 problem. Only pick a different area if nothing plausible can be improved there — and say so in ranked_higher_than.`
     : ''
 
+  // Item 3a: real renderings attached as image input. TRUSTED context (our own
+  // fresh capture of the customer's live site), so the descriptor sits outside
+  // the sentinels; the images themselves ride as image_url blocks (callLLMCapped).
+  const shotUrls: string[] = []
+  const shotDescs: string[] = []
+  if (screenshots?.desktopUrl) { shotUrls.push(screenshots.desktopUrl); shotDescs.push('desktop 1280×800') }
+  if (screenshots?.mobileUrl)  { shotUrls.push(screenshots.mobileUrl);  shotDescs.push('mobile 390×844') }
+  const screenshotContext = shotUrls.length
+    ? `SCREENSHOTS ATTACHED (${shotDescs.join(', then ')}): the CURRENT live rendering of "${screenshots!.pagePath}". Ground every claim about visual hierarchy, above-the-fold content, or what a visitor actually sees in these images — when a screenshot contradicts an assumption derived from the code, trust the screenshot. If an image looks blank or broken, say so in blind_spots and make no visual claims from it.`
+    : ''
+
   // Per-BLOCK sentinels: each untrusted block gets its OWN fresh uuid, generated
   // per Pass-2 call. A shared id would let an injection in any one block close
   // the single outer sentinel and have everything after it read as instructions
@@ -3060,7 +3129,7 @@ ${sealed(`[10] ${revenueContext || 'REVENUE: not connected'}`)}
 
 ${sealed(`[11] ${previousFixesContext || 'PREVIOUS FIXES: none'}`)}
 
-${guardrailsContext ? `${guardrailsContext}\n` : ''}${ownerFocusContext ? `${ownerFocusContext}\n` : ''}
+${guardrailsContext ? `${guardrailsContext}\n` : ''}${ownerFocusContext ? `${ownerFocusContext}\n` : ''}${screenshotContext ? `${screenshotContext}\n` : ''}
 Identify the single highest-impact conversion problem visible in this material. Return JSON only (no markdown) with this EXACT schema:
 {
   "problem": "1-2 sentence description of what's broken",
@@ -3080,7 +3149,16 @@ CONSTRAINTS:
 - Respect all BRAND GUARDRAILS above; never re-attempt anything on the NEVER DO AGAIN list.
 - If you cannot find a confident #1 problem, return { "skip": true, "reason": "..." } and we will not open a PR this week.`
 
-  const text = await callLLMCapped(subscriptionId, system, user, LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix')
+  let text: string
+  try {
+    text = await callLLMCapped(subscriptionId, system, user, LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix', shotUrls)
+  } catch (err: any) {
+    if (shotUrls.length === 0) throw err
+    // Image-bearing call failed (provider image fetch / multimodal hiccup) —
+    // one retry without images, so a screenshot can never cost the weekly fix.
+    slog('warn', 'fix_call_image_retry', { subscriptionId, error: String(err?.message || err).slice(0, 200) })
+    text = await callLLMCapped(subscriptionId, system, user.replace(screenshotContext, 'SCREENSHOTS: unavailable this run — do not make visual claims.'), LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix')
+  }
 
   // Consume the one-shot focus pin now that Pass 2 has run with it — even a
   // skip outcome counts as consideration; the owner can re-pin from the Funnel
@@ -3630,6 +3708,9 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   // serving the pinned page, then rides into Pass 2 (consumed there).
   const focusPagePath = await loadFocusPage(conn.subscription_id)
   const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank files serving that page higher.` : ''
+  // Item 3a: start both viewport captures NOW so they overlap the ranker +
+  // Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
+  const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
   const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
   const rankerCallAI = (args: { system: string; user: string }) =>
     callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
@@ -3663,10 +3744,11 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     DB_TIMEOUT_MS, 'shopify_step_finding_update',
   )
   const deepContext = shopifyDeepContext(files, rankerResult)
+  const fixScreens = await awaitShotsForModel(fixShots, run.id)
   const fixResult = await callAIForFix(
     conn.subscription_id, shopMap, deepContext, rankerResult,
     analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
-    focusPagePath,
+    focusPagePath, fixScreens,
   )
   if (fixResult.skip) {
     await dbWrite(
@@ -3791,7 +3873,7 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
 
   // Before-screenshot of the storefront (the staged write only applies on YES,
   // so this is still "before"). Last step by design — see attachBeforeScreenshot.
-  await attachBeforeScreenshot(run.id, conn.website_url)
+  await attachBeforeScreenshot(run.id, fixShots ? fixShots.desktop : null)
 }
 
 // ─── SHOPIFY-VIA-GITHUB: READ THEME FILES FROM THE REPO TREE (SG1) ────────────
@@ -3910,6 +3992,9 @@ async function processGithubThemeConnection(
   // Owner focus pin ("Fix in next run") — same threading as the other paths.
   const focusPagePath = await loadFocusPage(conn.subscription_id)
   const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank files serving that page higher.` : ''
+  // Item 3a: start both viewport captures NOW so they overlap the ranker +
+  // Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
+  const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
   const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
   const rankerCallAI = (args: { system: string; user: string }) =>
     callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
@@ -3942,10 +4027,11 @@ async function processGithubThemeConnection(
     DB_TIMEOUT_MS, 'shopify_github_step_finding_update',
   )
   const deepContext = shopifyDeepContext(files, rankerResult)
+  const fixScreens = await awaitShotsForModel(fixShots, run.id)
   const fixResult = await callAIForFix(
     conn.subscription_id, shopMap, deepContext, rankerResult,
     analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
-    focusPagePath,
+    focusPagePath, fixScreens,
   )
   if (fixResult.skip) {
     await dbWrite(
@@ -4046,7 +4132,7 @@ async function processGithubThemeConnection(
   // Before-screenshot of the storefront (Shopify only syncs the change after
   // the YES → merge, so this is still "before"). Last step by design — see
   // attachBeforeScreenshot.
-  await attachBeforeScreenshot(run.id, conn.website_url)
+  await attachBeforeScreenshot(run.id, fixShots ? fixShots.desktop : null)
 }
 
 async function processConnection(conn: any) {
@@ -4328,6 +4414,9 @@ async function processConnection(conn: any) {
     // serving the pinned page, then rides into Pass 2 (consumed there).
     const focusPagePath = await loadFocusPage(conn.subscription_id)
     const focusHint = focusPagePath ? ` OWNER PRIORITY: the owner asked this run to fix the page ${focusPagePath} — rank components serving that page higher.` : ''
+    // Item 3a: start both viewport captures NOW so they overlap the ranker +
+    // deep-read + Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
+    const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
     const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
     const rankerCallAI = (args: { system: string; user: string }) =>
       callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
@@ -4388,10 +4477,11 @@ async function processConnection(conn: any) {
       supabase.from('agent_runs').update({ current_step: 'finding_biggest_issue' }).eq('id', run.id),
       DB_TIMEOUT_MS, 'step_finding_biggest_issue_update'
     )
+    const fixScreens = await awaitShotsForModel(fixShots, run.id)
     const fixResult = await callAIForFix(
       conn.subscription_id, mapResult, deepContext, rankerResult,
       analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
-      focusPagePath,
+      focusPagePath, fixScreens,
     )
 
     // Honest skip — model couldn't find a confident #1 problem. New status.
@@ -4448,12 +4538,13 @@ async function processConnection(conn: any) {
     }
     const { pr, filesEdited } = prResult
 
-    // 3a: capture before-screenshot. Always shoot the site ROOT, never a route
-    // derived from file_to_edit: fileToRoutePath maps e.g. src/pages/Home.jsx →
-    // "/home", but customer sites are client-rendered SPAs where only "/" is a real
-    // route — an invented path like /home loads the empty shell and shoots solid
-    // black. Root always renders; the PR receipt already names the edited file.
-    const screenshotBefore = await captureScreenshot(conn.website_url)
+    // Item 3a: reuse the desktop capture already started before Pass 2 — it
+    // overlapped the LLM calls, so this await is usually instant (the old fresh
+    // serial capture here was the WallClockTimeout culprit). Target-page rules
+    // (site root, or the owner's pinned PostHog-real path — never a
+    // fileToRoutePath-derived guess, the black-frame root cause) live in
+    // startFixScreenshots.
+    const screenshotBefore = fixShots ? await fixShots.desktop : null
 
     // Step 6: approval notification.
     await dbWrite(
