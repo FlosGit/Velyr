@@ -183,47 +183,66 @@ export async function readDeepContext(
   let llmsTxt: string | null = null
   let packageJsonDeps = '{}'
 
-  if (mapResult.tailwindConfigPath) {
-    tailwindTheme = await readSupporting(mapResult.tailwindConfigPath, true, extractTailwindTheme)
-  }
-  if (mapResult.globalStylesPath) {
-    globalStyles = await readSupporting(mapResult.globalStylesPath, true, raw => firstLines(raw, 200))
-  }
+  // Item 8b: the five supporting reads are independent — fetch them
+  // concurrently. The sequential budget gating between them was theoretical
+  // (they aggregate ~25KB against a budget an order of magnitude larger), and
+  // the component walk below still enforces the budget strictly.
   {
-    const idx = fullPath('index.html')
-    indexHtml = await readSupporting(idx, has(idx), extractHtmlHeadAndBody)
-  }
-  {
+    const idx  = fullPath('index.html')
     const llms = fullPath('public/llms.txt')
-    llmsTxt = await readSupporting(llms, has(llms), raw => raw)
-  }
-  {
     // "top-level" package.json = the SELECTED site's package.json (siteRoot),
     // which holds the deps that actually ship — for a monorepo the repo-root
     // manifest is just workspace plumbing. See RA4 flag.
-    const pkg = fullPath('package.json')
-    const deps = await readSupporting(pkg, has(pkg), extractDeps)
+    const pkg  = fullPath('package.json')
+    const [tw, gs, ih, lt, deps] = await Promise.all([
+      mapResult.tailwindConfigPath ? readSupporting(mapResult.tailwindConfigPath, true, extractTailwindTheme) : Promise.resolve(null),
+      mapResult.globalStylesPath   ? readSupporting(mapResult.globalStylesPath, true, raw => firstLines(raw, 200)) : Promise.resolve(null),
+      readSupporting(idx, has(idx), extractHtmlHeadAndBody),
+      readSupporting(llms, has(llms), raw => raw),
+      readSupporting(pkg, has(pkg), extractDeps),
+    ])
+    tailwindTheme = tw
+    globalStyles  = gs
+    indexHtml     = ih
+    llmsTxt       = lt
     if (deps != null) packageJsonDeps = deps
   }
 
   // Then per ranked component (in rank order): file + sibling CSS. Styled-
   // components / emotion declarations need no extra fetch — they live in the
   // component file already and are covered by reading it.
-  for (const item of rankerResult.ranked) {
+  // Item 8b: fetches run CONCURRENTLY (pool of 8, mirroring the theme reader);
+  // the budget walk below stays strictly in rank order, so the bytes that reach
+  // the prompt are identical to the sequential version. Past-budget files may
+  // be fetched and discarded — a few wasted blob calls, never wasted prompt
+  // bytes (≤10 components + siblings, bounded by FINAL_RANKED_CAP).
+  const DEEP_FETCH_CONCURRENCY = 8
+  const tasks = rankerResult.ranked.map(item => ({ item, cssRel: detectSiblingCss(item.path, has, fullPath) }))
+  const prefetched = new Map<string, { res: FetchResult; cssRes: FetchResult | null }>()
+  let nextTask = 0
+  await Promise.all(Array.from({ length: Math.min(DEEP_FETCH_CONCURRENCY, tasks.length) }, async () => {
+    while (nextTask < tasks.length) {
+      const t = tasks[nextTask++]
+      const res = await fetchByFull(fullPath(t.item.path))
+      const cssRes = t.cssRel ? await fetchByFull(fullPath(t.cssRel)) : null
+      prefetched.set(t.item.path, { res, cssRes })
+    }
+  }))
+  for (const { item, cssRel } of tasks) {
     if (totalBytes >= budget) { skippedDueToBudget.push({ path: item.path, reason: 'budget_exceeded' }); continue }
-    const res = await fetchByFull(fullPath(item.path))
+    const pf = prefetched.get(item.path)
+    const res = pf?.res ?? { ok: false as const, reason: 'fetch_failed' as const }
     if (!res.ok) { skippedUnreadable.push({ path: item.path, reason: res.reason }); continue }
     const { content, truncated } = truncateForLLM(res.content)
     totalBytes += byteLength(content)
 
     let cssContent: string | null = null
-    const cssRel = detectSiblingCss(item.path, has, fullPath)
     if (cssRel) {
       if (totalBytes >= budget) {
         skippedDueToBudget.push({ path: cssRel, reason: 'budget_exceeded' })
       } else {
-        const cssRes = await fetchByFull(fullPath(cssRel))
-        if (cssRes.ok) {
+        const cssRes = pf?.cssRes
+        if (cssRes?.ok) {
           cssContent = truncateForLLM(cssRes.content).content
           totalBytes += byteLength(cssContent)
         }

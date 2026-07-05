@@ -322,13 +322,28 @@ export async function buildImportGraph(
     if (!enqueued.has(ep)) { queue.push({ path: ep, depth: 0 }); enqueued.add(ep) }
   }
 
+  // Item 8b: blob fetches are RA2's wall-clock cost (one getBlob per file,
+  // previously strictly sequential). Fetch each BFS frontier batch concurrently
+  // (≤ GRAPH_FETCH_CONCURRENCY, sized to the remaining maxFiles slots), then
+  // process results in dequeue order — node order, edge order, and the count
+  // cutoff stay byte-identical to the sequential traversal; only the network
+  // waiting overlaps.
+  const GRAPH_FETCH_CONCURRENCY = 8
   while (queue.length > 0) {
     if (nodes.length >= maxFiles) { truncatedAt = 'count'; break }
-    const { path: relPath, depth } = queue.shift()!
-    if (visited.has(relPath)) continue
-    visited.add(relPath)
+    const batch: Array<{ path: string; depth: number }> = []
+    while (batch.length < Math.min(GRAPH_FETCH_CONCURRENCY, maxFiles - nodes.length) && queue.length > 0) {
+      const next = queue.shift()!
+      if (visited.has(next.path)) continue
+      visited.add(next.path)
+      batch.push(next)
+    }
+    if (batch.length === 0) continue
+    const batchContents = await Promise.all(batch.map(b => fetchContent(b.path)))
 
-    const content = await fetchContent(relPath)
+    for (let bi = 0; bi < batch.length; bi++) {
+    const { path: relPath, depth } = batch[bi]
+    const content = batchContents[bi]
     const fw = frameworkOf(relPath)
     let imports: string[] = []
     let jsxElements: string[] = []
@@ -379,6 +394,7 @@ export async function buildImportGraph(
       } else if (!truncatedAt) {
         truncatedAt = 'depth'
       }
+    }
     }
   }
 
