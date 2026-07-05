@@ -850,21 +850,48 @@ async function handleRollbackCheck(res) {
       // the whole shared project (incl. velyr.io) and fabricates a bounce delta.
       // No host → we can't measure this customer's bounce rate, so skip the
       // rollback decision rather than act on the wrong site's data.
-      const hostFilter = conn?.posthog_host_filter
-      if (!hostFilter || !isValidHostFilter(hostFilter)) {
-        console.warn(`[rollback_check] run=${run.id} sub=${run.subscription_id}: missing/invalid posthog_host_filter — skipping bounce comparison`)
-        continue
-      }
-      const hostWhere     = [`properties.$host = '${String(hostFilter).replace(/'/g, "''")}'`]
-
       // Resolve the subscription OWNER's Telegram chat once per run so every
-      // notification below (rollback-recommended, rollback-failed, positive-impact)
-      // reaches the customer — never the global operator TELEGRAM_CHAT_ID, which
-      // would leak one tenant's change description to the operator and never reach
-      // the owner. If the owner has no chat bound, the sends are skipped.
+      // notification below (couldn't-measure, rollback-recommended, rollback-
+      // failed, impact result) reaches the customer — never the global operator
+      // TELEGRAM_CHAT_ID, which would leak one tenant's change description to
+      // the operator and never reach the owner. No chat bound → sends skipped.
       const { data: ownerSub } = await supabase.from('agent_subscriptions')
         .select('telegram_chat_id').eq('id', run.subscription_id).single()
       const ownerChatId = ownerSub?.telegram_chat_id || null
+
+      const hostFilter = conn?.posthog_host_filter
+      if (!hostFilter || !isValidHostFilter(hostFilter)) {
+        console.warn(`[rollback_check] run=${run.id} sub=${run.subscription_id}: missing/invalid posthog_host_filter — skipping bounce comparison`)
+        // Terminal + visible, not a silent weekly retry: the host filter is set
+        // at first-run analytics setup, so a missing one never heals on its own
+        // — retrying each cron only re-warned the logs while the owner saw
+        // nothing. Record the honest outcome (which is also the idempotency
+        // marker) and tell the owner once, gated on the insert succeeding so a
+        // transient DB failure retries next cron without double-notifying.
+        const { error: hostLearnErr } = await supabase.from('agent_learnings').insert({
+          subscription_id: run.subscription_id, run_id: run.id,
+          change_type: run.analysis_result?.change_type || 'other',
+          summary: 'Impact not measurable: analytics is not configured for this site (missing domain filter), so the bounce comparison was skipped.',
+          outcome: 'insufficient_data',
+          metric_type: 'site_wide_bounce_rate',
+          delta: 0,
+          confidence: 'none',
+        })
+        if (hostLearnErr) {
+          console.warn(`[rollback_check] host-filter learning insert failed for run=${run.id}: ${hostLearnErr.message}`)
+        } else if (ownerChatId) {
+          await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: ownerChatId,
+              text: `📊 <b>Velyr Impact Check</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n⚠️ Couldn't measure the impact: analytics isn't set up for your site yet, so this change stays live but unmeasured. Future fixes will be measured once analytics is connected.`,
+              parse_mode: 'HTML',
+            }),
+          })
+        }
+        continue
+      }
+      const hostWhere     = [`properties.$host = '${String(hostFilter).replace(/'/g, "''")}'`]
 
       const deployedAt    = new Date(run.completed_at)
       // Split the before/after bounce windows at the exact deploy INSTANT, not the
@@ -954,7 +981,20 @@ async function handleRollbackCheck(res) {
           delta: 0,
           confidence: 'none',
         })
-        if (learnErr) console.warn(`[rollback_check] insufficient_data learning insert failed for run=${run.id}: ${learnErr.message}`)
+        if (learnErr) {
+          console.warn(`[rollback_check] insufficient_data learning insert failed for run=${run.id}: ${learnErr.message}`)
+        } else if (ownerChatId) {
+          // Tell the owner instead of going silent — gated on the learning
+          // insert (the idempotency marker) so this can never repeat weekly.
+          await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: ownerChatId,
+              text: `📊 <b>Velyr Impact Check</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n⚠️ Not enough traffic to measure the impact (${beforeMeasure.sessions} sessions before / ${afterMeasure.sessions} after — need ≥${MIN_SESSIONS_FOR_BOUNCE_ATTRIBUTION} per side). The change stays live; it just can't be attributed.`,
+              parse_mode: 'HTML',
+            }),
+          })
+        }
         continue
       }
 
@@ -1145,6 +1185,9 @@ async function handleRollbackCheck(res) {
           })
         }
       }
+      // Within-noise outcomes (−5pp < Δ < +15pp) deliberately do NOT send a
+      // standalone message — they surface as one aggregate line in the weekly
+      // summary instead (owner's choice: one digest, not per-change pings).
     } catch (err) {
       console.error('Rollback check error for run', run.id, err)
     }
@@ -1192,7 +1235,14 @@ async function handleWeeklySummary(res) {
       const weekRuns       = weekRunsRes.data   || []
       const completedABTests = completedABRes.data || []
       const allLearnings   = allLearningsRes.data || []
-      const chatId         = subRes.data?.telegram_chat_id || process.env.TELEGRAM_CHAT_ID
+      // Owner-only. Falling back to the operator TELEGRAM_CHAT_ID leaked one
+      // tenant's summary (traffic, deployed changes, DNA) into the global
+      // operator chat — and the owner never saw it. No chat bound → no send.
+      const chatId         = subRes.data?.telegram_chat_id || null
+      if (!chatId) {
+        console.warn(`[weekly_summary] sub=${subscriptionId}: no telegram_chat_id bound — skipping send`)
+        continue
+      }
 
       const deployedRunIds = weekRuns.filter(r => r.status === 'deployed' || r.status === 'rolled_back').map(r => r.id)
       let impactMetrics    = []
@@ -1240,8 +1290,21 @@ async function handleWeeklySummary(res) {
         const scopeText   = best.metric_type === 'route_scoped_bounce_rate'
           ? 'on the pages an agent change touched'
           : 'site-wide in the week of an agent change'
-        if (improvement > 0) bestMetricLine = `\n📉 Bounce rate dropped ${improvement}pp ${scopeText} (correlation, not attribution)`
+        // Only a real win headlines (aligned with the measured_win bar) — a
+        // +1pp blip is noise and belongs in the within-noise line below.
+        if (improvement >= MEASURED_WIN_MIN_PP) bestMetricLine = `\n📉 Bounce rate dropped ${improvement}pp ${scopeText} (correlation, not attribution)`
       }
+      // Within-noise band (−MEASURED_WIN_MIN_PP < Δ < +15pp; keep the 15 in
+      // sync with ROLLBACK_BOUNCE_PP_THRESHOLD in handleRollbackCheck). These
+      // measured-but-unremarkable outcomes previously produced no message
+      // anywhere — the most common result for a paying customer was silence.
+      const mehCount = bounceMetrics.filter(m => {
+        const delta = m.value_after - m.value_before
+        return delta > -MEASURED_WIN_MIN_PP && delta < 15
+      }).length
+      const mehLine = mehCount > 0
+        ? `\n📊 ${mehCount} change${mehCount !== 1 ? 's' : ''} measured within normal variation (no measurable lift, no harm — still live)`
+        : ''
 
       let abSummary = ''
       if (completedABTests.length > 0) {
@@ -1265,7 +1328,7 @@ async function handleWeeklySummary(res) {
 ${trendEmoji} <b>Traffic</b>
 ${a ? `${a.uniqueVisitors} visitors · ${a.totalPageviews} pageviews` : 'No data'}
 ${trendText}
-Bounce rate: ${bounceText}${bestMetricLine}
+Bounce rate: ${bounceText}${bestMetricLine}${mehLine}
 
 🤖 <b>Agent Activity This Week</b>
 • Deployed: ${deployed} change${deployed !== 1 ? 's' : ''}
@@ -1311,7 +1374,12 @@ async function handleMidweek(res) {
       .from('agent_subscriptions').select('telegram_chat_id')
       .eq('id', conn.subscription_id).single()
 
-    const chatId = sub?.telegram_chat_id || process.env.TELEGRAM_CHAT_ID
+    // Owner-only — same tenant-leak fix as weekly_summary.
+    const chatId = sub?.telegram_chat_id || null
+    if (!chatId) {
+      console.warn(`[midweek] sub=${conn.subscription_id}: no telegram_chat_id bound — skipping send`)
+      continue
+    }
     const a      = analytics?.last7Days
     if (!a) continue
 
