@@ -103,12 +103,6 @@ function RunCard({ run }) {
         {run.problem || 'No problem description'}
       </p>
 
-      {run.ab_test && (
-        <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 500, color: C.accent, background: C.accentSoft, border: `1px solid ${C.accentMid}`, borderRadius: 5, padding: '3px 8px', marginBottom: 14, letterSpacing: '.04em', textTransform: 'uppercase' }}>
-          A/B Test · winner: {run.ab_test.winner}
-        </span>
-      )}
-
       {(run.screenshot_before || run.screenshot_after) && (
         <div className="ap-screenshot-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
           <div>

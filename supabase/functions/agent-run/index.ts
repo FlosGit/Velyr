@@ -2828,16 +2828,9 @@ async function loadBusinessDNA(subscriptionId: string) {
   return { grouped, neverDoAgain, whatWorks, entries: active }
 }
 
-async function recordDNA(subscriptionId: string, runId: string | null, fixType: string, outcome: 'measured_win'|'survived'|'rollback'|'pending', notes: string) {
-  // Best-effort + bounded: a DNA-write hang must not zombie the run after the
-  // PR already exists; the entry is reconstructable, the wall-clock is not.
-  await dbWrite(
-    supabase.from('agent_business_dna').insert({
-      subscription_id: subscriptionId, run_id: runId, fix_type: fixType, outcome, notes: (notes || '').slice(0, 500),
-    }),
-    DB_TIMEOUT_MS, 'business_dna_insert'
-  ).catch((e: any) => console.warn(`[dna] record failed for ${subscriptionId}:`, e?.message))
-}
+// (Item 8a: the edge-side recordDNA twin was deleted — it had zero call sites;
+// every DNA outcome writer lives on the Vercel side: api/agent/run.js,
+// api/_lib/run-reconcile.js, api/webhooks/telegram.js.)
 
 // ─── OWNER FOCUS PAGE ("Fix in next run", Funnel tab) ─────────────────────────
 // The owner pins one page via the dashboard (agent_subscriptions.focus_page_path,
@@ -2859,8 +2852,8 @@ async function loadFocusPage(subscriptionId: string): Promise<string | null> {
 }
 
 async function clearFocusPage(subscriptionId: string) {
-  // Best-effort + bounded, mirroring recordDNA — a clear-hang must not zombie
-  // the run; worst case the pin survives one extra week.
+  // Best-effort + bounded — a clear-hang must not zombie the run; worst case
+  // the pin survives one extra week.
   await dbWrite(
     supabase.from('agent_subscriptions').update({ focus_page_path: null }).eq('id', subscriptionId),
     DB_TIMEOUT_MS, 'focus_page_clear'

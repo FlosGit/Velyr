@@ -427,7 +427,6 @@ export default async function handler(req, res) {
   const mode = req.query?.mode
 
   // ── Quick modes — stay in Vercel ──────────────────────────────────────────
-  if (mode === 'evaluate_ab')          return handleEvaluateAB(res)
   if (mode === 'midweek')              return handleMidweek(res)
   if (mode === 'rollback_check')       return handleRollbackCheck(res)
   if (mode === 'weekly_summary')       return handleWeeklySummary(res)
@@ -500,144 +499,6 @@ async function getOctokit(installationId) {
       },
     },
   })
-}
-
-// ─── EVALUATE A/B ─────────────────────────────────────────────────────────────
-async function handleEvaluateAB(res) {
-  const { data: tests } = await supabase
-    .from('agent_ab_tests')
-    .select('*')
-    .eq('status', 'running')
-    .lt('evaluate_after', new Date().toISOString())
-
-  if (!tests || tests.length === 0) {
-    return res.json({ success: true, message: 'No A/B tests to evaluate' })
-  }
-
-  for (const test of tests) {
-    try {
-      const { data: conn } = await supabase
-        .from('agent_connections').select('*')
-        .eq('subscription_id', test.subscription_id).single()
-
-      const apiKey    = decryptSecret(conn?.posthog_api_key)    || process.env.POSTHOG_API_KEY
-      const projectId = conn?.posthog_project_id || process.env.POSTHOG_PROJECT_ID
-      const host      = conn?.posthog_host       || process.env.POSTHOG_HOST || 'https://us.i.posthog.com'
-      if (!apiKey) continue
-
-      const flagRes  = await fetch(`${host}/api/projects/${projectId}/feature_flags/${test.posthog_flag_id}/`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      })
-      const flagData = await flagRes.json()
-      const results  = flagData?.experiment_results?.result
-      if (!results) continue
-
-      const controlRate   = results.control?.conversion_rate   ?? 0
-      const treatmentRate = results.treatment?.conversion_rate ?? 0
-
-      let winner = null, delta = 0
-      if (treatmentRate > controlRate * 1.05) {
-        winner = 'treatment'
-        delta  = Math.round(((treatmentRate - controlRate) / (controlRate || 1)) * 100)
-      } else if (controlRate > treatmentRate * 1.05) {
-        winner = 'control'
-        delta  = -Math.round(((controlRate - treatmentRate) / (controlRate || 1)) * 100)
-      }
-      if (!winner) continue
-
-      await supabase.from('agent_learnings').insert({
-        subscription_id: test.subscription_id, run_id: test.run_id,
-        change_type: test.change_type, summary: test.summary,
-        outcome: winner === 'treatment' ? 'positive' : 'negative',
-        metric_type: 'conversion_rate', delta, confidence: 'high',
-      })
-
-      // 3d/3i: also write to agent_business_dna so the DNA tab and Claude prompt see this
-      await recordDNA(
-        test.subscription_id, test.run_id, test.change_type || 'other',
-        // An A/B winner IS a measured result — the one DNA writer that earns
-        // measured_win directly rather than via the 7-day promotion.
-        winner === 'treatment' ? 'measured_win' : 'rollback',
-        winner === 'treatment'
-          ? `A/B winner (treatment): ${test.summary} (+${delta}% conversion)`
-          : `A/B loser (control won): ${test.summary} (${delta}% vs control)`
-      )
-
-      await supabase.from('agent_ab_tests')
-        .update({ status: 'completed', winner, delta_pct: delta })
-        .eq('id', test.id)
-
-      // 3i: if control won, auto-revert the change via a follow-up PR
-      let revertedPrUrl = null
-      if (winner === 'control') {
-        try {
-          const { data: run } = await supabase.from('agent_runs').select('*').eq('id', test.run_id).single()
-          if (run?.analysis_result?.file_to_edit && conn?.github_installation_id) {
-            const octokit = await getOctokit(conn.github_installation_id)
-            const owner   = conn.github_repo_owner
-            const repo    = conn.github_repo_name
-            const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, per_page: 30 })
-            const agentCommit = commits.find(c =>
-              c.commit.message.startsWith('fix:') &&
-              c.commit.message.includes((run.analysis_result.problem || '').slice(0, 30))
-            )
-            const parentSha = agentCommit?.parents?.[0]?.sha
-            if (parentSha) {
-              const defaultBranch = await getDefaultBranch(octokit, owner, repo)
-              const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` })
-              const branchName    = `agent/ab-revert-${test.run_id.slice(0, 8)}`
-              await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: ref.object.sha })
-              const { data: originalFile } = await octokit.rest.repos.getContent({ owner, repo, path: run.analysis_result.file_to_edit, ref: parentSha })
-              const { data: currentFile  } = await octokit.rest.repos.getContent({ owner, repo, path: run.analysis_result.file_to_edit })
-              await octokit.rest.repos.createOrUpdateFileContents({
-                owner, repo, path: run.analysis_result.file_to_edit,
-                message: `revert: A/B test — control won (${delta}%)`,
-                content: originalFile.content, sha: currentFile.sha, branch: branchName,
-              })
-              // Stage 4.8: do NOT auto-merge revert PRs. Open the PR, mark the
-              // run as waiting_approval, and let the user confirm via Telegram.
-              const { data: revertPr } = await octokit.rest.pulls.create({
-                owner, repo,
-                title: `🔄 A/B Auto-Revert: ${run.analysis_result.problem}`,
-                body: `## A/B Test — Control Won\n\nAfter 7 days, the control variant outperformed the treatment by ${Math.abs(delta)}%.\n\nThis PR reverts the change to restore the original.\n\n_Reply *YES* in Telegram to merge this revert, or *NO* to keep the treatment live._`,
-                head: branchName, base: defaultBranch,
-              })
-              await supabase.from('agent_runs').update({
-                status:     'waiting_approval',
-                pr_number:  revertPr.number,
-                pr_url:     revertPr.html_url,
-              }).eq('id', test.run_id)
-              revertedPrUrl = revertPr.html_url
-            }
-          }
-        } catch (revertErr) {
-          console.error('A/B auto-revert failed:', revertErr)
-        }
-      }
-
-      const outcomeMsg = winner === 'treatment'
-        ? `✅ *A/B Test Winner: Treatment*\n📈 +${delta}% conversion lift confirmed.\nSaved to your Business DNA.`
-        : `📊 *A/B Result: Control Won*\n📉 Change did not improve conversions (${delta}%).\nLearning saved — agent will avoid similar patterns.${revertedPrUrl ? `\n🔄 Revert PR opened (awaiting your approval): ${revertedPrUrl}\nReply *YES* to merge, *NO* to keep the treatment live.` : ''}`
-
-      // Telegram HTML migration intentionally SKIPPED here: handleEvaluateAB is
-      // vestigial (the agent no longer creates A/B tests; this mode has no cron
-      // entry in vercel.json and is never invoked). Left on legacy Markdown
-      // as-is rather than migrated, to avoid touching dead code. If A/B ever
-      // returns, migrate this to parse_mode: 'HTML' + escapeHtml(test.summary).
-      await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: process.env.TELEGRAM_CHAT_ID,
-          text: `🤖 *Velyr Growth Agent — A/B Result*\n\n*${test.summary}*\n\n${outcomeMsg}`,
-          parse_mode: 'Markdown',
-        }),
-      })
-    } catch (err) {
-      console.error('A/B evaluate error for test', test.id, err)
-    }
-  }
-
-  return res.json({ success: true, evaluated: tests.length })
 }
 
 // ─── FILE → URL ROUTE MAPPING (Stage 2) ──────────────────────────────────────
@@ -1231,7 +1092,7 @@ async function handleWeeklySummary(res) {
       const subscriptionId = conn.subscription_id
       const oneWeekAgo     = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
-      const [analytics, weekRunsRes, completedABRes, allLearningsRes, subRes] = await Promise.all([
+      const [analytics, weekRunsRes, allLearningsRes, subRes] = await Promise.all([
         getPostHogAnalytics(
           decryptSecret(conn.posthog_api_key)    || process.env.POSTHOG_API_KEY,
           conn.posthog_project_id || process.env.POSTHOG_PROJECT_ID,
@@ -1239,13 +1100,11 @@ async function handleWeeklySummary(res) {
           conn.posthog_host_filter
         ),
         supabase.from('agent_runs').select('*').eq('subscription_id', subscriptionId).gte('created_at', oneWeekAgo).order('created_at', { ascending: false }),
-        supabase.from('agent_ab_tests').select('*').eq('subscription_id', subscriptionId).eq('status', 'completed').gte('created_at', oneWeekAgo),
         supabase.from('agent_learnings').select('outcome, delta, metric_type').eq('subscription_id', subscriptionId),
         supabase.from('agent_subscriptions').select('telegram_chat_id').eq('id', subscriptionId).single(),
       ])
 
       const weekRuns       = weekRunsRes.data   || []
-      const completedABTests = completedABRes.data || []
       const allLearnings   = allLearningsRes.data || []
       // Owner-only. Falling back to the operator TELEGRAM_CHAT_ID leaked one
       // tenant's summary (traffic, deployed changes, DNA) into the global
@@ -1318,16 +1177,6 @@ async function handleWeeklySummary(res) {
         ? `\n📊 ${mehCount} change${mehCount !== 1 ? 's' : ''} measured within normal variation (no measurable lift, no harm — still live)`
         : ''
 
-      let abSummary = ''
-      if (completedABTests.length > 0) {
-        const winners  = completedABTests.filter(t => t.winner === 'treatment')
-        abSummary      = `\n🔬 <b>A/B Tests:</b> ${completedABTests.length} completed · ${winners.length} won`
-        if (winners.length > 0) {
-          const avgLift = Math.round(winners.reduce((sum, t) => sum + (t.delta_pct || 0), 0) / winners.length)
-          abSummary    += ` · avg +${avgLift}% lift`
-        }
-      }
-
       const dnaSummary       = totalLearnings > 0
         ? `\n🧬 <b>Business DNA:</b> ${totalLearnings} learnings${avgPositiveDelta ? ` · avg +${avgPositiveDelta}% on wins` : ''}`
         : ''
@@ -1347,7 +1196,7 @@ Bounce rate: ${bounceText}${bestMetricLine}${mehLine}
 • Rolled back: ${rolledBack}
 • Rejected: ${rejected}
 • Awaiting approval: ${pending}
-${deployedChanges ? `\n<b>Deployed changes:</b>\n${deployedChanges}` : ''}${rolledBackChanges ? `\n<b>Rolled back:</b>\n${rolledBackChanges}` : ''}${abSummary}${dnaSummary}
+${deployedChanges ? `\n<b>Deployed changes:</b>\n${deployedChanges}` : ''}${rolledBackChanges ? `\n<b>Rolled back:</b>\n${rolledBackChanges}` : ''}${dnaSummary}
 
 <i>Next run: Monday · Reply <b>status</b> for details</i>`
 
@@ -1551,7 +1400,7 @@ async function handlePublicTimeline(req, res) {
   // (already denormalized at run time) and use it directly.
   const [runsRes, dnaRes, imRes] = await Promise.all([
     supabase.from('agent_runs')
-      .select('id, status, created_at, completed_at, problem_description, screenshot_before, screenshot_after, bounce_rate_before, bounce_rate_after, score_before, score_after, pr_url, competitor_changes, ab_test_variants, pages_fixed')
+      .select('id, status, created_at, completed_at, problem_description, screenshot_before, screenshot_after, bounce_rate_before, bounce_rate_after, score_before, score_after, pr_url, competitor_changes, pages_fixed')
       .eq('subscription_id', sub.id)
       .order('created_at', { ascending: false }).limit(50),
     supabase.from('agent_business_dna')
@@ -1575,12 +1424,7 @@ async function handlePublicTimeline(req, res) {
     if (!impactByRun.has(im.run_id)) impactByRun.set(im.run_id, im)
   }
 
-  // Strip A/B variants details to "winner only if resolved" — withhold the
-  // raw find/replace strings so visitors don't see the unchanged-from-control
-  // copy of an in-flight test.
   const runs = (runsRes.data || []).map(r => {
-    const ab = r.ab_test_variants
-    const abPublic = ab && ab.winner ? { winner: ab.winner, change_type: ab.change_type } : null
     const im = impactByRun.get(r.id)
     return {
       id: r.id, status: r.status,
@@ -1596,7 +1440,6 @@ async function handlePublicTimeline(req, res) {
       score_before: r.score_before, score_after: r.score_after,
       pr_url: r.pr_url,
       competitor_changes: r.competitor_changes,
-      ab_test: abPublic,
       pages_fixed: r.pages_fixed,
     }
   })

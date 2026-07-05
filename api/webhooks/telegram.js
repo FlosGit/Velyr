@@ -966,21 +966,6 @@ async function handleStatus(chatId) {
     return `${emoji} <code>${escapeHtml(r.id.slice(0, 8))}</code> ${escapeHtml(r.status.replace('_', ' '))} (${date})${prLink}`
   }) ?? []
 
-  const { data: abTests } = await supabase
-    .from('agent_ab_tests')
-    .select('summary, status, winner, delta_pct, evaluate_after')
-    .eq('subscription_id', subId)
-    .order('created_at', { ascending: false })
-    .limit(3)
-
-  const abLines = abTests?.map(t => {
-    const evalDate = new Date(t.evaluate_after).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-    if (t.status === 'completed') {
-      return `📊 ${escapeHtml(t.summary)} → ${t.winner === 'treatment' ? `✅ +${t.delta_pct}%` : `❌ ${t.delta_pct}%`}`
-    }
-    return `🔬 ${escapeHtml(t.summary)} — results on ${evalDate}`
-  }) ?? []
-
   const { data: competitors } = await supabase
     .from('agent_competitor_urls')
     .select('url, active')
@@ -992,7 +977,6 @@ async function handleStatus(chatId) {
   ) ?? []
 
   let msg = `📊 <b>Velyr Agent Status</b>\n\n<b>Last 5 runs:</b>\n${lines.join('\n') || '<i>No runs yet</i>'}`
-  if (abLines.length) msg += `\n\n<b>A/B Tests:</b>\n${abLines.join('\n')}`
   if (competitorLines.length) msg += `\n\n<b>Tracked Competitors:</b>\n${competitorLines.join('\n')}`
 
   await sendMessage(chatId, msg)
