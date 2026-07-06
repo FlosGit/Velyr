@@ -2847,6 +2847,29 @@ async function scanCompetitorsForChanges(subscriptionId: string, competitorUrls:
   return changes.length > 0 ? changes : null
 }
 
+// C8: proactive competitor-change alert. scanCompetitorsForChanges already diffs each
+// tracked site's hero / CTA / pricing against last week's snapshot; this surfaces those
+// diffs as their OWN Telegram (previously they were only stored on the run's
+// competitor_changes). Fires independent of the fix outcome. `changes` =
+// [{ url, diffs: string[], current }] — every interpolated value is competitor-scraped, so
+// escapeHtml each. Best-effort; never throws.
+async function sendCompetitorAlert(chatId: string, changes: any[]) {
+  const blocks = (changes || []).slice(0, 2).map((c: any) => {
+    const lines = (c.diffs || []).slice(0, 3).map((d: string) => `  • ${escapeHtml(d)}`).join('\n')
+    return `<b>${escapeHtml(c.url)}</b>\n${lines}`
+  }).join('\n\n')
+  if (!blocks) return
+  await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `🔭 <b>Competitor update</b>\n\nA site you track changed since last week:\n\n${blocks}\n\n<i>The agent already weighs your tracked competitors in its weekly analysis — no action needed.</i>`,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+    }),
+  }).catch(err => console.error('[competitor-alert] send failed:', err))
+}
+
 // ─── BUSINESS DNA — load + record (3d) ────────────────────────────────────────
 async function loadBusinessDNA(subscriptionId: string) {
   const { data } = await supabase
@@ -4630,6 +4653,13 @@ async function processConnection(conn: any) {
       loadBusinessDNA(conn.subscription_id),                               // 3d new agent_business_dna
       scanCompetitorsForChanges(conn.subscription_id, trackedCompetitors), // 3c
     ])
+
+    // C8: proactive competitor alert — fire it here, right after the diff is computed, so
+    // it reaches the owner regardless of whether this run ends in a fix, a skip, or a
+    // find_mismatch. Best-effort; a send failure never affects the run.
+    if (competitorChanges?.length && subRow?.telegram_chat_id) {
+      await sendCompetitorAlert(subRow.telegram_chat_id, competitorChanges)
+    }
 
     // 3b: revenue attribution
     const revenue = subRow?.stripe_revenue_connected
