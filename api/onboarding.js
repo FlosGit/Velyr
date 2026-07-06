@@ -23,8 +23,9 @@ import { createClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
 import { createAppAuth } from '@octokit/auth-app'
 import { Octokit } from '@octokit/rest'
-import { encryptSecret, decryptSecret } from './_lib/secret-crypto.js'
+import { encryptSecret } from './_lib/secret-crypto.js'
 import { verifySessionCookie } from './github/_oauth-state.js'
+import { refreshShopifyToken } from './_lib/shopify-token-refresh.js'
 
 export const config = { maxDuration: 60 }
 
@@ -787,7 +788,10 @@ async function getShopifyConnForOwner(req, subscriptionId, label) {
 
   const { data: conn, error: connErr } = await serviceClient
     .from('agent_connections')
-    .select('shopify_shop_domain, shopify_access_token, shopify_main_theme_id, connection_source')
+    // B8: also select the fields refreshShopifyToken needs (id + both token expiries +
+    // the refresh token) so a call made more than ~1h after OAuth doesn't 401 on a stale
+    // access token — it refreshes + rotates in place instead.
+    .select('id, shopify_shop_domain, shopify_access_token, shopify_refresh_token, shopify_token_expires_at, shopify_refresh_token_expires_at, shopify_main_theme_id, connection_source')
     .eq('subscription_id', subscriptionId)
     .maybeSingle()
   if (connErr) {
@@ -797,15 +801,18 @@ async function getShopifyConnForOwner(req, subscriptionId, label) {
   if (!conn?.shopify_shop_domain || !conn?.shopify_access_token) {
     return { ok: false, status: 400, error: 'No Shopify store is connected for this subscription.' }
   }
-  let token
-  try {
-    token = decryptSecret(conn.shopify_access_token)
-  } catch (e) {
-    console.error(`onboarding/${label}: token decrypt failed:`, e?.message)
-    token = null
+  // B8: refresh (fast-path returns the current token when still valid, e.g. right after
+  // OAuth; refreshes + persists when near/past expiry). Mutates conn in place.
+  const tok = await refreshShopifyToken(serviceClient, conn)
+  if (!tok.ok) {
+    return {
+      ok: false, status: 400,
+      error: tok.reason === 'needs_reconsent'
+        ? 'Your Shopify connection expired. Reconnect your store.'
+        : 'Could not reach Shopify to refresh access. Try again.',
+    }
   }
-  if (!token) return { ok: false, status: 400, error: 'Your Shopify connection expired. Reconnect your store.' }
-  return { ok: true, conn, token }
+  return { ok: true, conn, token: tok.accessToken }
 }
 
 // ─── action=list_themes (POST) ───────────────────────────────────────────────

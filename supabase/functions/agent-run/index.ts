@@ -1498,15 +1498,21 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
         // (sample-weighted — identical numbers to the pre-split query) plus a
         // Mobile/Desktop breakdown. Mobile dominates conversion problems, and
         // an aggregate scroll depth hides "mobile users never see the CTA".
-        const [scrollRes, clicksRes] = await Promise.all([
+        const [scrollRes, clicksRes, rageRes] = await Promise.all([
           query({ kind: 'EventsQuery', event: '$pageleave',   after: sevenDaysAgo, before: today, limit: 24, orderBy: ['count() DESC'],
                   select: ['properties.$prev_pageview_pathname', 'properties.$device_type', 'avg(toFloat(properties.$prev_pageview_max_scroll_percentage))', 'count()'],
                   where:  ['properties.$prev_pageview_max_scroll_percentage is not null', 'properties.$prev_pageview_pathname is not null'] }),
           query({ kind: 'EventsQuery', event: '$autocapture', after: sevenDaysAgo, before: today, limit: 16,  orderBy: ['count() DESC'],
                   select: ['properties.$el_text', 'properties.$device_type', 'count()'],
                   where:  ["properties.$event_type = 'click'", "properties.$el_text != ''"] }),
+          // C6: rage-clicks (posthog-js emits $rageclick on rapid repeated clicks in one
+          // spot) — concrete frustration evidence per page. Own query, own aggregation;
+          // any failure is swallowed by the outer engagement try/catch.
+          query({ kind: 'EventsQuery', event: '$rageclick',   after: sevenDaysAgo, before: today, limit: 12,  orderBy: ['count() DESC'],
+                  select: ['properties.$pathname', 'properties.$device_type', 'count()'],
+                  where:  ['properties.$pathname is not null'] }),
         ])
-        const [scroll, clicks] = await Promise.all([scrollRes.json(), clicksRes.json()])
+        const [scroll, clicks, rage] = await Promise.all([scrollRes.json(), clicksRes.json(), rageRes.json()])
         const pctOf = (sum: number, n: number) => Math.max(0, Math.min(100, Math.round((sum / n) * 100)))
         const scrollAgg = new Map<string, any>()
         for (const r of (scroll.results || [])) {
@@ -1543,7 +1549,21 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
           // mobileShare only when device data exists on the rows (older events
           // may lack $device_type) — null must render as "unknown", never 0%.
           .map((e: any) => ({ text: e.text, clicks: e.clicks, mobileShare: e.deviced > 0 ? Math.round((e.mobile / e.deviced) * 100) : null }))
-        if (scrollByPage.length || topClicks.length) engagement = { scrollByPage, topClicks }
+        // C6: aggregate rage-clicks per page (+ mobile share, same null-means-unknown rule).
+        const rageAgg = new Map<string, any>()
+        for (const r of (rage.results || [])) {
+          const path = String(r[0] || '').trim()
+          const device = String(r[1] || ''), n = Number(r[2]) || 0
+          if (!path || n <= 0) continue
+          let e = rageAgg.get(path)
+          if (!e) { e = { path, count: 0, mobile: 0, deviced: 0 }; rageAgg.set(path, e) }
+          e.count += n
+          if (device) { e.deviced += n; if (device === 'Mobile') e.mobile += n }
+        }
+        const rageClicks = [...rageAgg.values()]
+          .sort((a: any, b: any) => b.count - a.count).slice(0, 6)
+          .map((e: any) => ({ path: e.path, count: e.count, mobileShare: e.deviced > 0 ? Math.round((e.mobile / e.deviced) * 100) : null }))
+        if (scrollByPage.length || topClicks.length || rageClicks.length) engagement = { scrollByPage, topClicks, rageClicks }
       } catch (err) {
         console.warn('PostHog engagement signals skipped (core analytics unaffected):', err)
       }
@@ -3090,6 +3110,8 @@ function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any)
     if (scroll) lines.push(`Scroll depth (avg max-scroll % per page — low % = visitors never see the lower sections): ${scroll}`)
     const clicks = (eng?.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks}${c.mobileShare != null ? `, ${c.mobileShare}% mob` : ''})`).join(', ')
     if (clicks) lines.push(`Most-clicked elements (autocapture): ${clicks}`)
+    const rage = (eng?.rageClicks || []).slice(0, 5).map((r: any) => `${r.path} (${r.count}${r.mobileShare != null ? `, ${r.mobileShare}% mob` : ''})`).join(', ')
+    if (rage) lines.push(`Rage-clicks (rapid repeated clicks in one spot = user frustration): ${rage}`)
   } else {
     lines.push('No analytics data available.')
   }
@@ -3188,7 +3210,8 @@ async function callAIForFix(
     return `${s.path} → ${s.avgMaxScrollPct}%${split} (${s.samples} leaves)`
   }).join('; ') || 'n/a'}
 - Most-clicked elements (autocapture, by visible label; % mob = share of clicks from mobile): ${(eng.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks}${c.mobileShare != null ? `, ${c.mobileShare}% mob` : ''})`).join(', ') || 'n/a'}
-  Use scroll % to judge whether a section/CTA is actually seen, and clicks to see what visitors engage with vs ignore. When the mobile scroll depth is much lower than desktop, pair it with the attached mobile screenshot — the highest-impact fixes are usually above-the-fold on mobile. This is real behavior — prefer it over assumptions from code layout.` : ''
+- Rage-clicks (rapid repeated clicks in one spot = frustration — a broken/dead element, a misleading affordance, or a slow response; % mob = share from mobile): ${(eng.rageClicks || []).slice(0, 5).map((r: any) => `${r.path} (${r.count}${r.mobileShare != null ? `, ${r.mobileShare}% mob` : ''})`).join(', ') || 'n/a'}
+  Use scroll % to judge whether a section/CTA is actually seen, clicks to see what visitors engage with vs ignore, and rage-clicks to spot pages where something feels broken. When the mobile scroll depth is much lower than desktop, pair it with the attached mobile screenshot — the highest-impact fixes are usually above-the-fold on mobile. This is real behavior — prefer it over assumptions from code layout.` : ''
   const analyticsContext = a ? `REAL ANALYTICS (last 7 days):
 - Pageviews: ${a.totalPageviews} · Sessions: ${a.uniqueVisitors} · Bounce: ${a.bounceRate}%
 - Mobile: ${a.mobilePercent != null ? `${a.mobilePercent}%` : 'unknown'} · vs last week: ${a.trafficChange != null ? `${a.trafficChange > 0 ? '+' : ''}${a.trafficChange}%` : 'first week'}
@@ -4757,7 +4780,7 @@ async function processConnection(conn: any) {
     const engForReceipt = analytics?.last7Days?.engagement
     const visitorsForReceipt = analytics?.last7Days?.uniqueVisitors
     const behavioralNote = engForReceipt
-      ? `scroll depth on ${engForReceipt.scrollByPage?.length || 0} page(s) and ${engForReceipt.topClicks?.length || 0} clicked element(s) inspected (PostHog autocapture, last 7 days)`
+      ? `scroll depth on ${engForReceipt.scrollByPage?.length || 0} page(s), ${engForReceipt.topClicks?.length || 0} clicked element(s), and ${engForReceipt.rageClicks?.length || 0} rage-click page(s) inspected (PostHog autocapture, last 7 days)`
       : (typeof visitorsForReceipt === 'number' && visitorsForReceipt >= NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D
           ? 'none returned for the last 7 days (autocapture may be disabled)'
           : `not available — fewer than ${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions in the last 7 days`)
@@ -5001,34 +5024,60 @@ async function handleSingleRun(subscriptionId: string) {
   return { success: true, processed: 1 }
 }
 
-async function handleFullRun() {
-  console.log('[run] handleFullRun start')
-  await cleanupStaleRuns()
-
-  const { data: connections } = await supabase
-    .from('agent_connections').select('*, agent_subscriptions!inner(*)')
-    .eq('agent_subscriptions.status', 'active')
-    .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
-
-  console.log(`[run] active connections: ${connections?.length ?? 0}`)
-  if (!connections || connections.length === 0) {
-    return { success: true, message: 'No active connections' }
+// B3: fan out the Monday run — one single_run edge self-invocation per eligible
+// subscription — instead of processing every connection inside THIS one isolate's
+// wall-clock. The old inline worker pool (concurrency 3) put all N connections under a
+// single wall-clock budget; past ~30 customers a Monday would truncate. Each single_run
+// gets its own fresh isolate + wall-clock, and the per-subscription advisory lock + the
+// monthly spend cap already make concurrent/duplicate dispatch safe and idempotent
+// (handleSingleRun re-checks eligibility + acquires the lock). Batched with a small pause
+// so we don't hammer the edge concurrency ceiling (or GitHub/OpenRouter) in one instant.
+async function fanOutSingleRuns(subscriptionIds: string[]): Promise<number> {
+  const selfUrl    = `${Deno.env.get('SUPABASE_URL')}/functions/v1/agent-run`
+  const authHeader = `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+  const BATCH      = Number(Deno.env.get('AGENT_FANOUT_BATCH') || '5')
+  const PAUSE_MS   = Number(Deno.env.get('AGENT_FANOUT_PAUSE_MS') || '1000')
+  let dispatched = 0
+  for (let i = 0; i < subscriptionIds.length; i++) {
+    const subId = subscriptionIds[i]
+    // Fire-and-forget: the single_run handler returns 202 immediately and does the heavy
+    // work via EdgeRuntime.waitUntil, so this fetch resolves fast; the 2s abort is only a
+    // safety net for a hung dispatch. An AbortError still means the request landed.
+    const controller = new AbortController()
+    const t = setTimeout(() => controller.abort(), 2000)
+    try {
+      await fetch(selfUrl, {
+        method: 'POST',
+        headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intent: 'single_run', subscriptionId: subId }),
+        signal: controller.signal,
+      })
+      dispatched++
+    } catch (e: any) {
+      if (e?.name === 'AbortError') dispatched++
+      else slog('warn', 'fanout_dispatch_failed', { subscriptionId: subId, error: e?.message })
+    } finally {
+      clearTimeout(t)
+    }
+    if ((i + 1) % BATCH === 0 && i + 1 < subscriptionIds.length) {
+      await new Promise(r => setTimeout(r, PAUSE_MS))
+    }
   }
+  return dispatched
+}
 
-  // Stage 4.12: bounded concurrency. Unbounded Promise.allSettled hit GitHub
-  // and OpenRouter for every subscription in the same instant — a 200-user
-  // Monday would trip GitHub's secondary rate limits. Process at most N
-  // connections in parallel.
+// Legacy inline path (escape hatch: AGENT_FULLRUN_FANOUT=false). The Stage-4.12 bounded
+// worker pool — all connections under one isolate's wall-clock. Retained so fan-out can
+// be reverted without a redeploy if it ever misbehaves in prod.
+async function processConnectionsInline(connections: any[]) {
   const concurrency = Number(Deno.env.get('AGENT_RUN_CONCURRENCY') || '3')
   const queue       = [...connections]
   const workers     = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
     while (queue.length > 0) {
       const conn = queue.shift()
       if (!conn) return
-      // Stage 4.6: acquire lock; skip if already running elsewhere.
       const got = await acquireRunLock(conn.subscription_id)
       if (!got) {
-        console.log(`[run] lock held for ${conn.subscription_id} — skipped (another run owns it; not released until TTL or completion)`)
         console.warn(`[run-lock] skipping ${conn.subscription_id} — already locked`)
         continue
       }
@@ -5043,6 +5092,36 @@ async function handleFullRun() {
     }
   })
   await Promise.all(workers)
-
   return { success: true, processed: connections.length, concurrency }
+}
+
+async function handleFullRun() {
+  console.log('[run] handleFullRun start')
+  await cleanupStaleRuns()
+
+  const fanout = (Deno.env.get('AGENT_FULLRUN_FANOUT') ?? 'true') !== 'false'
+
+  if (fanout) {
+    // B3: only the eligible subscription ids are needed for the fan-out (no full rows).
+    const { data: subs } = await supabase
+      .from('agent_connections').select('subscription_id, agent_subscriptions!inner(status, subscription_status)')
+      .eq('agent_subscriptions.status', 'active')
+      .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
+    const ids = [...new Set((subs || []).map((s: any) => s.subscription_id).filter(Boolean))]
+    console.log(`[run] fan-out: ${ids.length} eligible subscription(s)`)
+    if (ids.length === 0) return { success: true, message: 'No active connections' }
+    const dispatched = await fanOutSingleRuns(ids)
+    return { success: true, mode: 'fanout', dispatched, total: ids.length }
+  }
+
+  // Escape hatch: process inline in this isolate.
+  const { data: connections } = await supabase
+    .from('agent_connections').select('*, agent_subscriptions!inner(*)')
+    .eq('agent_subscriptions.status', 'active')
+    .in('agent_subscriptions.subscription_status', ['active', 'trialing'])
+  console.log(`[run] active connections (inline): ${connections?.length ?? 0}`)
+  if (!connections || connections.length === 0) {
+    return { success: true, message: 'No active connections' }
+  }
+  return await processConnectionsInline(connections)
 }

@@ -57,6 +57,19 @@ const ROLLED_BACK_STATUSES = ['rolled_back', 'shopify_rolled_back']
 const REJECTED_STATUSES    = ['rejected', 'shopify_rejected']
 const AWAITING_STATUSES    = ['waiting_approval', 'shopify_awaiting_approval', 'shopify_rollback_pending']
 
+// B5: bounded-concurrency map. The report modes (midweek / weekly_summary) loop over
+// every subscriber doing ~6 PostHog queries each; serial iteration hits Vercel's 60s
+// wall well before the customer count justifies delegating to the edge function. A pool
+// of `concurrency` cuts wall time ~Nx. Each worker owns its own try/catch, so one
+// failure never aborts the batch.
+async function runPool(items, concurrency, worker) {
+  const queue = [...(items || [])]
+  const runners = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    while (queue.length) await worker(queue.shift())
+  })
+  await Promise.all(runners)
+}
+
 // Constant-time string equality for shared-secret comparisons.
 function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false
@@ -1152,7 +1165,7 @@ async function handleWeeklySummary(res) {
     return res.json({ success: true, message: 'No active connections' })
   }
 
-  for (const conn of connections) {
+  await runPool(connections, 4, async (conn) => {
     try {
       const subscriptionId = conn.subscription_id
       const oneWeekAgo     = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
@@ -1177,7 +1190,7 @@ async function handleWeeklySummary(res) {
       const chatId         = subRes.data?.telegram_chat_id || null
       if (!chatId) {
         console.warn(`[weekly_summary] sub=${subscriptionId}: no telegram_chat_id bound — skipping send`)
-        continue
+        return
       }
 
       const deployedRunIds = weekRuns.filter(r => DEPLOYED_STATUSES.includes(r.status) || ROLLED_BACK_STATUSES.includes(r.status)).map(r => r.id)
@@ -1272,7 +1285,7 @@ ${deployedChanges ? `\n<b>Deployed changes:</b>\n${deployedChanges}` : ''}${roll
     } catch (err) {
       console.error('Weekly summary error for subscription', conn.subscription_id, err)
     }
-  }
+  })
 
   return res.json({ success: true, mode: 'weekly_summary' })
 }
@@ -1288,7 +1301,8 @@ async function handleMidweek(res) {
     return res.json({ success: true, message: 'No active connections' })
   }
 
-  for (const conn of connections) {
+  await runPool(connections, 4, async (conn) => {
+   try {
     const analytics = await getPostHogAnalytics(
       decryptSecret(conn.posthog_api_key)    || process.env.POSTHOG_API_KEY,
       conn.posthog_project_id || process.env.POSTHOG_PROJECT_ID,
@@ -1304,10 +1318,10 @@ async function handleMidweek(res) {
     const chatId = sub?.telegram_chat_id || null
     if (!chatId) {
       console.warn(`[midweek] sub=${conn.subscription_id}: no telegram_chat_id bound — skipping send`)
-      continue
+      return
     }
     const a      = analytics?.last7Days
-    if (!a) continue
+    if (!a) return
 
     const trendEmoji = a.trafficChange === null ? '📊' : a.trafficChange > 10 ? '📈' : a.trafficChange < -10 ? '📉' : '➡️'
     const trendText  = a.trafficChange === null ? 'first week of tracking'
@@ -1347,7 +1361,10 @@ ${pagesLines ? `<b>Most visited:</b>\n${pagesLines}` : ''}
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
     })
-  }
+   } catch (err) {
+     console.error('Midweek error for subscription', conn.subscription_id, err)
+   }
+  })
 
   return res.json({ success: true, mode: 'midweek' })
 }
