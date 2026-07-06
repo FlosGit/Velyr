@@ -16,6 +16,27 @@ import { getOctokit } from './github-app.js'
 // find the exact change); pass null if unknown. Returns { kind } so the caller
 // can pick the right confirmation message.
 export async function reconcileDeployed(supabase, run, mergeSha, { approvalLabel = 'YES', expectedStatus = 'waiting_approval' } = {}) {
+  // A run carrying rollback_reason='metrics_dropped' is in its AUTO-ROLLBACK phase:
+  // handleRollbackCheck opened a revert PR and flipped it back to waiting_approval.
+  // Merging that PR UNDOES the earlier fix, so the run is 'rolled_back' (NOT 'deployed'
+  // — that dishonestly credited the reverted fix and let promotePendingDNA mark a failed
+  // change 'survived'), and the fix's pending DNA row resolves to 'rollback'. A rollback
+  // run is always a conversion_fix (setup_posthog runs are excluded from the rollback
+  // check), so this branch precedes the run_type handling below.
+  if (run.rollback_reason === 'metrics_dropped') {
+    const { data: claimed } = await supabase.from('agent_runs').update({
+      status:           'rolled_back',
+      completed_at:     new Date().toISOString(),
+      merge_commit_sha: mergeSha ?? null,
+    }).eq('id', run.id).eq('status', expectedStatus).select('id')
+    if (!claimed || claimed.length === 0) return { kind: 'noop', claimed: false }
+    // Resolve the fix's pending DNA (recorded at the original approval) to 'rollback'.
+    await supabase.from('agent_business_dna')
+      .update({ outcome: 'rollback' })
+      .eq('run_id', run.id).eq('outcome', 'pending')
+    return { kind: 'rollback_executed', claimed: true }
+  }
+
   // Compare-and-swap the terminal transition: two concurrent approvals (two distinct
   // Telegram messages — "yes" + "y" — or a Telegram YES racing the GitHub-merge
   // webhook) must not both run the non-idempotent side effects below (a duplicate
@@ -53,6 +74,21 @@ export async function reconcileDeployed(supabase, run, mergeSha, { approvalLabel
 // caller can pick the right message (and so setup-PR retry vs. permanent
 // decline is observable).
 export async function reconcileRejected(supabase, run, { rejectLabel = 'NO', expectedStatus = 'waiting_approval' } = {}) {
+  // NO on an auto-rollback proposal (rollback_reason='metrics_dropped') = KEEP the
+  // change live, the inverse of the forward flow. Flip the run back to 'deployed'
+  // (mirror of the Shopify shopify_rollback_pending → NO → shopify_deployed path) and
+  // stamp 'rollback_declined' so the next rollback_check doesn't re-detect it as a
+  // rollback run. No DNA insert: the fix's pending DNA stays pending, so a later check
+  // can still promote it if the metrics recover. Precedes the run_type branches (a
+  // rollback run is always a conversion_fix).
+  if (run.rollback_reason === 'metrics_dropped') {
+    const { data: claimed } = await supabase.from('agent_runs')
+      .update({ status: 'deployed', rollback_reason: 'rollback_declined' })
+      .eq('id', run.id).eq('status', expectedStatus).select('id')
+    if (!claimed || claimed.length === 0) return { kind: 'noop', claimed: false }
+    return { kind: 'rollback_declined', claimed: true }
+  }
+
   // Foreign-choice rows never opened a PR — permanent decline, no completed_at
   // (matches the original handler; this branch predates the completed_at stamp).
   if (run.run_type === 'setup_posthog_foreign_choice') {

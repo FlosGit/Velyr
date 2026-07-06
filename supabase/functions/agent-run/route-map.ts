@@ -62,10 +62,14 @@ export function fileToRoutePath(filePath: string): string | null {
     return normalizeRoute('/' + segs.join('/'))
   }
 
-  // ── Pages Router / Vite (preserved verbatim) ──
-  return p
+  // ── Pages Router / Vite ──
+  // A11: run the result through normalizeRoute (like the App Router branch) so a NESTED
+  // index — pages/blog/index.jsx → /blog/index → /blog/ — loses its trailing slash and
+  // becomes /blog (matching PostHog's $pathname). Root ('/') is preserved. Without this
+  // the funnel view lookup for every nested index page was always 0.
+  const pagesRoute = p
     .replace(/^(src\/pages|pages|src\/views|src\/screens)\//, '/')
     .replace(/\.(jsx|tsx|js|ts)$/, '')
     .replace(/\/index$/, '/')
-    .toLowerCase()
+  return normalizeRoute(pagesRoute)
 }

@@ -108,11 +108,16 @@ async function getActiveSubId(chatId) {
     .eq('agent_subscriptions.status', 'active')
     .not('verification_code_id', 'is', null)
     .not('verified_at',          'is', null)
+    // A15: a chat CAN be verified for >1 connection (SG3a shared-chat). Without .limit(1)
+    // the bare .maybeSingle() errored on 2 rows → null → every non-approval command
+    // (status/dna/note/competitor) answered "subscription no longer active", even though
+    // YES/NO worked (run-scoped via getChatAuthorizedSubIds). For these sub-scoped
+    // commands any one of the chat's authorized subs is a valid target, so pick the
+    // newest deterministically instead of failing closed. Approval stays run-scoped.
+    .order('verified_at', { ascending: false })
+    .limit(1)
     .maybeSingle()
   if (error) {
-    // Defense in depth: if Postgres returned an error (e.g. multiple rows
-    // matched the chat_id — should be impossible under the trust model),
-    // refuse to authorize rather than silently picking one.
     console.error('[telegram] getActiveSubId query error for chat_id', chatId, error)
     return null
   }
@@ -342,7 +347,9 @@ async function findLatestRejectedRunForChat(chatId) {
     .from('agent_runs')
     .select('id')
     .eq('subscription_id', subscriptionId)
-    .eq('status', 'rejected')
+    // A13: a Shopify-direct NO lands the fix in 'shopify_rejected', not 'rejected', so
+    // `note <reason>` after one previously answered "No recently skipped run".
+    .in('status', ['rejected', 'shopify_rejected'])
     .eq('run_type', 'conversion_fix')
     .order('completed_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
@@ -517,6 +524,20 @@ async function applyShopifyDirectWrite(run, conn, chatId) {
     analysis_result: { ...run.analysis_result, applied_write: { themeId: pending.themeId, files: appliedFiles, upsertJobId: up.jobId ?? null } },
   }).eq('id', run.id)
 
+  // Business DNA — record 'pending' for a conversion fix (a PostHog-setup apply has no
+  // conversion logic to learn from). This gives the Shopify-direct path the SAME DNA
+  // lifecycle as the GitHub path (reconcileDeployed): promoted to measured_win/survived
+  // by promotePendingDNA after 7 days, or resolved to 'rollback' if a 48h-drop rollback
+  // is later approved (executeShopifyDirectRollback).
+  if (run.analysis_result?.setup_kind !== 'posthog') {
+    await supabase.from('agent_business_dna').insert({
+      subscription_id: run.subscription_id, run_id: run.id,
+      fix_type: run.analysis_result?.change_type || 'other',
+      outcome: 'pending',
+      notes: `Applied to live theme (YES): ${(run.analysis_result?.problem || '').slice(0, 400)}`,
+    })
+  }
+
   // Stage 4: a PostHog-setup apply also stamps the install-once gate + gets its own copy.
   // The setup proposal consumed the run the user actually asked for — resolving it
   // starts the real analysis immediately instead of stranding them behind the cooldown.
@@ -628,6 +649,11 @@ async function executeShopifyDirectRollback(run, conn, chatId) {
   await supabase.from('agent_runs').update({
     status: 'shopify_rolled_back', completed_at: new Date().toISOString(),
   }).eq('id', run.id)
+  // Resolve the fix's pending DNA to 'rollback' (mirror of reconcileDeployed's isRollback
+  // branch for GitHub). The 48h check no longer records rollback DNA at proposal time.
+  await supabase.from('agent_business_dna')
+    .update({ outcome: 'rollback' })
+    .eq('run_id', run.id).eq('outcome', 'pending')
   return sendMessage(chatId, `🔄 Rolled back — your theme is restored to before this change.`)
 }
 
@@ -724,6 +750,9 @@ async function handleApprove(runId, chatId) {
     // reconcile path the GitHub pull_request webhook uses for a manual merge.
     const reconciled = await reconcileDeployed(supabase, run, prInfo.merge_commit_sha, { approvalLabel: 'YES, already merged' })
     if (reconciled.kind === 'noop') return sendMessage(chatId, `✅ <b>Already merged.</b> (Reconciled — status updated.)`)
+    if (reconciled.kind === 'rollback_executed') {
+      return sendMessage(chatId, `🔄 <b>Rollback merged.</b> The change has been reverted on your site (the revert PR was already merged).`)
+    }
     if (reconciled.kind === 'setup_installed') {
       const started = await startFollowupRun(supabase, run.subscription_id)
       return sendMessage(chatId, started
@@ -781,6 +810,11 @@ async function handleApprove(runId, chatId) {
   // helper the GitHub pull_request webhook calls for a manual merge.
   const result = await reconcileDeployed(supabase, run, mergeSha, { approvalLabel: 'YES' })
   if (result.kind === 'noop') return  // another invocation already reconciled this merge
+
+  // Auto-rollback revert PR merged → the earlier fix has been undone.
+  if (result.kind === 'rollback_executed') {
+    return sendMessage(chatId, `🔄 <b>Rolled back.</b> The revert PR was merged — Vercel is deploying the reverted version now. Your site is back to before this change.`)
+  }
 
   // Setup-PR YES → "analytics installed" + start the analysis run the setup consumed;
   // conversion fix → "deploying" message.
@@ -849,7 +883,7 @@ async function handleReject(runId, chatId) {
         ? `👍 No problem — I won't add analytics. Starting your analysis run from your funnel structure now. You can enable analytics later from your dashboard.`
         : `👍 No problem — I won't add analytics. I couldn't start your analysis run automatically — tap <b>Run now</b> in your dashboard. You can enable analytics later from there too.`)
     }
-    return sendMessage(chatId, `❌ <b>Skipped.</b> Nothing was changed in your theme — the agent will analyze again on the next run.`)
+    return sendMessage(chatId, `❌ <b>Skipped.</b> Nothing was changed in your theme — the agent will analyze again on the next run.\n\n<i>Optionally tell me why — reply <b>note &lt;reason&gt;</b> and I'll attach it to this run.</i>`)
   }
 
   // Stage 3: NO on a rollback proposal = KEEP the change live (the inverse of the
@@ -879,6 +913,12 @@ async function handleReject(runId, chatId) {
   await closeRejectedPr(conn, run, { close: true })
   const result = await reconcileRejected(supabase, run, { rejectLabel: 'NO' })
   if (result.kind === 'noop') return  // another invocation already rejected this run
+
+  // NO on an auto-rollback proposal = keep the change live (the run is flipped back to
+  // 'deployed'). The revert PR + its agent/rollback-* branch were just cleaned up above.
+  if (result.kind === 'rollback_declined') {
+    return sendMessage(chatId, `👍 <b>Kept the change live.</b> No rollback — I'll keep watching the metrics.`)
+  }
 
   switch (result.kind) {
     // setup_retry deliberately does NOT dispatch a follow-up run: the next run
@@ -956,14 +996,25 @@ async function handleStatus(chatId) {
 
   const statusEmoji = {
     pending: '⏳', running: '🔄', waiting_approval: '⏸',
-    approved: '✅', rejected: '❌', deployed: '🚀', failed: '💥', rolled_back: '🔄'
+    approved: '✅', rejected: '❌', deployed: '🚀', failed: '💥', rolled_back: '🔄',
+    // A13: Shopify-direct lifecycle — without these every shopify_* run rendered as ❓.
+    shopify_awaiting_approval: '⏸', shopify_deployed: '🚀', shopify_rejected: '❌',
+    shopify_rollback_pending: '⏸', shopify_rolled_back: '🔄', shopify_concurrency_abort: '🛑',
+    shopify_needs_reconsent: '🔌', shopify_not_configured: '⚙️', shopify_token_failed: '🔌',
+    shopify_theme_read_failed: '⚠️',
+    // Honest skips / find problems (both connection types).
+    skipped_low_confidence: '🤷', skipped_no_data: '🤷', skipped_insufficient_graph: '🤷',
+    skipped_cost_cap: '💸', skipped_repo_unavailable: '⚠️', skipped_unsupported_framework: '⚠️',
+    skipped_setup_pending: '⏭️', find_mismatch: '🔍', find_ambiguous: '🔍',
   }
 
   const lines = runs?.map(r => {
     const emoji = statusEmoji[r.status] ?? '❓'
     const date = new Date(r.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
     const prLink = r.pr_url ? ` — <a href="${escapeHtml(r.pr_url)}">PR</a>` : ''
-    return `${emoji} <code>${escapeHtml(r.id.slice(0, 8))}</code> ${escapeHtml(r.status.replace('_', ' '))} (${date})${prLink}`
+    // replace(/_/g, …): multi-underscore statuses (shopify_awaiting_approval) need a
+    // global replace, not the first-only .replace('_', ' ').
+    return `${emoji} <code>${escapeHtml(r.id.slice(0, 8))}</code> ${escapeHtml(r.status.replace(/_/g, ' '))} (${date})${prLink}`
   }) ?? []
 
   const { data: competitors } = await supabase

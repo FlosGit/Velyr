@@ -170,7 +170,7 @@ ${list(blindSpots)}
 
 - Revert this PR (GitHub UI: "Revert" button on the merged PR page).
 - If metrics regress, the agent's 48h rollback check will open a revert PR automatically and ping you for approval.
-- Auto-rollback trigger: site-wide bounce +${ROLLBACK_BOUNCE_PP_THRESHOLD}pp within 48h (correlation, not attribution)${aiHypothesisLine}
+- Auto-rollback trigger: bounce +${ROLLBACK_BOUNCE_PP_THRESHOLD}pp within 48h — measured on the affected route(s) when the change maps confidently to them, otherwise site-wide (correlation, not attribution)${aiHypothesisLine}
 
 ## Environment checks
 

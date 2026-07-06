@@ -1296,20 +1296,29 @@ function buildFunnelAnalysis(allPages: any, analytics: any) {
   }
 
   const funnelPages: any[] = []
-  let prevViews: number | null = null
+  // A16: drop-off is measured against the LANDING page's traffic (the funnel entry
+  // point), NOT the previous page in iteration order. The old version chained
+  // prevViews across funnelOrder, so an /about page "dropped off" from a /checkout
+  // page (adjacent only in the type list, not the real funnel) and pages within one
+  // type dropped off from each other. It also had a dead conditional whose two
+  // branches were identical. Now: establish the landing baseline, then compute a
+  // gap-vs-landing only for the core conversion-sequence types.
+  const SEQUENCE_TYPES = ['pricing', 'checkout', 'lead_magnet']
+  let landingViews: number | null = null
 
   for (const type of funnelOrder) {
     for (const path of (pagesByType[type] || [])) {
       // Stage 2: shared App-Router-aware mapping (Pages/Vite output unchanged).
       const routePath = fileToRoutePath(path) || '/'
 
-      const views        = topPathViews[routePath] || topPathViews[routePath + '/'] || 0
-      const dropOffScore = prevViews && views > 0 ? Math.round((1 - views / prevViews) * 100) : null
+      const views = topPathViews[routePath] || topPathViews[routePath + '/'] || 0
+      // First landing page with traffic sets the baseline (funnelOrder puts landing first).
+      if (landingViews === null && type === 'landing' && views > 0) landingViews = views
+      const dropOffScore = (SEQUENCE_TYPES.includes(type) && landingViews && views > 0)
+        ? Math.max(0, Math.round((1 - views / landingViews) * 100))
+        : null
 
       funnelPages.push({ filePath: path, pageType: type, routePath, views, dropOffScore })
-
-      if (views > 0 && (prevViews === null || type === 'landing')) prevViews = views
-      else if (views > 0) prevViews = views
     }
   }
 
@@ -1560,7 +1569,9 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
 // ─── PAGESPEED ───────────────────────────────────────────────────────────────
 async function getPageSpeedScore(url: string) {
   try {
-    const res  = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&key=${Deno.env.get('GOOGLE_PAGESPEED_API_KEY')}`)
+    // B2: bound the Lighthouse run (it can take 60s+) so a slow PageSpeed call can't
+    // stall the whole context Promise.all it sits inside.
+    const res  = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&key=${Deno.env.get('GOOGLE_PAGESPEED_API_KEY')}`, { signal: AbortSignal.timeout(30000) })
     const data = await res.json()
     return {
       performance: Math.round((data.lighthouseResult?.categories?.performance?.score || 0) * 100),
@@ -1579,7 +1590,12 @@ async function getPreviousRuns(subscriptionId: string) {
   const { data } = await supabase
     .from('agent_runs').select('analysis_result')
     .eq('subscription_id', subscriptionId)
-    .in('status', ['deployed', 'waiting_approval'])
+    // A4: include the Shopify-direct deployed/pending statuses. Without them a
+    // Shopify-direct run's own past fixes never populate the "ALREADY FIXED — DO NOT
+    // REPEAT" prompt block (those runs live in shopify_deployed / shopify_awaiting_
+    // approval, never plain deployed/waiting_approval), so the agent could re-propose a
+    // change the merchant already deployed every single week.
+    .in('status', ['deployed', 'waiting_approval', 'shopify_deployed', 'shopify_awaiting_approval'])
     .order('created_at', { ascending: false }).limit(5)
   return data?.map((r: any) => r.analysis_result?.problem).filter(Boolean) || []
 }
@@ -1595,6 +1611,12 @@ async function fetchBusinessDNA(subscriptionId: string) {
   const fmtDelta = (d: number) => d > 0 ? `+${d}%` : `${d}%`
   const wins     = data.filter((l: any) => l.outcome === 'positive')
   const losses   = data.filter((l: any) => l.outcome === 'negative')
+  // A5: only non-signal rows (insufficient_data from the rollback check, a stray manual
+  // note, …) → return null, NOT { winsText: 'None yet', lossesText: 'None yet' }. hasDNA
+  // string-truthy-checks those 'None yet' strings, so returning them flipped the no-data
+  // gate to "has DNA" for exactly the customers whose analytics were too thin to measure
+  // — letting Pass 2 run ungrounded on empty signal.
+  if (wins.length === 0 && losses.length === 0) return null
   return {
     winsText:   wins.map((l: any)   => `• ${l.change_type}: ${l.summary} (${fmtDelta(l.delta)} ${l.metric_type})`).join('\n') || 'None yet',
     lossesText: losses.map((l: any) => `• ${l.change_type}: ${l.summary} (${fmtDelta(l.delta)} ${l.metric_type})`).join('\n') || 'None yet',
@@ -2876,8 +2898,8 @@ async function generateMonthlyRoast(opts: {
   recentRuns: any[]; competitorData: any; dna: any;
 }) {
   try {
-    const wins   = opts.recentRuns.filter((r: any) => r.status === 'deployed').slice(0, 5)
-    const losses = opts.recentRuns.filter((r: any) => r.status === 'rolled_back' || r.status === 'rejected').slice(0, 5)
+    const wins   = opts.recentRuns.filter((r: any) => r.status === 'deployed' || r.status === 'shopify_deployed').slice(0, 5)
+    const losses = opts.recentRuns.filter((r: any) => ['rolled_back', 'shopify_rolled_back', 'rejected', 'shopify_rejected'].includes(r.status)).slice(0, 5)
 
     const prompt = `You are a smart, blunt friend writing a monthly roast report for the owner of ${opts.websiteUrl}. No corporate fluff. No hedging. Be honest about what's working, what's embarrassing, and what they keep dodging.
 
@@ -2902,12 +2924,9 @@ Make it sound like a smart friend being honest. Direct second person. No headers
     })
     assertPromptSize(requestBody, 'generateMonthlyRoast')
 
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${Deno.env.get('OPENROUTER_API_KEY')}`, 'Content-Type': 'application/json' },
-      body: requestBody,
-    })
-    const data = await res.json()
+    // B1: timeout + one retry (the roast is non-critical, so a hang here must never
+    // burn the run's wall-clock).
+    const data = await postOpenRouterWithRetry(requestBody, 'generateMonthlyRoast', 45_000)
     if (data?.usage) {
       await recordLLMUsage(opts.subscriptionId, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0, 'generateMonthlyRoast')
     }
@@ -2939,6 +2958,38 @@ Make it sound like a smart friend being honest. Direct second person. No headers
   }
 }
 
+// A10: fire the monthly roast on the first Monday REGARDLESS of which pipeline path the
+// run takes. The old call site ran only after a successful GitHub PR, so any month where
+// the first-Monday run skipped (no-data, low-confidence, find_mismatch, setup gate) or
+// took either Shopify path produced no roast. This runs once per customer per month —
+// gated by isFirstMondayOfMonth AND a same-month last_roast_at dedup (so cron + a manual
+// run on the same first Monday don't double-send) — and fetches its own inputs (it never
+// depended on pipeline outputs). Called right after the spend-cap pre-flight, before the
+// path fork. Never throws (generateMonthlyRoast owns its own try/catch).
+async function maybeRunMonthlyRoast(conn: any, subRow: any) {
+  if (!isFirstMondayOfMonth()) return
+  const chatId: string | null = subRow?.telegram_chat_id || null
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  const { data: subMeta } = await supabase
+    .from('agent_subscriptions').select('last_roast_at').eq('id', conn.subscription_id).maybeSingle()
+  if (subMeta?.last_roast_at && String(subMeta.last_roast_at).slice(0, 7) === thisMonth) return   // already roasted this month
+
+  const { data: recentRuns } = await supabase.from('agent_runs')
+    .select('status, analysis_result, completed_at')
+    .eq('subscription_id', conn.subscription_id)
+    .gte('created_at', new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString())
+    .order('created_at', { ascending: false }).limit(20)
+  const competitorUrls = await getCompetitorUrls(conn.subscription_id)
+  const [competitorData, dna] = await Promise.all([
+    competitorUrls.length > 0 ? fetchCompetitorData(competitorUrls) : Promise.resolve(null),
+    loadBusinessDNA(conn.subscription_id),
+  ])
+  await generateMonthlyRoast({
+    subscriptionId: conn.subscription_id, websiteUrl: conn.website_url || '',
+    chatId, recentRuns: recentRuns || [], competitorData, dna,
+  })
+}
+
 // ─── GENERIC CAPPED LLM CALL (Stage RA3) ─────────────────────────────────────
 // Low-level OpenRouter call with the Stage-2 cost caps applied: assertPromptSize
 // guards MAX_PROMPT_BYTES, recordLLMUsage tracks spend, and the caller passes
@@ -2946,6 +2997,39 @@ Make it sound like a smart friend being honest. Direct second person. No headers
 // closure; intentionally generic so future light LLM calls reuse it. The
 // monthly-spend ceiling is enforced once per run in processConnection's
 // pre-flight (before this is ever reached).
+// B1: shared OpenRouter POST with a wall-clock TIMEOUT + ONE retry. Both LLM call sites
+// previously fetched with NO AbortSignal (a hung POST burned the edge isolate's
+// wall-clock — the WallClockTimeout failure class) and NO retry (a transient 429/5xx
+// failed the whole weekly run with a scary "Run Failed" Telegram). Retries once, after a
+// 2s pause, on a network error / 429 / 5xx; a plain 4xx is returned as-is (a real request
+// error we shouldn't hammer). Returns the parsed JSON body.
+async function postOpenRouterWithRetry(requestBody: string, callerLabel: string, timeoutMs: number): Promise<any> {
+  const attempt = async () => {
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Deno.env.get('OPENROUTER_API_KEY')}`, 'Content-Type': 'application/json' },
+        body: requestBody,
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      const data = await res.json().catch(() => ({}))
+      return { ok: res.ok, status: res.status, data, networkError: null as any }
+    } catch (e: any) {
+      return { ok: false, status: 0, data: null, networkError: e }
+    }
+  }
+  let r = await attempt()
+  if (!r.ok && (r.networkError || r.status === 429 || r.status >= 500)) {
+    slog('warn', 'openrouter_retry', { callerLabel, status: r.status, error: r.networkError ? String(r.networkError?.message || r.networkError).slice(0, 120) : undefined })
+    await new Promise(res => setTimeout(res, 2000))
+    r = await attempt()
+  }
+  if (r.networkError && r.data == null) {
+    throw new Error(`${callerLabel}: OpenRouter request failed: ${r.networkError?.message || String(r.networkError)}`)
+  }
+  return r.data
+}
+
 async function callLLMCapped(subscriptionId: string, system: string, user: string, maxTokens: number, callerLabel: string, imageUrls: string[] = []): Promise<string> {
   const requestBody = JSON.stringify({
     model: 'anthropic/claude-sonnet-4.6',
@@ -2966,12 +3050,10 @@ async function callLLMCapped(subscriptionId: string, system: string, user: strin
   })
   assertPromptSize(requestBody, callerLabel)
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('OPENROUTER_API_KEY')}`, 'Content-Type': 'application/json' },
-    body: requestBody,
-  })
-  const data = await response.json()
+  // B1: image-bearing Pass-2 calls get a longer budget (the provider fetches the
+  // screenshot URLs); everything else 45s. Both under the edge wall-clock.
+  const timeoutMs = imageUrls.length > 0 ? 90_000 : 45_000
+  const data = await postOpenRouterWithRetry(requestBody, callerLabel, timeoutMs)
 
   const usage = data?.usage
   if (usage) await recordLLMUsage(subscriptionId, usage.prompt_tokens || 0, usage.completion_tokens || 0, callerLabel)
@@ -3013,9 +3095,9 @@ function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any)
   }
   if (funnelAnalysis) {
     const pages = (funnelAnalysis.funnelPages || []).filter((p: any) => p.views > 0).slice(0, 8)
-      .map((p: any) => `${p.filePath} (${p.pageType}) → ${p.views} views${p.dropOffScore ? `, ${p.dropOffScore}% drop-off` : ''}`).join('; ')
+      .map((p: any) => `${p.filePath} (${p.pageType}) → ${p.views} views${p.dropOffScore ? `, ${p.dropOffScore}% below landing traffic` : ''}`).join('; ')
     if (pages) lines.push(`Funnel pages (file → traffic): ${pages}`)
-    if (funnelAnalysis.biggestDropOff) lines.push(`Biggest funnel drop-off: ${funnelAnalysis.biggestDropOff.filePath} (${funnelAnalysis.biggestDropOff.dropOffScore}%).`)
+    if (funnelAnalysis.biggestDropOff) lines.push(`Largest drop from the landing page: ${funnelAnalysis.biggestDropOff.filePath} (${funnelAnalysis.biggestDropOff.dropOffScore}% fewer visitors reach it).`)
   }
   const dnaWins   = String(dna?.whatWorks    || dna?.winsText   || '').trim().slice(0, 400)
   const dnaLosses = String(dna?.neverDoAgain || dna?.lossesText || '').trim().slice(0, 400)
@@ -3040,9 +3122,13 @@ export interface FixResult {
   file_to_edit?: string
   code_change?: { find: string; replace: string }
   // Item 4: bounded multi-file. OPTIONAL companion edits (max 2) the primary
-  // change REQUIRES to function (component + its CSS module, constant + call
-  // site). Each passes the same per-file guards (forbidden path, extension,
-  // find-uniqueness, syntax) as the primary; never used to bundle unrelated fixes.
+  // change REQUIRES to function (a constant AND its call site, a component AND a
+  // helper it imports). Each passes the same per-file guards as the primary
+  // (forbidden path, extension, find-uniqueness, syntax); never used to bundle
+  // unrelated fixes. A3: on a non-theme run only the JS/TS family is a valid edit
+  // target (createPR's VERIFIABLE_EDIT_EXTENSIONS) — a standalone .css/.module.css
+  // path is rejected and fails the whole run, so style changes must live in the
+  // component (className / inline style / styled-component), never a separate sheet.
   additional_edits?: Array<{ file_to_edit: string; code_change: { find: string; replace: string } }>
   expected_metric?: { metric: 'bounce_rate' | 'conversion_rate' | 'form_completion'; direction: 'decrease' | 'increase'; magnitude_pp: number; caveat: string }
   confidence?: 'low' | 'medium' | 'high'
@@ -3084,6 +3170,16 @@ async function callAIForFix(
   ).join('\n\n')
   const allowedPaths = deepContext.components.map(c => c.path)
 
+  // A3: the editable-file-type constraint is framework-specific. A theme run (SG2)
+  // legitimately edits .liquid/.json; every other run is restricted to the JS/TS family
+  // (createPR's VERIFIABLE_EDIT_EXTENSIONS). Steering the model to a .css/.module.css
+  // path on a css-modules repo used to hard-fail the whole run (that path is neither in
+  // allowedPaths nor a verifiable extension), so we forbid it explicitly instead.
+  const isThemeRunPrompt = mapResult.framework === 'shopify-liquid'
+  const editTypeConstraint = isThemeRunPrompt
+    ? '- Every file_to_edit (primary and additional) MUST be a theme file shown above (.liquid, or a template .json). Do NOT invent asset/config paths.'
+    : '- Every file_to_edit (primary and additional) MUST be a JavaScript/TypeScript file (.js/.jsx/.ts/.tsx/.mjs/.cjs). Do NOT select a standalone stylesheet (.css/.scss/.module.css) — it will be rejected. Make style changes inside the component itself: edit its className, an inline style object, or its styled-component/emotion block.'
+
   const eng = a?.engagement
   const engagementLines = eng ? `
 - Scroll depth (avg max-scroll % per page, from $pageleave — low % = visitors stop before seeing the rest; [mob/desk] = per-device split): ${(eng.scrollByPage || []).slice(0, 5).map((s: any) => {
@@ -3099,7 +3195,7 @@ async function callAIForFix(
 - Top pages: ${(a.topPages || []).map((p: any) => `${p.path} (${p.views} views)`).join(', ')}${engagementLines}` : 'No analytics data available.'
 
   const funnelContext = funnelAnalysis ? `FUNNEL (${funnelAnalysis.totalPages} pages): ${Object.entries(funnelAnalysis.pageTypes).map(([t, n]) => `${t}: ${n}`).join(', ')}
-${funnelAnalysis.funnelPages.filter((p: any) => p.views > 0).map((p: any) => `- ${p.filePath} (${p.pageType}) → ${p.views} views${p.dropOffScore ? `, ${p.dropOffScore}% drop-off` : ''}`).join('\n')}${funnelAnalysis.biggestDropOff ? `\nBIGGEST DROP-OFF: ${funnelAnalysis.biggestDropOff.filePath} (${funnelAnalysis.biggestDropOff.dropOffScore}%)` : ''}` : ''
+${funnelAnalysis.funnelPages.filter((p: any) => p.views > 0).map((p: any) => `- ${p.filePath} (${p.pageType}) → ${p.views} views${p.dropOffScore ? `, ${p.dropOffScore}% fewer visitors than the landing page` : ''}`).join('\n')}${funnelAnalysis.biggestDropOff ? `\nLARGEST DROP FROM LANDING: ${funnelAnalysis.biggestDropOff.filePath} (${funnelAnalysis.biggestDropOff.dropOffScore}% fewer visitors than the landing page reach it)` : ''}` : ''
 
   const dnaWins   = (dna?.whatWorks    || dna?.winsText   || '').trim()
   const dnaLosses = (dna?.neverDoAgain || dna?.lossesText || '').trim()
@@ -3187,7 +3283,8 @@ Identify the single highest-impact conversion problem visible in this material. 
 CONSTRAINTS:
 - file_to_edit MUST be one of: ${allowedPaths.join(', ') || '(none)'}. Do not invent paths.
 - code_change.find MUST appear EXACTLY ONCE in the chosen file, copied verbatim.
-- additional_edits is OPTIONAL and capped at 2. Use it ONLY for edits the primary change REQUIRES to function (e.g. the component AND its CSS module, or a constant AND its call site) — never to bundle unrelated improvements. Same rules per entry: path from the list above, find appears exactly once in that file. Omit it (or use []) for a normal single-file fix.
+- additional_edits is OPTIONAL and capped at 2. Use it ONLY for edits the primary change REQUIRES to function (e.g. a constant AND its call site, or a component AND a helper it imports) — never to bundle unrelated improvements. Same rules per entry: path from the list above, find appears exactly once in that file. Omit it (or use []) for a normal single-file fix.
+${editTypeConstraint}
 - Respect all BRAND GUARDRAILS above; never re-attempt anything on the NEVER DO AGAIN list.
 - If you cannot find a confident #1 problem, return { "skip": true, "reason": "..." } and we will not open a PR this week.`
 
@@ -3526,6 +3623,33 @@ async function maybeProposeShopifyPostHogSetup(
   // No $host partition key yet → the loader would register nothing useful; skip setup
   // (the conversion analysis still runs, on funnel-only signal).
   if (!hostFilter) return 'continue'
+
+  // A7: dedupe. If a PostHog-setup proposal is already awaiting the merchant's YES, do
+  // NOT stage a second one — the gate here is only posthog_snippet_installed_at (never
+  // stamped until the merchant acts), so without this every weekly run stacked another
+  // shopify_awaiting_approval row and re-sent the "turn on analytics" Telegram. Mirrors
+  // the GitHub Setup-PR dedupe (maybeRunSnippetSetup). .limit(1) so an existing pile-up
+  // of duplicates doesn't error maybeSingle. Marking THIS run skipped + returning
+  // 'proposed' makes the caller return without staging a duplicate.
+  const { data: existingShopifySetup } = await supabase
+    .from('agent_runs')
+    .select('id')
+    .eq('subscription_id', conn.subscription_id)
+    .eq('run_type', 'setup_posthog')
+    .eq('status', 'shopify_awaiting_approval')
+    .limit(1)
+    .maybeSingle()
+  if (existingShopifySetup) {
+    await dbWrite(
+      supabase.from('agent_runs').update({
+        status: 'skipped_setup_pending', run_type: 'setup_posthog', current_step: 'done',
+        completed_at: new Date().toISOString(),
+        error_message: 'Analytics setup already awaiting approval — run skipped',
+      }).eq('id', run.id),
+      DB_TIMEOUT_MS, 'shopify_posthog_dedupe_skip',
+    )
+    return 'proposed'
+  }
 
   const read = await readShopifyThemeFile(conn.shopify_shop_domain, conn.shopify_main_theme_id, accessToken, 'layout/theme.liquid')
   if (!read.ok) {
@@ -4246,10 +4370,13 @@ async function processConnection(conn: any) {
     )
     run = runData
 
-    // Pull subscription extras (revenue connection, slug, etc.) once up front
-    const { data: subRow } = await supabase.from('agent_subscriptions')
-      .select('telegram_chat_id, stripe_revenue_connected, stripe_account_id, competitors, public_slug, is_public')
-      .eq('id', conn.subscription_id).single()
+    // B7: reuse the subscription row the caller already joined onto the connection
+    // (handleFullRun / handleSingleRun both SELECT agent_subscriptions!inner(*)) instead
+    // of a second round-trip. Fallback query only if a future caller omits the join.
+    const subRow = conn.agent_subscriptions
+      || (await supabase.from('agent_subscriptions')
+            .select('telegram_chat_id, stripe_revenue_connected, stripe_account_id, competitors, public_slug, is_public')
+            .eq('id', conn.subscription_id).single()).data
     const trackedCompetitors: string[] = subRow?.competitors || []
 
     // ── Monthly spend cap pre-flight ───────────────────────────────────────
@@ -4271,6 +4398,12 @@ async function processConnection(conn: any) {
       await notifyCapExceeded(subRow?.telegram_chat_id || null, spendStatus.spent, spendStatus.period)
       return
     }
+
+    // A10: monthly roast — fire it here (once per customer per month) so it lands on
+    // EVERY pipeline path, not just a successful GitHub PR. Awaited (bounded by its own
+    // timeouts + internal try/catch) before the fork so it can't be dropped when a later
+    // branch returns early.
+    await maybeRunMonthlyRoast(conn, subRow)
 
     // ── Shopify-direct fork (Step 3) ─────────────────────────────────────────
     // A pure-Shopify connection has no GitHub repo and takes the Liquid-theme
@@ -4333,7 +4466,7 @@ async function processConnection(conn: any) {
     // breaks the build. The Telegram goes ONLY to this subscription's own
     // chat_id (never env.TELEGRAM_CHAT_ID, which would leak repo failures to
     // Flo's personal chat).
-    const mapResult: MapResult = await discoverFrameworkAndStructure(
+    let mapResult: MapResult = await discoverFrameworkAndStructure(
       octokit, conn.github_repo_owner, conn.github_repo_name, preflight.defaultBranch,
     )
 
@@ -4347,6 +4480,26 @@ async function processConnection(conn: any) {
     // maybeRunSnippetSetup) also keeps the React-oriented snippet flow away from
     // theme repos.
     if (isShopifyThemeRepo(mapResult.repoTree)) {
+      // A6 / SG3b: Shopify can map the live theme to ANY branch. When the merchant set a
+      // connected branch that isn't the repo default, the theme content we ANALYZE must
+      // come from that branch too — otherwise the ranker + find/replace run against
+      // default-branch bytes while createPR validates + writes against the connected
+      // branch (createPR's baseBranch), producing chronic find_mismatch or a fix computed
+      // from stale content. Re-map on the connected branch (one extra getTree, only for
+      // this configuration). A failed re-map falls through to the default tree — that only
+      // risks a find_mismatch, never a write to the wrong branch (createPR owns the base).
+      const connectedBranch = conn.shopify_connected_branch
+      if (connectedBranch && connectedBranch !== preflight.defaultBranch) {
+        try {
+          mapResult = await discoverFrameworkAndStructure(
+            octokit, conn.github_repo_owner, conn.github_repo_name, connectedBranch,
+          )
+        } catch (e: any) {
+          slog('warn', 'shopify_github_connected_branch_remap_failed', {
+            subscriptionId: conn.subscription_id, branch: connectedBranch, error: e?.message,
+          })
+        }
+      }
       await processGithubThemeConnection(conn, run, subRow, octokit, mapResult.repoTree)
       return
     }
@@ -4687,19 +4840,8 @@ async function processConnection(conn: any) {
 
     // (Weekly email summary removed — Telegram approval message is the only
     // customer notification for a weekly run.)
-
-    // 3h: Monthly roast — only on the first Monday
-    if (isFirstMondayOfMonth()) {
-      const { data: recentRuns } = await supabase.from('agent_runs')
-        .select('status, analysis_result, completed_at')
-        .eq('subscription_id', conn.subscription_id)
-        .gte('created_at', new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString())
-        .order('created_at', { ascending: false }).limit(20)
-      await generateMonthlyRoast({
-        subscriptionId: conn.subscription_id, websiteUrl: conn.website_url || '',
-        chatId, recentRuns: recentRuns || [], competitorData, dna,
-      })
-    }
+    // (Monthly roast moved to maybeRunMonthlyRoast, called after the spend-cap
+    // pre-flight above so it fires on every pipeline path — bug A10.)
 
   } catch (err: any) {
     slog('error', 'process_connection_failed', {

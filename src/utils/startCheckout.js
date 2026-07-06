@@ -3,19 +3,19 @@
 // Pure primitive: POST to /api/stripe?action=checkout and, on success, redirect
 // the browser to the Checkout session URL. Returns { redirected, error }.
 //
-// Callers are responsible for resolving any Supabase session and passing
-// userId/userEmail. The subscription checkout always requires an authenticated
-// user (userId); the server rejects the call without one.
-export async function startCheckout(type, userId = null, userEmail = null) {
+// Callers pass the Supabase session access token. The server derives the user
+// (id + email) from the verified JWT — A14: userId/userEmail are no longer trusted
+// from the request body. The subscription checkout always requires an authenticated
+// user; the server rejects the call (401) without a valid token.
+export async function startCheckout(type, accessToken = null) {
   try {
-    const body = { type }
-    if (userId)    body.userId    = userId
-    if (userEmail) body.userEmail = userEmail
-
     const res = await fetch('/api/stripe?action=checkout', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({ type }),
     })
     const data = await res.json().catch(() => ({}))
 

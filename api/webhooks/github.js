@@ -124,6 +124,14 @@ export default async function handler(req, res) {
     if (pr.merged) {
       const reconciled = await reconcileDeployed(supabase, run, pr.merge_commit_sha, { approvalLabel: 'merged on GitHub' })
       if (reconciled.kind === 'noop') return res.status(200).json({ ok: true, reconciled: 'already' })
+      // Auto-rollback revert PR merged on github.com → the earlier fix is undone.
+      if (reconciled.kind === 'rollback_executed') {
+        await notifyTelegram(
+          conn.telegram_chat_id,
+          `🔁 Revert PR #${prNumber} was merged on GitHub — the change is now marked <b>rolled back</b>. Your site is back to before this change.`
+        )
+        return res.status(200).json({ ok: true, reconciled: 'rolled_back' })
+      }
       // A merged Setup-PR consumed the analysis run — resolving it out-of-band
       // starts the real run now, same as the Telegram YES path.
       if (reconciled.kind === 'setup_installed') {
@@ -146,6 +154,15 @@ export default async function handler(req, res) {
       await closeRejectedPr(conn, run, { close: false })
       const rejected = await reconcileRejected(supabase, run, { rejectLabel: 'closed on GitHub' })
       if (rejected.kind === 'noop') return res.status(200).json({ ok: true, reconciled: 'already' })
+      // Revert PR closed without merging = keep the change live (run flipped back to
+      // 'deployed'). Mirror the Telegram NO wording.
+      if (rejected.kind === 'rollback_declined') {
+        await notifyTelegram(
+          conn.telegram_chat_id,
+          `🔁 Revert PR #${prNumber} was closed on GitHub — keeping the change live. I'll keep watching the metrics.`
+        )
+        return res.status(200).json({ ok: true, reconciled: 'rollback_declined' })
+      }
       // Permanent setup decline unblocks analysis (setup_retry re-offers next
       // run instead — no dispatch, it would just re-ask immediately).
       let startedNote = ''

@@ -45,7 +45,17 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')   // A18: align with the telegram.js + edge escapeHtml twins
 }
+
+// Status groups spanning BOTH the GitHub and Shopify-direct run lifecycles. A
+// Shopify-direct run never reaches plain 'deployed'/'rolled_back'/'rejected'/
+// 'waiting_approval' (it lives in shopify_*), so any status filter that must cover both
+// connection types uses these instead of a bare string compare. (Bugs A9, A12.)
+const DEPLOYED_STATUSES    = ['deployed', 'shopify_deployed']
+const ROLLED_BACK_STATUSES = ['rolled_back', 'shopify_rolled_back']
+const REJECTED_STATUSES    = ['rejected', 'shopify_rejected']
+const AWAITING_STATUSES    = ['waiting_approval', 'shopify_awaiting_approval', 'shopify_rollback_pending']
 
 // Constant-time string equality for shared-secret comparisons.
 function safeEqual(a, b) {
@@ -171,12 +181,9 @@ async function captureScreenshot(url) {
   } catch { return null }
 }
 
-async function recordDNA(subscriptionId, runId, fixType, outcome, notes) {
-  await supabase.from('agent_business_dna').insert({
-    subscription_id: subscriptionId, run_id: runId, fix_type: fixType, outcome,
-    notes: (notes || '').slice(0, 500),
-  })
-}
+// (recordDNA removed — DNA is now written only at approval time: reconcileDeployed
+// for GitHub, applyShopifyDirectWrite for Shopify-direct. The 48h rollback check
+// only measures; it never inserts DNA. See handleRollbackCheck.)
 
 // A pending DNA entry earns 'measured_win' only when the run's matched-window
 // bounce measurement (impact_metrics, deploy±2d, ≥100 sessions/side) improved
@@ -292,6 +299,56 @@ async function handleEnforceSubscriptions(res) {
     .delete()
     .lt('created_at', fpCutoff)
   if (fpGcError && fpGcError.code !== '42P01') console.warn('[enforce-subscriptions] trial-fingerprint GC failed:', fpGcError.message)
+
+  // A19: bound three tables/buckets that previously grew forever. All best-effort,
+  // daily-cron piggyback like the GCs above; tolerate 42P01 (table not yet migrated).
+  //
+  // 1. agent_competitor_snapshots — one row per tracked URL per weekly run. The diff
+  //    logic only reads the newest snapshot per URL, so anything older than 90d is dead
+  //    weight (a competitor still tracked keeps its recent baseline within the window).
+  const snapCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+  const { error: snapGcErr } = await supabase
+    .from('agent_competitor_snapshots').delete().lt('captured_at', snapCutoff)
+  if (snapGcErr && snapGcErr.code !== '42P01') console.warn('[enforce-subscriptions] competitor-snapshot GC failed:', snapGcErr.message)
+
+  // 2. agent_site_network — one nodes/edges JSON blob per run. The dashboard reads only
+  //    the newest per subscription, so 90d+ history is pure storage.
+  const netCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+  const { error: netGcErr } = await supabase
+    .from('agent_site_network').delete().lt('created_at', netCutoff)
+  if (netGcErr && netGcErr.code !== '42P01') console.warn('[enforce-subscriptions] site-network GC failed:', netGcErr.message)
+
+  // 3. screenshots storage bucket — every capture uploads a UUID-keyed PNG and nothing
+  //    ever deleted them. List a bounded page (oldest first), and delete only objects
+  //    >180d old that are NOT referenced by any run's screenshot_before/after (the
+  //    columns store the full public URL, whose last path segment is the object name).
+  //    Batch-capped; successive daily runs drain any backlog. Cross-referencing means a
+  //    still-shown old screenshot is never deleted.
+  try {
+    const { data: objects } = await supabase.storage.from('screenshots')
+      .list('', { limit: 1000, sortBy: { column: 'created_at', order: 'asc' } })
+    const shotCutoff = Date.now() - 180 * 24 * 60 * 60 * 1000
+    const oldNames = (objects || [])
+      .filter(o => o?.name?.endsWith('.png') && o?.created_at && new Date(o.created_at).getTime() < shotCutoff)
+      .map(o => o.name)
+    if (oldNames.length) {
+      const { data: refRows } = await supabase
+        .from('agent_runs').select('screenshot_before, screenshot_after')
+      const referenced = new Set()
+      for (const r of (refRows || [])) {
+        for (const u of [r.screenshot_before, r.screenshot_after]) {
+          if (typeof u === 'string') { const seg = u.split('/').pop(); if (seg) referenced.add(seg) }
+        }
+      }
+      const toDelete = oldNames.filter(n => !referenced.has(n)).slice(0, 100)
+      if (toDelete.length) {
+        const { error: rmErr } = await supabase.storage.from('screenshots').remove(toDelete)
+        if (rmErr) console.warn('[enforce-subscriptions] screenshot GC remove failed:', rmErr.message)
+      }
+    }
+  } catch (e) {
+    console.warn('[enforce-subscriptions] screenshot GC failed:', e?.message || String(e))
+  }
 
   // Capture any missing public-timeline "after" screenshots. Piggybacked on this
   // daily cron (in addition to the weekly rollback_check) so a deployed run's
@@ -532,11 +589,15 @@ function fileToRoutePath(filePath) {
     }
     return normalizeRoute('/' + segs.join('/'))
   }
-  return p
+  // A11 (twin of route-map.ts): normalizeRoute the pages-branch result so a nested
+  // index (pages/blog/index.jsx → /blog/index → /blog/) drops its trailing slash to
+  // /blog, matching PostHog's $pathname. Root '/' is preserved. Keep byte-identical
+  // to the Deno twin.
+  const pagesRoute = p
     .replace(/^(src\/pages|pages|src\/views|src\/screens)\//, '/')
     .replace(/\.(jsx|tsx|js|ts)$/, '')
     .replace(/\/index$/, '/')
-    .toLowerCase()
+  return normalizeRoute(pagesRoute)
 }
 
 // ─── ROLLBACK CHECK ───────────────────────────────────────────────────────────
@@ -567,7 +628,10 @@ async function backfillAfterScreenshots(handlerStart) {
   const { data: pending } = await supabase
     .from('agent_runs')
     .select('id, subscription_id')
-    .eq('status', 'deployed')
+    // A12: include shopify_deployed — a Shopify-direct deploy gets a "before" shot
+    // (attachBeforeScreenshot) but never an "after" one without this, so its dashboard /
+    // public-timeline card stays half-populated forever.
+    .in('status', DEPLOYED_STATUSES)
     .is('screenshot_after', null)
     .lte('completed_at', minDeployAge)
     .order('completed_at', { ascending: false })
@@ -904,15 +968,16 @@ async function handleRollbackCheck(res) {
         ...(shouldRollback ? { rollback_reason: 'metrics_dropped' } : {}),
       }).eq('id', run.id)
 
-      // 3d: Business DNA — record outcome
-      const fixType = run.analysis_result?.change_type || 'other'
-      const noteSuffix = `${run.analysis_result?.problem || ''} (bounce ${bounceBefore}% → ${bounceAfter}%, Δ${bounceDelta >= 0 ? '+' : ''}${bounceDelta}%)`
-      if (shouldRollback) {
-        await recordDNA(run.subscription_id, run.id, fixType, 'rollback', `Auto-rolled back: ${noteSuffix}`)
-      } else {
-        // Pending — gets promoted to 'success' after 7 days if still deployed
-        await recordDNA(run.subscription_id, run.id, fixType, 'pending', `48h check positive: ${noteSuffix}`)
-      }
+      // Business DNA is NOT written here anymore. It has a single lifecycle now:
+      //   • recorded 'pending' when a fix is APPROVED (reconcileDeployed for GitHub,
+      //     applyShopifyDirectWrite for Shopify-direct),
+      //   • promoted to measured_win / survived by promotePendingDNA after 7 days, OR
+      //   • resolved to 'rollback' when an auto-rollback is APPROVED (reconcileDeployed
+      //     isRollback / executeShopifyDirectRollback).
+      // The old proposal-time inserts here recorded a rollback that hadn't happened yet
+      // (rollbacks are approval-gated) and double-counted the deployed fix (a second
+      // pending row on top of the approval-time one). This 48h check now only MEASURES
+      // (impact_metrics + agent_learnings above); it never mutates DNA.
 
       const isShopifyDirect = conn?.connection_source === 'shopify_direct'
         || (conn?.shopify_shop_domain && !conn?.github_repo_name)
@@ -1115,7 +1180,7 @@ async function handleWeeklySummary(res) {
         continue
       }
 
-      const deployedRunIds = weekRuns.filter(r => r.status === 'deployed' || r.status === 'rolled_back').map(r => r.id)
+      const deployedRunIds = weekRuns.filter(r => DEPLOYED_STATUSES.includes(r.status) || ROLLED_BACK_STATUSES.includes(r.status)).map(r => r.id)
       let impactMetrics    = []
       if (deployedRunIds.length > 0) {
         const { data: metrics } = await supabase.from('impact_metrics').select('*').in('run_id', deployedRunIds)
@@ -1129,10 +1194,10 @@ async function handleWeeklySummary(res) {
         : null
 
       const a          = analytics?.last7Days
-      const deployed   = weekRuns.filter(r => r.status === 'deployed').length
-      const rolledBack = weekRuns.filter(r => r.status === 'rolled_back').length
-      const rejected   = weekRuns.filter(r => r.status === 'rejected').length
-      const pending    = weekRuns.filter(r => r.status === 'waiting_approval').length
+      const deployed   = weekRuns.filter(r => DEPLOYED_STATUSES.includes(r.status)).length
+      const rolledBack = weekRuns.filter(r => ROLLED_BACK_STATUSES.includes(r.status)).length
+      const rejected   = weekRuns.filter(r => REJECTED_STATUSES.includes(r.status)).length
+      const pending    = weekRuns.filter(r => AWAITING_STATUSES.includes(r.status)).length
 
       const trendEmoji = !a?.trafficChange ? '📊' : a.trafficChange > 10 ? '📈' : a.trafficChange < -10 ? '📉' : '➡️'
       const trendText  = a?.trafficChange == null ? 'First week of tracking'
@@ -1180,8 +1245,8 @@ async function handleWeeklySummary(res) {
       const dnaSummary       = totalLearnings > 0
         ? `\n🧬 <b>Business DNA:</b> ${totalLearnings} learnings${avgPositiveDelta ? ` · avg +${avgPositiveDelta}% on wins` : ''}`
         : ''
-      const deployedChanges  = weekRuns.filter(r => r.status === 'deployed').map(r => `  ✅ ${escapeHtml(r.analysis_result?.problem?.slice(0, 60) || 'Change deployed')}`).join('\n') || ''
-      const rolledBackChanges = weekRuns.filter(r => r.status === 'rolled_back').map(r => `  🔄 ${escapeHtml(r.analysis_result?.problem?.slice(0, 60) || 'Rolled back')}`).join('\n') || ''
+      const deployedChanges  = weekRuns.filter(r => DEPLOYED_STATUSES.includes(r.status)).map(r => `  ✅ ${escapeHtml(r.analysis_result?.problem?.slice(0, 60) || 'Change deployed')}`).join('\n') || ''
+      const rolledBackChanges = weekRuns.filter(r => ROLLED_BACK_STATUSES.includes(r.status)).map(r => `  🔄 ${escapeHtml(r.analysis_result?.problem?.slice(0, 60) || 'Rolled back')}`).join('\n') || ''
 
       const message = `📋 <b>Velyr — Weekly Executive Summary</b>
 <i>Week of ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</i>
@@ -1512,9 +1577,17 @@ async function handleUpdateSettings(req, res, user) {
 
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No valid fields provided' })
 
+  // B10: resolve the caller's newest subscription and update BY id. The old
+  // update-by-auth_user_id + .select().maybeSingle() throws if a user ever holds 2
+  // rows (and would write the slug/settings to BOTH). Mirrors handleDnaVerdict.
+  const { data: target } = await supabase
+    .from('agent_subscriptions').select('id').eq('auth_user_id', user.id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle()
+  if (!target) return res.status(404).json({ error: 'No subscription found' })
+
   const { data, error } = await supabase
     .from('agent_subscriptions').update(updates)
-    .eq('auth_user_id', user.id).select().maybeSingle()
+    .eq('id', target.id).select().maybeSingle()
   if (error) {
     // 23505 = the public_slug UNIQUE index rejected a slug another user already
     // holds — the authoritative close to the check-then-write TOCTOU above (see
@@ -1614,7 +1687,11 @@ async function handleTriggerRun(req, res, user) {
     .from('agent_runs')
     .select('id')
     .eq('subscription_id', sub.id)
-    .in('status', ['running', 'waiting_approval'])
+    // A8: include the Shopify-direct pending states — a staged theme write awaiting YES
+    // (shopify_awaiting_approval) or a proposed rollback (shopify_rollback_pending) is
+    // just as much "in flight" as a GitHub waiting_approval; a second manual run would
+    // stage a duplicate pending write and break the one-pending-per-sub invariant.
+    .in('status', ['running', 'waiting_approval', 'shopify_awaiting_approval', 'shopify_rollback_pending'])
     .limit(1)
     .maybeSingle()
   if (inflight) {

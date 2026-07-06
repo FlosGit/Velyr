@@ -1701,7 +1701,7 @@ function StripeSubscriptionPanel({ navigate }) {
     setSubscribeLoading(true)
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) { setSubscribeLoading(false); return }
-    const result = await startCheckout('subscription', session.user.id, session.user.email)
+    const result = await startCheckout('subscription', session.access_token)
     if (!result?.redirected) setSubscribeLoading(false)
   }
 
@@ -2395,7 +2395,7 @@ export default function AgentDashboard({ navigate }) {
     setSubscribeLoading(true)
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) { navigate('/agent/login'); return }
-    const result = await startCheckout('subscription', session.user.id, session.user.email)
+    const result = await startCheckout('subscription', session.access_token)
     if (!result?.redirected) setSubscribeLoading(false)
   }
 

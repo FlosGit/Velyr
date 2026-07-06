@@ -1,6 +1,7 @@
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { computeFingerprintsForSubscription } from './_lib/trial-fingerprint.js'
+import { dispatchAgentRun } from './_lib/edge-dispatch.js'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2026-04-22.dahlia',
@@ -11,6 +12,26 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+// Fire the post-onboarding first run (single_run) once the trial exists. Bug A2:
+// this MUST happen after start_trial flips subscription_status to 'trialing', not at
+// onboarding finalize — handleSingleRun's eligibility filter (active|trialing) drops a
+// run fired while the status is still NULL. Idempotent: only dispatches when the sub has
+// no run rows yet, so the dashboard's start_trial retry / the alreadyStarted early-return
+// can't double-fire. Deliberately does NOT touch last_manual_run_at (an auto-run must not
+// consume the daily manual-run allowance). Non-fatal — Monday's cron is the backstop.
+async function maybeDispatchFirstRun(subscriptionId) {
+  const { count, error } = await supabase
+    .from('agent_runs')
+    .select('id', { count: 'exact', head: true })
+    .eq('subscription_id', subscriptionId)
+  if (error) {
+    console.warn('start_trial: first-run guard count failed, skipping auto-run:', error.message)
+    return
+  }
+  if ((count || 0) > 0) return  // a run already exists — don't re-fire
+  await dispatchAgentRun({ intent: 'single_run', subscriptionId })
+}
+
 // CONVERSION checkout. As of the no-card-trial change, this path runs ONLY at
 // trial-end: the 14-day trial was created WITHOUT a payment method and Stripe's
 // trial_settings.end_behavior.missing_payment_method:'cancel' cancelled it, so
@@ -20,16 +41,25 @@ const supabase = createClient(
 // here — they start a no-card trial through onboarding (api/onboarding.js
 // init_subscription → api/stripe.js start_trial).
 async function handleCheckout(req, res) {
-  const { type, userId, userEmail } = req.body
+  const { type } = req.body
 
   if (type !== 'subscription') {
     return res.status(400).json({ error: 'Invalid type. Must be subscription' })
   }
 
-  // Subscriptions require an account (the Growth Agent system is keyed by Supabase user_id).
-  if (!userId) {
-    return res.status(400).json({ error: 'userId required for subscription' })
+  // A14: authenticate. userId/userEmail previously came from the request BODY, so an
+  // unauthenticated caller could open a Checkout session bound to another user's Stripe
+  // customer — a write into their billing state and, since the Checkout page shows that
+  // customer's email, an email-disclosure oracle given a leaked user UUID. Derive both
+  // from the verified JWT instead (mirrors start_trial / portal).
+  const authHeader = req.headers.authorization
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' })
   }
+  const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.slice(7))
+  if (authError || !user) return res.status(401).json({ error: 'Invalid token' })
+  const userId    = user.id
+  const userEmail = user.email
 
   const APP_URL = process.env.VITE_APP_URL
 
@@ -113,6 +143,9 @@ async function handleStartTrial(req, res) {
   // Idempotent: an existing customer id means the trial (or a converted sub)
   // already exists — never create a second trial / second customer.
   if (sub.stripe_customer_id) {
+    // Recover a lost first-run dispatch (e.g. the edge was unreachable on the first
+    // start_trial): maybeDispatchFirstRun no-ops if a run already exists.
+    await maybeDispatchFirstRun(sub.id)
     return res.status(200).json({ ok: true, alreadyStarted: true })
   }
 
@@ -211,6 +244,12 @@ async function handleStartTrial(req, res) {
       )
       if (fpInsErr) console.error('start_trial: fingerprint record failed:', fpInsErr.message)
     }
+
+    // Fire the first run now that the row is 'trialing' (run-eligible) — the analytics
+    // Setup-PR lands immediately instead of waiting for Monday's cron. Skip only if the
+    // row update above failed (the webhook reconciles it to 'trialing' asynchronously and
+    // Monday's cron is the backstop). Bug A2.
+    if (!updErr) await maybeDispatchFirstRun(sub.id)
 
     return res.status(200).json({ ok: true })
   } catch (err) {

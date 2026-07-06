@@ -110,10 +110,11 @@ export default async function handler(req, res) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object
-        console.log('[webhook/checkout] event id:', event.id)
-        console.log('[webhook/checkout] session:', JSON.stringify(session))
-        console.log('[webhook/checkout] metadata:', session.metadata)
-        console.log('[webhook/checkout] client_reference_id:', session.client_reference_id, '| mode:', session.mode, '| customer:', session.customer, '| subscription:', session.subscription, '| customer_email:', session.customer_email)
+        // B9: do NOT log the full session (customer_details carries name / email /
+        // address — PII in the log stream). Log only the non-PII identifiers the
+        // diagnostics actually need. metadata is app-controlled (type + user_id).
+        console.log('[webhook/checkout] event id:', event.id, '| metadata:', session.metadata)
+        console.log('[webhook/checkout] client_reference_id:', session.client_reference_id, '| mode:', session.mode, '| customer:', session.customer, '| subscription:', session.subscription, '| has_email:', !!session.customer_email)
 
         const userId = session.client_reference_id
         const type = session.metadata?.type
