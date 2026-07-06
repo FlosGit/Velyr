@@ -2017,9 +2017,21 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
 }
 
 // ─── RUN DETAIL MODAL ─────────────────────────────────────────────────────────
-function RunDetail({run, onClose}) {
+function RunDetail({run, onClose, onDecision, busy}) {
   const analysis = run.analysis_result||{}
   const funnel   = run.funnel_analysis
+  // C2: dashboard approve/reject for a pending GitHub run (waiting_approval + a PR).
+  // Shopify theme approvals (shopify_awaiting_approval) stay Telegram-only, so we gate on
+  // the GitHub status + pr_url. onDecision is absent in read-only contexts (public page).
+  const canDecide = typeof onDecision === 'function' && run.status === 'waiting_approval' && !!run.pr_url
+  const [decisionError, setDecisionError] = useState(null)
+  const [decisionDone, setDecisionDone] = useState(null)  // 'approve' | 'reject'
+  async function decide(decision) {
+    setDecisionError(null)
+    const r = await onDecision(run.id, decision)
+    if (r?.ok) setDecisionDone(decision)
+    else setDecisionError(r?.error || 'Could not complete that action.')
+  }
   const fields   = [
     {label:'Data insight',         text:analysis.data_insight},
     {label:'Impact',               text:analysis.impact},
@@ -2127,9 +2139,31 @@ function RunDetail({run, onClose}) {
             </div>
           </div>
         )}
+        {canDecide && !decisionDone && (
+          <div style={{marginTop:20}}>
+            <SectionLabel style={{marginBottom:8}}>Your decision</SectionLabel>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              <button onClick={()=>decide('approve')} disabled={busy} className="v-press" style={{
+                borderRadius:9,padding:'12px',border:'none',cursor:busy?'default':'pointer',opacity:busy?0.6:1,
+                background:C.green,color:'#fff',fontSize:14,fontFamily:FONT.sans,fontWeight:600,
+              }}>{busy?'Working…':'✓ Approve & merge'}</button>
+              <button onClick={()=>decide('reject')} disabled={busy} className="v-press" style={{
+                borderRadius:9,padding:'12px',border:`1px solid ${C.border}`,cursor:busy?'default':'pointer',opacity:busy?0.6:1,
+                background:C.bgSoft,color:C.text,fontSize:14,fontFamily:FONT.sans,fontWeight:500,
+              }}>Skip</button>
+            </div>
+            {decisionError && <p style={{fontSize:12,color:C.redText||C.yellowText,marginTop:8}}>{decisionError}</p>}
+            <p style={{fontSize:11,color:C.textMuted,marginTop:8}}>You can also reply YES / NO in Telegram — either works.</p>
+          </div>
+        )}
+        {decisionDone && (
+          <p style={{fontSize:13,color:C.greenText,marginTop:20,fontWeight:500}}>
+            {decisionDone==='approve' ? '✓ Approved — the change is deploying now.' : '✓ Skipped — the agent will try again next run.'}
+          </p>
+        )}
         {run.pr_url&&(
           <a href={run.pr_url} target="_blank" rel="noreferrer" className="btn-primary v-press" style={{
-            display:'block',textAlign:'center',marginTop:20,
+            display:'block',textAlign:'center',marginTop:decisionDone||canDecide?10:20,
             borderRadius:9,padding:'12px',
             fontSize:14,fontFamily:FONT.sans,fontWeight:500,textDecoration:'none',
           }}>View Pull Request on GitHub →</a>
@@ -2409,6 +2443,31 @@ export default function AgentDashboard({ navigate }) {
     setActionLoading(false)
   }
 
+  // C2: approve (merge) or reject (close) the pending GitHub run from the dashboard —
+  // the web twin of the Telegram YES/NO. Reuses the same server-side reconcile + CAS, so
+  // racing a Telegram reply is safe. Returns { ok } | { ok:false, error } for inline
+  // display; refreshes on success. Shopify theme approvals stay Telegram-only (409).
+  const [runDecisionBusy, setRunDecisionBusy] = useState(false)
+  async function handleRunDecision(runId, decision) {
+    if (runDecisionBusy || isDemo) return { ok: false, error: 'Unavailable in demo mode.' }
+    setRunDecisionBusy(true)
+    try {
+      const token = await getToken()
+      const res = await fetch(`/api/agent/run?action=${decision === 'approve' ? 'approve_run' : 'reject_run'}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) { await fetchData(); return { ok: true } }
+      return { ok: false, error: data.error || 'Could not complete that action.' }
+    } catch {
+      return { ok: false, error: 'Network error. Please try again.' }
+    } finally {
+      setRunDecisionBusy(false)
+    }
+  }
+
   // "Run now" — fires a single manual run (api/agent/run.js?action=trigger_run).
   // Server enforces: active + not paused, no run in-flight, max 1/day. We
   // optimistically stamp last_manual_run_at so the button locks immediately, and
@@ -2501,7 +2560,7 @@ export default function AgentDashboard({ navigate }) {
   return (
     <>
       <style>{CSS + MOTION_CSS}</style>
-      {selected&&<RunDetail run={selected} onClose={()=>setSelected(null)}/>}
+      {selected&&<RunDetail run={selected} onClose={()=>setSelected(null)} onDecision={handleRunDecision} busy={runDecisionBusy}/>}
       {showDeleteConfirm&&(
         <DeleteConfirmModal
           onConfirm={handleDeleteAccount}

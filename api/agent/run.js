@@ -6,6 +6,8 @@ import { throttling } from '@octokit/plugin-throttling'
 import crypto from 'node:crypto'
 import { decryptSecret } from '../_lib/secret-crypto.js'
 import { resolveAffectedScope, sessionize, bounceFromSessions } from '../_lib/route-scope.js'
+import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
+import { startFollowupRun } from '../_lib/edge-dispatch.js'
 
 // Stage 5.D: Octokit with automatic GitHub rate-limit / secondary-rate-limit
 // backoff (honors Retry-After). Mirrors the Edge Function.
@@ -397,7 +399,7 @@ export default async function handler(req, res) {
   }
 
   // ── Authenticated user actions (Supabase JWT) ─────────────────────────────
-  if (action === 'update-settings' || action === 'reenable_snippet' || action === 'trigger_run' || action === 'dna_verdict') {
+  if (action === 'update-settings' || action === 'reenable_snippet' || action === 'trigger_run' || action === 'dna_verdict' || action === 'approve_run' || action === 'reject_run') {
     const authHeader = req.headers.authorization
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' })
     const token = authHeader.replace('Bearer ', '')
@@ -408,6 +410,7 @@ export default async function handler(req, res) {
     if (action === 'reenable_snippet') return handleReenableSnippet(req, res, user)
     if (action === 'trigger_run')      return handleTriggerRun(req, res, user)
     if (action === 'dna_verdict')      return handleDnaVerdict(req, res, user)
+    if (action === 'approve_run' || action === 'reject_run') return handleRunAction(req, res, user, action)
   }
 
   // ── Account actions (quick — stay in Vercel) ──────────────────────────────
@@ -1830,4 +1833,95 @@ async function handleTriggerRun(req, res, user) {
     .eq('id', sub.id)
 
   return res.status(200).json({ success: true, triggered: true, nextManualRunAt })
+}
+
+// ─── C2: Approve / reject a run from the DASHBOARD (Supabase JWT) ─────────────
+// The web twin of the Telegram YES/NO for GitHub runs — customers who miss the
+// Telegram ping can act from the place they already check results. It reuses the SAME
+// reconcile helpers + compare-and-swap as the Telegram + GitHub-webhook paths, so a
+// dashboard action and a Telegram reply racing each other is safe (one wins, one no-ops)
+// and lands the run in exactly the same state (incl. the A1 rollback branches).
+//
+// SCOPE: GitHub runs in 'waiting_approval' only. Shopify-direct theme approvals
+// (shopify_*) stay Telegram-only for now — their apply/rollback logic (optimistic
+// concurrency + live theme writes) lives in the Telegram handler and isn't worth
+// duplicating here; the action returns a clear 409 pointing the user to Telegram.
+// Ownership: the run must belong to one of the caller's own subscriptions (no IDOR).
+async function handleRunAction(req, res, user, action) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const runId = req.body?.run_id
+  if (!runId || typeof runId !== 'string') return res.status(400).json({ error: 'run_id required' })
+
+  const { data: subs } = await supabase
+    .from('agent_subscriptions').select('id').eq('auth_user_id', user.id)
+  const subIds = (subs || []).map(s => s.id)
+  if (subIds.length === 0) return res.status(404).json({ error: 'No subscription found' })
+
+  const { data: run } = await supabase
+    .from('agent_runs').select('*').eq('id', runId).in('subscription_id', subIds).maybeSingle()
+  if (!run) return res.status(404).json({ error: 'Run not found' })
+
+  // Shopify-direct theme approvals are Telegram-only for now.
+  if (String(run.status).startsWith('shopify_')) {
+    return res.status(409).json({ error: 'Theme approvals are handled in Telegram — reply to the approval message there.' })
+  }
+  if (run.status !== 'waiting_approval') {
+    return res.status(409).json({ error: 'This run is no longer awaiting approval.' })
+  }
+
+  const { data: conn } = await supabase
+    .from('agent_connections').select('*').eq('subscription_id', run.subscription_id).single()
+  if (!conn) return res.status(404).json({ error: 'Connection not found' })
+
+  // ── Reject ──
+  if (action === 'reject_run') {
+    await closeRejectedPr(conn, run, { close: true })
+    const result = await reconcileRejected(supabase, run, { rejectLabel: 'dashboard' })
+    if (result.kind === 'noop') return res.status(200).json({ success: true, status: run.status, already: true })
+    return res.status(200).json({ success: true, status: 'rejected', kind: result.kind })
+  }
+
+  // ── Approve ──
+  // Foreign-choice (add-analytics-alongside) needs the edge Setup-PR build — keep it in
+  // Telegram (that path fire-and-forgets to the edge fn).
+  if (run.run_type === 'setup_posthog_foreign_choice') {
+    return res.status(409).json({ error: 'Confirm this analytics choice in Telegram.' })
+  }
+  if (!run.pr_number) return res.status(409).json({ error: 'This run has no pull request to merge.' })
+
+  const octokit = await getOctokit(conn.github_installation_id)
+  let prInfo
+  try {
+    const { data } = await octokit.rest.pulls.get({ owner: conn.github_repo_owner, repo: conn.github_repo_name, pull_number: run.pr_number })
+    prInfo = data
+  } catch (err) {
+    return res.status(502).json({ error: `Could not fetch PR #${run.pr_number} from GitHub.` })
+  }
+
+  // Already merged out-of-band → just reconcile.
+  if (prInfo.merged) {
+    const r = await reconcileDeployed(supabase, run, prInfo.merge_commit_sha, { approvalLabel: 'dashboard, already merged' })
+    if (r.kind === 'setup_installed') await startFollowupRun(supabase, run.subscription_id)
+    return res.status(200).json({ success: true, status: r.kind === 'rollback_executed' ? 'rolled_back' : 'deployed', already: true })
+  }
+  if (prInfo.state === 'closed') return res.status(409).json({ error: 'The pull request is closed (not merged).' })
+  if (prInfo.mergeable === false) return res.status(409).json({ error: 'The PR is not mergeable (a conflict with the base branch). Resolve it on GitHub, then retry.' })
+
+  let mergeSha = null
+  try {
+    const { data: mergeResult } = await octokit.rest.pulls.merge({
+      owner: conn.github_repo_owner, repo: conn.github_repo_name, pull_number: run.pr_number, merge_method: 'squash',
+    })
+    mergeSha = mergeResult?.sha || null
+  } catch (err) {
+    return res.status(502).json({ error: `Merge failed: ${err?.message || 'GitHub error'}. Fix on GitHub and retry, or reject.` })
+  }
+
+  const result = await reconcileDeployed(supabase, run, mergeSha, { approvalLabel: 'dashboard' })
+  if (result.kind === 'noop') return res.status(200).json({ success: true, status: 'deployed', already: true })
+  if (result.kind === 'setup_installed') {
+    await startFollowupRun(supabase, run.subscription_id)
+    return res.status(200).json({ success: true, status: 'deployed', kind: 'setup_installed' })
+  }
+  return res.status(200).json({ success: true, status: result.kind === 'rollback_executed' ? 'rolled_back' : 'deployed', kind: result.kind })
 }
