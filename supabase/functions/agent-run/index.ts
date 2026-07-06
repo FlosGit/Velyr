@@ -3972,7 +3972,7 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   // Item 3a: start both viewport captures NOW so they overlap the ranker +
   // Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
   const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
-  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
+  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint + ((subRow?.conversion_goal || '').trim() ? ` OWNER CONVERSION GOAL: rank higher the files/components that most influence "${(subRow?.conversion_goal || '').trim().slice(0, 300)}".` : '')
   const rankerCallAI = (args: { system: string; user: string }) =>
     callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
   const rankerResult: RankerResult = await rankComponentsForConversion(
@@ -4276,7 +4276,7 @@ async function processGithubThemeConnection(
   // Item 3a: start both viewport captures NOW so they overlap the ranker +
   // Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
   const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
-  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
+  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint + ((subRow?.conversion_goal || '').trim() ? ` OWNER CONVERSION GOAL: rank higher the files/components that most influence "${(subRow?.conversion_goal || '').trim().slice(0, 300)}".` : '')
   const rankerCallAI = (args: { system: string; user: string }) =>
     callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
   const rankerResult: RankerResult = await rankComponentsForConversion(
@@ -4737,7 +4737,7 @@ async function processConnection(conn: any) {
     // Item 3a: start both viewport captures NOW so they overlap the ranker +
     // deep-read + Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
     const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
-    const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint
+    const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna) + focusHint + ((subRow?.conversion_goal || '').trim() ? ` OWNER CONVERSION GOAL: rank higher the files/components that most influence "${(subRow?.conversion_goal || '').trim().slice(0, 300)}".` : '')
     const rankerCallAI = (args: { system: string; user: string }) =>
       callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
 
