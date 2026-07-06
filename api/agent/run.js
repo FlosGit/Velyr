@@ -1170,6 +1170,51 @@ async function handleRollbackCheck(res) {
   return res.json({ success: true, checked: deployedRuns?.length || 0, afterShotsCaptured })
 }
 
+// ─── C9: "BROKEN WINDOWS" SWEEP (zero-LLM deterministic site checks) ──────────
+// Cheap, deterministic HTML checks on the customer's homepage — surfaced as one line in
+// the weekly summary. Fills skip-weeks with visible, honest signal at NO token cost, and
+// catches real SEO/UX regressions the conversion agent doesn't look at. Best-effort: any
+// fetch/parse failure returns [] (never throws, never blocks the summary). All checks are
+// parseable from the fetched HTML alone — no link-following (which would be slow/expensive).
+async function scanBrokenWindows(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VelyrBot/1.0)' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return []
+    const html = await res.text()
+    const findings = []
+    const isHttps = /^https:/i.test(url)
+
+    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, ' ').trim()
+    if (!title) findings.push('missing or empty <title> tag')
+    else if (title.length > 65) findings.push(`title is ${title.length} chars — search results truncate past ~60`)
+
+    const metaDesc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i)?.[1]?.trim()
+    if (metaDesc == null) findings.push('no meta description (search engines invent a snippet)')
+    else if (metaDesc.length < 50) findings.push('meta description under 50 chars — too thin for search')
+
+    if (!/<meta[^>]+property=["']og:title["']/i.test(html))  findings.push('no og:title — weak link previews when shared')
+    if (!/<meta[^>]+property=["']og:image["']/i.test(html))  findings.push('no og:image — no thumbnail on social shares')
+    if (!/<meta[^>]+name=["']viewport["']/i.test(html))      findings.push('no viewport meta — mobile layout likely broken')
+
+    const imgs  = html.match(/<img\b[^>]*>/gi) || []
+    const noAlt = imgs.filter(t => !/\balt\s*=/i.test(t)).length
+    if (imgs.length > 0 && noAlt > 0) findings.push(`${noAlt} of ${imgs.length} images have no alt text (accessibility + SEO)`)
+
+    if (isHttps) {
+      const mixed = (html.match(/(?:src|href)\s*=\s*["']http:\/\/[^"']+/gi) || [])
+        .filter(u => !/http:\/\/(?:localhost|127\.0\.0\.1|www\.w3\.org|schema\.org|ns\.adobe\.com)/i.test(u)).length
+      if (mixed > 0) findings.push(`${mixed} insecure http:// resource(s) on an https page (mixed-content warnings)`)
+    }
+
+    return findings.slice(0, 5)
+  } catch {
+    return []
+  }
+}
+
 // ─── WEEKLY SUMMARY ───────────────────────────────────────────────────────────
 async function handleWeeklySummary(res) {
   const { data: connections } = await supabase
@@ -1277,6 +1322,12 @@ async function handleWeeklySummary(res) {
       const deployedChanges  = weekRuns.filter(r => DEPLOYED_STATUSES.includes(r.status)).map(r => `  ✅ ${escapeHtml(r.analysis_result?.problem?.slice(0, 60) || 'Change deployed')}`).join('\n') || ''
       const rolledBackChanges = weekRuns.filter(r => ROLLED_BACK_STATUSES.includes(r.status)).map(r => `  🔄 ${escapeHtml(r.analysis_result?.problem?.slice(0, 60) || 'Rolled back')}`).join('\n') || ''
 
+      // C9: zero-LLM site health sweep — one line, best-effort (never blocks the summary).
+      const brokenWindows = conn.website_url ? await scanBrokenWindows(conn.website_url) : []
+      const bwLine = brokenWindows.length
+        ? `\n\n🔧 <b>Quick wins on your site</b> (not conversion fixes — worth a look):\n${brokenWindows.map(f => `  • ${escapeHtml(f)}`).join('\n')}`
+        : ''
+
       const message = `📋 <b>Velyr — Weekly Executive Summary</b>
 <i>Week of ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</i>
 
@@ -1290,7 +1341,7 @@ Bounce rate: ${bounceText}${bestMetricLine}${mehLine}
 • Rolled back: ${rolledBack}
 • Rejected: ${rejected}
 • Awaiting approval: ${pending}
-${deployedChanges ? `\n<b>Deployed changes:</b>\n${deployedChanges}` : ''}${rolledBackChanges ? `\n<b>Rolled back:</b>\n${rolledBackChanges}` : ''}${dnaSummary}
+${deployedChanges ? `\n<b>Deployed changes:</b>\n${deployedChanges}` : ''}${rolledBackChanges ? `\n<b>Rolled back:</b>\n${rolledBackChanges}` : ''}${dnaSummary}${bwLine}
 
 <i>Next run: Monday · Reply <b>status</b> for details</i>`
 
