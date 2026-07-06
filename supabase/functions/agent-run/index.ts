@@ -1078,6 +1078,23 @@ async function notifyCapExceeded(chatId: string | null, spent: number, period: s
   }).catch(err => console.error('[llm-cap] notifyCapExceeded send failed:', err))
 }
 
+// C11: surface the model's OPTIONAL question to the owner (sent on a skip). They reply
+// with the existing `note <answer>` command, which stores it in agent_learnings as
+// durable prompt context for future runs — so the agent learns business context it can
+// never scrape. Best-effort; never throws.
+async function notifyOwnerQuestion(chatId: string | null, question: string | undefined | null) {
+  const q = (question || '').trim()
+  if (!chatId || !q) return
+  await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `🤔 <b>One question to sharpen next week's fix</b>\n\n${escapeHtml(q.slice(0, 500))}\n\nReply <b>note</b> &lt;your answer&gt; and I'll factor it into every future run.`,
+      parse_mode: 'HTML',
+    }),
+  }).catch(err => console.error('[owner-question] send failed:', err))
+}
+
 // Honest "we don't have enough to suggest something" message. Used by the
 // no-data gate and the empty-repo gate so a missing-signal week doesn't ship
 // a fabricated PR. `reason` is a short single-line cause.
@@ -3197,6 +3214,11 @@ export interface FixResult {
   confidence_reason?: string
   blind_spots?: string[]
   rollback_signal?: string
+  // C11: an OPTIONAL single question the model wants the owner to answer to materially
+  // improve future recommendations (business context it can't scrape). Surfaced via
+  // Telegram on a skip; the owner replies with the existing `note <answer>` command,
+  // which stores it as durable prompt context. Omitted unless genuinely useful.
+  question_for_owner?: string
 }
 
 async function callAIForFix(
@@ -3351,7 +3373,8 @@ Identify the single highest-impact conversion problem visible in this material. 
   "confidence": "low" | "medium" | "high",
   "confidence_reason": "what about the inputs makes this more or less confident",
   "blind_spots": ["specific things you couldn't inspect that could change this assessment"],
-  "rollback_signal": "what would tell us in 48h this didn't work"
+  "rollback_signal": "what would tell us in 48h this didn't work",
+  "question_for_owner": "OPTIONAL — one specific question whose answer would materially improve future recommendations (business context you cannot scrape, e.g. 'What's the ONE action you want visitors to take on /pricing — start a trial, book a demo, or buy?'). Omit this field entirely unless a concrete answer would genuinely change your analysis. Never ask something inferable from the inputs."
 }
 CONSTRAINTS:
 - file_to_edit MUST be one of: ${allowedPaths.join(', ') || '(none)'}. Do not invent paths.
@@ -4020,6 +4043,7 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
       DB_TIMEOUT_MS, 'shopify_low_confidence_update',
     )
     await notifyInsufficientData(chatId, fixResult.reason || 'no confident high-impact fix this week')
+    await notifyOwnerQuestion(chatId, fixResult.question_for_owner)  // C11
     return
   }
   // Every edited file (primary + additional_edits, item 4) must be one of the
@@ -4323,6 +4347,7 @@ async function processGithubThemeConnection(
       DB_TIMEOUT_MS, 'shopify_github_low_confidence_update',
     )
     await notifyInsufficientData(chatId, fixResult.reason || 'no confident high-impact fix this week')
+    await notifyOwnerQuestion(chatId, fixResult.question_for_owner)  // C11
     return
   }
   // Every edited file (primary + additional_edits, item 4) must be one of the
@@ -4815,6 +4840,7 @@ async function processConnection(conn: any) {
         DB_TIMEOUT_MS, 'skipped_low_confidence_update'
       )
       await notifyInsufficientData(chatId || null, fixResult.reason || 'no confident high-impact fix this week')
+      await notifyOwnerQuestion(chatId || null, fixResult.question_for_owner)  // C11
       return
     }
 
