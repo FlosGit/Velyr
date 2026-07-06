@@ -70,6 +70,20 @@ async function runPool(items, concurrency, worker) {
   await Promise.all(runners)
 }
 
+// C1: inline approval keyboard. callback_data carries the exact run id so a button tap
+// resolves the precise run (the webhook's callback_query handler routes it to handleApprove
+// /handleReject, which authorize it against the chat's subs). `variant` picks labels: 'fix'
+// (apply/skip a proposed change) or 'rollback' (undo/keep). Plain text YES/NO still works.
+function approvalKeyboard(runId, variant = 'fix') {
+  const [yes, no] = variant === 'rollback'
+    ? ['↩️ Roll back', '✅ Keep it']
+    : ['✅ Apply', '❌ Skip']
+  return { inline_keyboard: [[
+    { text: yes, callback_data: `approve:${runId}` },
+    { text: no,  callback_data: `reject:${runId}` },
+  ]] }
+}
+
 // Constant-time string equality for shared-secret comparisons.
 function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false
@@ -695,8 +709,9 @@ async function proposeShopifyDirectRollback(run, bounceBefore, bounceAfter, boun
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: subRow.telegram_chat_id,
-          text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 ${escapeHtml(scopeLabel)}: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\nReply <b>YES</b> to undo this change on your live theme, or <b>NO</b> to keep it.`,
+          text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 ${escapeHtml(scopeLabel)}: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\nTap a button below (or reply <b>YES</b> to undo / <b>NO</b> to keep).`,
           parse_mode: 'HTML',
+          reply_markup: approvalKeyboard(run.id, 'rollback'),
         }),
       })
       const j = await res.json().catch(() => ({}))
@@ -1104,8 +1119,9 @@ async function handleRollbackCheck(res) {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     chat_id: ownerChatId,
-                    text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 ${escapeHtml(scopeLabel)}: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\n🔍 Review PR: ${escapeHtml(pr.html_url)}\n\nReply <b>YES</b> to merge the rollback, or <b>NO</b> to keep the change live.`,
+                    text: `⚠️ <b>Velyr Rollback Recommended</b>\n\n<b>Change:</b> ${escapeHtml(run.analysis_result?.problem)}\n\n📉 ${escapeHtml(scopeLabel)}: ${bounceBefore}% → ${bounceAfter}% (+${bounceDelta}pp)\n<i>(correlation, not proven causation)</i>\n\n🔍 Review PR: ${escapeHtml(pr.html_url)}\n\nTap a button below (or reply <b>YES</b> to merge the rollback / <b>NO</b> to keep the change live).`,
                     parse_mode: 'HTML',
+                    reply_markup: approvalKeyboard(run.id, 'rollback'),
                   }),
                 })
               }

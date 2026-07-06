@@ -72,6 +72,20 @@ async function sendMessage(chatId, text, extra = {}) {
   }
 }
 
+// C1: acknowledge an inline-button tap so Telegram stops the button's loading spinner.
+// Best-effort — never throws. Optional `text` shows a toast to the user.
+async function answerCallbackQuery(callbackQueryId, text) {
+  try {
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, ...(text ? { text } : {}) }),
+    })
+  } catch (err) {
+    console.warn('[telegram] answerCallbackQuery failed:', err?.message)
+  }
+}
+
 // ─── TRUST MODEL: chat_id ↔ subscription binding ─────────────────────────────
 // We treat the Telegram chat_id as the caller's identity for every command
 // except /start. The binding now has an explicit audit trail (Stage 4.13):
@@ -1226,6 +1240,27 @@ export default async function handler(req, res) {
         // (`run.status !== 'waiting_approval'`) still prevents double-merge.
         console.warn(`[telegram] dedupe insert failed for update_id ${updateId}:`, insertErr.message)
       }
+    }
+
+    // C1: inline-button taps arrive as callback_query (no body.message). callback_data is
+    // 'approve:<runId>' | 'reject:<runId>' — the exact run id, so a tap resolves the precise
+    // run (unlike a bare text "YES", which degrades to newest-pending). Authorization is
+    // identical to the `approve <run-id>` command: handleApprove/handleReject validate the
+    // run against the chat's authorized subs, so callback_data is never blindly trusted. The
+    // update_id dedupe above already guards Telegram redelivery / double-taps (and the CAS
+    // inside reconcile* is the final guard).
+    const cbq = body.callback_query
+    if (cbq) {
+      const cbChatId = cbq.message?.chat?.id
+      const data = typeof cbq.data === 'string' ? cbq.data : ''
+      const m = /^(approve|reject):(.+)$/.exec(data)
+      await answerCallbackQuery(cbq.id)   // stop the button spinner regardless
+      if (m && cbChatId != null) {
+        const [, action, runId] = m
+        if (action === 'approve') await handleApprove(runId, cbChatId)
+        else                      await handleReject(runId, cbChatId)
+      }
+      return res.status(200).json({ ok: true })
     }
 
     const message = body.message

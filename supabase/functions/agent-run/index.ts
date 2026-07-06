@@ -1048,6 +1048,21 @@ function escapeHtml(s: unknown): string {
     .replace(/"/g, '&quot;')
 }
 
+// C1: inline approval keyboard (Deno twin of api/agent/run.js's approvalKeyboard).
+// callback_data carries the exact run id; the Telegram webhook's callback_query handler
+// routes a tap to handleApprove/handleReject (which authorize it against the chat's subs).
+// `variant`: 'fix' (apply/skip a change) or 'foreign' (add-analytics/skip). Text YES/NO
+// still works alongside — the buttons are purely additive.
+function approvalKeyboard(runId: string, variant: 'fix' | 'foreign' = 'fix') {
+  const [yes, no] = variant === 'foreign'
+    ? ['✅ Add analytics', '❌ Skip']
+    : ['✅ Apply', '❌ Skip']
+  return { inline_keyboard: [[
+    { text: yes, callback_data: `approve:${runId}` },
+    { text: no,  callback_data: `reject:${runId}` },
+  ]] }
+}
+
 // Telegram failure-mode notification used when we cap a subscription out.
 // Kept inline (not refactored) — it's the only place we need this exact text.
 // Numbers/period only (no uncontrolled interpolation) → stays on Markdown.
@@ -1902,24 +1917,26 @@ Standard pageview events (URL, session, device type, referrer). No PII beyond wh
 _Once merged, the agent will read real visitor data on its next weekly run._`
 }
 
-async function sendSnippetTelegram(chatId: string, prUrl: string) {
+async function sendSnippetTelegram(chatId: string, prUrl: string, runId: string) {
   await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `📊 <b>Velyr wants to install analytics tracking</b> — required for the agent to read your funnel data. It loads PostHog from their CDN (no dependency to install). Reply <b>YES</b> to merge, <b>NO</b> to skip. Full details in the PR: <a href="${escapeHtml(prUrl)}">${escapeHtml(prUrl)}</a>`,
+      text: `📊 <b>Velyr wants to install analytics tracking</b> — required for the agent to read your funnel data. It loads PostHog from their CDN (no dependency to install). Tap a button below (or reply <b>YES</b> to merge / <b>NO</b> to skip). Full details in the PR: <a href="${escapeHtml(prUrl)}">${escapeHtml(prUrl)}</a>`,
       parse_mode: 'HTML',
+      reply_markup: approvalKeyboard(runId, 'foreign'),
     }),
   }).catch(err => console.error('[snippet-telegram] send failed:', err))
 }
 
-async function sendForeignChoiceTelegram(chatId: string) {
+async function sendForeignChoiceTelegram(chatId: string, runId: string) {
   await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `📊 <b>Velyr Analytics — Your choice</b>\n\nWe detected an existing PostHog installation in your project. Velyr uses its own analytics (separate project, partitioned by your domain).\n\nTwo options:\n• Reply <b>YES</b> — Add Velyr's snippet alongside yours. Events flow to both projects (slightly higher event volume on your end).\n• Reply <b>NO</b> — Skip Velyr analytics. Fix recommendations will be less accurate without funnel data.`,
+      text: `📊 <b>Velyr Analytics — Your choice</b>\n\nWe detected an existing PostHog installation in your project. Velyr uses its own analytics (separate project, partitioned by your domain).\n\nTwo options:\n• <b>Add analytics</b> — Add Velyr's snippet alongside yours. Events flow to both projects (slightly higher event volume on your end).\n• <b>Skip</b> — Skip Velyr analytics. Fix recommendations will be less accurate without funnel data.\n\n<i>Tap a button below (or reply YES / NO).</i>`,
       parse_mode: 'HTML',
+      reply_markup: approvalKeyboard(runId, 'foreign'),
     }),
   }).catch(err => console.error('[foreign-choice-telegram] send failed:', err))
 }
@@ -2161,7 +2178,7 @@ async function createSnippetPR(
       DB_TIMEOUT_MS, 'createpr_waiting_approval_update'
     )
 
-    if (chatId) await sendSnippetTelegram(chatId, pr.html_url)
+    if (chatId) await sendSnippetTelegram(chatId, pr.html_url, run.id)
 
   } catch (err: any) {
     slog('error', 'snippet_pr_failed', {
@@ -2577,7 +2594,7 @@ async function maybeRunSnippetSetup(
       }).eq('id', run.id),
       DB_TIMEOUT_MS, 'foreign_choice_update'
     )
-    if (chatId) await sendForeignChoiceTelegram(chatId)
+    if (chatId) await sendForeignChoiceTelegram(chatId, run.id)
     return true
   }
 
@@ -3508,7 +3525,7 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
 // The single approval callsite. Honesty-first: hypothesis + expected metric +
 // file + first blind spot, with the full receipt in the PR. RA7 owns the final
 // wording of THIS message (every other Telegram message stays byte-identical).
-async function sendTelegramNotification(fixResult: FixResult, pr: any, _runId: string, chatId: string) {
+async function sendTelegramNotification(fixResult: FixResult, pr: any, runId: string, chatId: string) {
   const em = fixResult.expected_metric
   const expected = em
     ? `${em.direction} ${em.metric} ~${em.magnitude_pp}pp (${fixResult.confidence || 'unknown'} confidence)`
@@ -3527,11 +3544,11 @@ async function sendTelegramNotification(fixResult: FixResult, pr: any, _runId: s
 
 🔗 <a href="${escapeHtml(pr.html_url)}">View PR</a>
 
-Reply <b>YES</b> to merge / <b>NO</b> to reject. Full receipt in the PR.`
+Tap a button below (or reply <b>YES</b> to merge / <b>NO</b> to reject). Full receipt in the PR.`
 
   const response = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML', disable_web_page_preview: false }),
+    body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML', disable_web_page_preview: false, reply_markup: approvalKeyboard(runId) }),
   })
   const data = await response.json()
   if (!data.ok) console.error('Telegram error:', data.description)
@@ -3747,8 +3764,9 @@ async function maybeProposeShopifyPostHogSetup(
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        text: `📊 <b>Velyr — turn on analytics</b>\n\nTo measure conversions and prove every change pays off, Velyr adds a tiny analytics snippet to your theme's <code>layout/theme.liquid</code> (the same loader velyr.io uses — no apps, no slowdown).\n\nReply <b>YES</b> to install it on your live theme / <b>NO</b> to skip.`,
+        text: `📊 <b>Velyr — turn on analytics</b>\n\nTo measure conversions and prove every change pays off, Velyr adds a tiny analytics snippet to your theme's <code>layout/theme.liquid</code> (the same loader velyr.io uses — no apps, no slowdown).\n\nTap a button below (or reply <b>YES</b> to install on your live theme / <b>NO</b> to skip).`,
         parse_mode: 'HTML',
+        reply_markup: approvalKeyboard(run.id, 'foreign'),
       }),
     }).catch(() => null)
     const tgData = tgRes ? await tgRes.json().catch(() => ({})) : {}
@@ -4089,10 +4107,10 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     (fixResult.confidence ? `\n<b>Confidence:</b> ${escapeHtml(fixResult.confidence)}` : '') +
     `\n\n<b>Find:</b>\n<pre>${escapeHtml(primaryChange.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(primaryChange.replace.slice(0, 600))}</pre>` +
     (stagedFiles.length > 1 ? `\n<i>(primary change shown; ${stagedFiles.length - 1} companion edit${stagedFiles.length > 2 ? 's' : ''} the fix requires ride${stagedFiles.length > 2 ? '' : 's'} along — YES applies all, NO skips all)</i>` : '') +
-    `\n\nReply <b>YES</b> to apply this change to your live theme / <b>NO</b> to skip.`
+    `\n\nTap a button below (or reply <b>YES</b> to apply to your live theme / <b>NO</b> to skip).`
   const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: approvalMsg, parse_mode: 'HTML' }),
+    body: JSON.stringify({ chat_id: chatId, text: approvalMsg, parse_mode: 'HTML', reply_markup: approvalKeyboard(run.id) }),
   }).catch(() => null)
   const tgData = tgRes ? await tgRes.json().catch(() => ({})) : {}
   if (!tgData.ok) console.error('[shopify] approval telegram error:', tgData.description)
