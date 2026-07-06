@@ -3214,6 +3214,7 @@ async function callAIForFix(
   guardrails: any,
   focusPagePath: string | null = null,
   screenshots: FixScreenshots | null = null,
+  conversionGoal: string | null = null,
 ): Promise<FixResult> {
   const a = analytics?.last7Days
 
@@ -3280,6 +3281,15 @@ ${funnelAnalysis.funnelPages.filter((p: any) => p.views > 0).map((p: any) => `- 
     ? `OWNER PRIORITY: the site owner explicitly asked THIS run to focus on the page "${focusPagePath}". If a credible conversion problem exists on that page (or in a component that renders it), choose it as the #1 problem. Only pick a different area if nothing plausible can be improved there — and say so in ranked_higher_than.`
     : ''
 
+  // C5: owner-defined conversion goal — the explicit optimization objective. Like the
+  // brand guardrails + focus pin, it's OUR user's server-validated instruction, so it
+  // sits OUTSIDE the untrusted-data sentinels. Sanitized here (trim + cap) as well as at
+  // the write API, so a raw subRow value passed by any caller is safe.
+  const goalClean = conversionGoal ? String(conversionGoal).trim().slice(0, 300) : ''
+  const ownerGoalContext = goalClean
+    ? `OWNER CONVERSION GOAL: the site owner's #1 success metric is "${goalClean}". Optimize primarily for THIS — pick the fix most likely to increase it, and frame the hypothesis and expected_metric around it. Bounce rate is a secondary signal, not the target.`
+    : ''
+
   // Item 3a: real renderings attached as image input. TRUSTED context (our own
   // fresh capture of the customer's live site), so the descriptor sits outside
   // the sentinels; the images themselves ride as image_url blocks (callLLMCapped).
@@ -3328,7 +3338,7 @@ ${sealed(`[10] ${revenueContext || 'REVENUE: not connected'}`)}
 
 ${sealed(`[11] ${previousFixesContext || 'PREVIOUS FIXES: none'}`)}
 
-${guardrailsContext ? `${guardrailsContext}\n` : ''}${ownerFocusContext ? `${ownerFocusContext}\n` : ''}${screenshotContext ? `${screenshotContext}\n` : ''}
+${guardrailsContext ? `${guardrailsContext}\n` : ''}${ownerGoalContext ? `${ownerGoalContext}\n` : ''}${ownerFocusContext ? `${ownerFocusContext}\n` : ''}${screenshotContext ? `${screenshotContext}\n` : ''}
 Identify the single highest-impact conversion problem visible in this material. Return JSON only (no markdown) with this EXACT schema:
 {
   "problem": "1-2 sentence description of what's broken",
@@ -3999,7 +4009,7 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   const fixResult = await callAIForFix(
     conn.subscription_id, shopMap, deepContext, rankerResult,
     analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
-    focusPagePath, fixScreens,
+    focusPagePath, fixScreens, subRow?.conversion_goal || null,
   )
   if (fixResult.skip) {
     await dbWrite(
@@ -4302,7 +4312,7 @@ async function processGithubThemeConnection(
   const fixResult = await callAIForFix(
     conn.subscription_id, shopMap, deepContext, rankerResult,
     analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
-    focusPagePath, fixScreens,
+    focusPagePath, fixScreens, subRow?.conversion_goal || null,
   )
   if (fixResult.skip) {
     await dbWrite(
@@ -4791,7 +4801,7 @@ async function processConnection(conn: any) {
     const fixResult = await callAIForFix(
       conn.subscription_id, mapResult, deepContext, rankerResult,
       analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
-      focusPagePath, fixScreens,
+      focusPagePath, fixScreens, subRow?.conversion_goal || null,
     )
 
     // Honest skip — model couldn't find a confident #1 problem. New status.

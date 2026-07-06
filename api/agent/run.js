@@ -1656,6 +1656,17 @@ async function handleUpdateSettings(req, res, user) {
     updates.competitors = cleaned
   }
 
+  // C5: owner-defined conversion goal (free text; the Pass-1/Pass-2 optimization
+  // objective). null/'' clears it. Capped at 300 chars — it's a natural-language target,
+  // not structured. Requires migration 20260706_conversion_goal.sql.
+  if (body.conversion_goal !== undefined) {
+    if (body.conversion_goal === null || String(body.conversion_goal).trim() === '') {
+      updates.conversion_goal = null
+    } else {
+      updates.conversion_goal = String(body.conversion_goal).trim().slice(0, 300)
+    }
+  }
+
   // "Fix in next run" (Funnel tab): pin one page for the next weekly run. The
   // edge function biases the ranker + Pass-2 prompt toward it, then clears the
   // pin once consumed (loadFocusPage/clearFocusPage). null/'' = un-schedule.

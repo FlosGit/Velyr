@@ -1858,6 +1858,11 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
   const [compError,    setCompError]    = useState(null)
   const [publicSaved,  setPublicSaved]  = useState(false)
   const [compSaved,    setCompSaved]    = useState(false)
+  // C5: owner-defined conversion goal.
+  const [goal,         setGoal]         = useState(subscription?.conversion_goal || '')
+  const [savingGoal,   setSavingGoal]   = useState(false)
+  const [goalError,    setGoalError]    = useState(null)
+  const [goalSaved,    setGoalSaved]    = useState(false)
   // Danger-zone cancel (Kündigungsbutton, BGB §312k) — routes to the Stripe
   // Billing Portal where cancellation is confirmed and a receipt issued.
   const [cancelLoading, setCancelLoading] = useState(false)
@@ -1878,6 +1883,17 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
       else               setPublicSaved(true)
     } catch (e) { setPublicError(e.message || 'Failed to save') }
     finally       { setSavingPublic(false) }
+  }
+
+  async function saveGoal() {
+    setGoalError(null); setGoalSaved(false)
+    setSavingGoal(true)
+    try {
+      const result = await onSaveSettings({ conversion_goal: goal.trim() || null })
+      if (result?.error) setGoalError(result.error)
+      else               setGoalSaved(true)
+    } catch (e) { setGoalError(e.message || 'Failed to save') }
+    finally       { setSavingGoal(false) }
   }
 
   async function saveCompetitors() {
@@ -1956,6 +1972,23 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
             {publicError||'✓ Saved'}
           </p>
         )}
+      </Card>
+
+      {/* Conversion goal (C5) — the Pass-1/Pass-2 optimization objective. */}
+      <Card className="fade-up" style={{padding:'22px 26px',marginBottom:14,animationDelay:'.10s'}}>
+        <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Your conversion goal</p>
+        <p style={{fontSize:11.5,color:C.label,margin:'4px 0 14px'}}>The one action you want visitors to take — the agent optimizes for this, not just bounce rate. Leave blank to optimize for engagement generally.</p>
+        <input type="text" value={goal} maxLength={300}
+          onChange={e=>setGoal(e.target.value)}
+          placeholder="e.g. clicks on the “Start free trial” button"
+          style={{...monoInput,width:'100%',maxWidth:460}}/>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginTop:14,flexWrap:'wrap'}}>
+          <button className="btn btn-primary v-press" onClick={saveGoal} disabled={savingGoal} style={{
+            fontSize:12,fontWeight:500,borderRadius:8,padding:'9px 16px',opacity:savingGoal?0.6:1,
+          }}>{savingGoal?'Saving…':'Save goal'}</button>
+          {goalSaved && <span className="reveal-in" style={{fontSize:11.5,color:C.green}}>✓ Saved</span>}
+          {goalError && <span className="reveal-in" style={{fontSize:11.5,color:C.redText}}>{goalError}</span>}
+        </div>
       </Card>
 
       {/* Competitors — capped at two, by design. */}
