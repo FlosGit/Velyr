@@ -2040,12 +2040,26 @@ function RunDetail({run, onClose, onDecision, busy}) {
     if (r?.ok) setDecisionDone({ decision, message: r.message, status: r.status })
     else setDecisionError(r?.error || 'Could not complete that action.')
   }
+  // Honesty-first Pass-2 schema (current). The old data_insight/impact/solution fields are
+  // no longer produced, so the modal used to show blank sections; surface what the agent
+  // actually returns — its reasoning, the alternatives it considered, and its own caveats.
+  const em = analysis.expected_metric
+  const expectedText = em
+    ? `${em.direction === 'decrease' ? 'Lower' : 'Raise'} ${String(em.metric || '').replace(/_/g, ' ')} by ~${em.magnitude_pp}pp${em.caveat ? ` — ${em.caveat}` : ''}`
+    : null
+  const confidenceText = analysis.confidence
+    ? `${analysis.confidence}${analysis.confidence_reason ? ` — ${analysis.confidence_reason}` : ''}`
+    : null
+  const blindSpots = Array.isArray(analysis.blind_spots) ? analysis.blind_spots.filter(Boolean) : []
   const fields   = [
-    {label:'Data insight',         text:analysis.data_insight},
-    {label:'Impact',               text:analysis.impact},
-    {label:'Solution',             text:analysis.solution},
-    {label:'Expected improvement', text:analysis.expected_improvement},
-    {label:'Competitor angle',     text:analysis.competitor_insight},
+    {label:'Why this is the problem',   text:analysis.hypothesis},
+    {label:'What else I considered',    text:analysis.ranked_higher_than},
+    {label:'Expected outcome',          text:expectedText},
+    {label:'Confidence',                text:confidenceText},
+    {label:'How we’ll know in 48h', text:analysis.rollback_signal},
+    // Legacy fallbacks so historical runs still render their fields.
+    {label:'Data insight',              text:analysis.data_insight},
+    {label:'Solution',                  text:analysis.solution},
   ]
 
   return (
@@ -2091,6 +2105,16 @@ function RunDetail({run, onClose, onDecision, busy}) {
             <p style={{fontSize:13,color:C.text,lineHeight:1.65}}>{item.text}</p>
           </div>
         ))}
+        {blindSpots.length>0&&(
+          <div style={{background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
+            <SectionLabel style={{marginBottom:6}}>Blind spots the agent flagged</SectionLabel>
+            <ul style={{margin:0,paddingLeft:18}}>
+              {blindSpots.map((b,i)=>(
+                <li key={i} style={{fontSize:12.5,color:C.textMuted,lineHeight:1.6,marginBottom:3}}>{b}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {analysis.file_to_edit&&(
           <div style={{background:C.chipBg,border:'1px solid #DDE7DA',borderRadius:9,padding:'12px 14px',marginBottom:8}}>
             <SectionLabel style={{color:C.chipText,marginBottom:5}}>File edited</SectionLabel>
