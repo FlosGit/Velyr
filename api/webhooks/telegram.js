@@ -3,9 +3,7 @@ import crypto from 'node:crypto'
 import { getOctokit } from '../_lib/github-app.js'
 import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
 import { dispatchAgentRun, startFollowupRun } from '../_lib/edge-dispatch.js'
-import { normalizePendingWrite, classifyConcurrency, confirmApplied, resolveAppliedFiles, planRollbackOps, classifyCreatedCollisions } from '../_lib/shopify-rollback.js'
-import { queryThemeChecksums, upsertThemeFiles, deleteThemeFiles } from '../_lib/shopify-theme-io.js'
-import { refreshShopifyToken } from '../_lib/shopify-token-refresh.js'
+import { applyShopifyDirectWrite, executeShopifyDirectRollback, rejectShopifyDirect } from '../_lib/shopify-approval.js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -373,304 +371,6 @@ async function findLatestRejectedRunForChat(chatId) {
   return run?.id || null
 }
 
-// ─── SHOPIFY-DIRECT: forward apply (YES on shopify_awaiting_approval) ─────────
-// Optimistic concurrency → upsert → confirm (option a) → record applied_write.
-// The checksum re-query and the upsert run BACK-TO-BACK (only pure compares between),
-// so a merchant edit since analysis is caught with the smallest possible race window.
-async function applyShopifyDirectWrite(run, conn, chatId) {
-  const pending = normalizePendingWrite(run.analysis_result?.pending_write)
-  if (!pending.themeId || pending.files.length === 0) {
-    return sendMessage(chatId, `❌ I couldn't find the prepared change for this run (missing pending write). Nothing was applied — the agent will retry on the next run.`)
-  }
-  // Atomically CLAIM the run before any write so two concurrent YES messages can't
-  // both apply (which would double-write and false-abort each other). The winner
-  // flips shopify_awaiting_approval → 'running'; the loser gets 0 rows and bails.
-  // 'running' is also the honest in-progress status: a crash mid-write leaves it
-  // 'running' (stale-swept to failed), never a dishonest shopify_awaiting_approval,
-  // and applied_write is persisted before the upsert so the change stays recoverable.
-  const { data: claimed } = await supabase.from('agent_runs')
-    .update({ status: 'running' }).eq('id', run.id).eq('status', 'shopify_awaiting_approval').select('id')
-  if (!claimed || claimed.length === 0) return  // another invocation already owns this approval
-
-  // Refresh the Shopify access token if needed BEFORE any theme I/O. The merchant
-  // typically approves far more than the ~60-min access-token life after the run, so
-  // a stored token is usually expired here; without this every delayed YES 401'd.
-  const tok = await refreshShopifyToken(supabase, conn)
-  if (!tok.ok) {
-    // Un-claim so the merchant can retry after reconnecting / transient recovery.
-    await supabase.from('agent_runs').update({ status: 'shopify_awaiting_approval' }).eq('id', run.id)
-    return sendMessage(chatId, tok.reason === 'needs_reconsent'
-      ? `🔌 Your Shopify connection has expired — please reconnect your store, then I can apply changes again.`
-      : `⚠️ I couldn't reach Shopify to refresh access just now, so I applied nothing. The agent will retry on the next run.`)
-  }
-  const token = tok.accessToken
-  const shop = conn.shopify_shop_domain
-
-  // 1. Optimistic concurrency — re-query the CURRENT checksum of every modified file.
-  //    STRICT here (item 7): a modified file staged with a null analysis-time checksum
-  //    (absent on the Shopify payload, or a legacy pending_write) cannot be
-  //    concurrency-checked at all, so it must ABORT — writing it blind could clobber a
-  //    merchant edit made between analysis and YES. Previously null-checksum files were
-  //    skipped, and if ALL files were null the entire check was bypassed. The rollback
-  //    path below deliberately keeps the lenient default (blocking a rollback is worse
-  //    than an unguarded restore — see executeShopifyDirectRollback).
-  const modifiedFiles     = pending.files.filter(f => f.op === 'modified')
-  const checkableFilenames = modifiedFiles.filter(f => f.checksumMd5 != null).map(f => f.filename)
-  if (modifiedFiles.length > 0) {
-    let byFilename = {}
-    if (checkableFilenames.length > 0) {
-      const cks = await queryThemeChecksums(shop, token, pending.themeId, checkableFilenames)
-      if (!cks.ok) {
-        // Couldn't read the live state → never overwrite blind.
-        await supabase.from('agent_runs').update({
-          status: 'failed', error_message: `Pre-write checksum re-query failed: ${cks.message}`.slice(0, 500),
-        }).eq('id', run.id)
-        return sendMessage(chatId, `❌ I couldn't verify your theme's current state, so I applied nothing. The agent will retry on the next run.`)
-      }
-      byFilename = cks.byFilename
-    }
-    const concurrency = classifyConcurrency(pending.files, byFilename, { strictNullChecksum: true })
-    if (!concurrency.ok) {
-      const changed      = concurrency.conflicts || []
-      const unverifiable = concurrency.unverifiable || []
-      const parts = []
-      if (changed.length)      parts.push(`changed since analysis: ${changed.join(', ')}`)
-      if (unverifiable.length) parts.push(`unverifiable (no analysis-time checksum): ${unverifiable.join(', ')}`)
-      await supabase.from('agent_runs').update({
-        status: 'shopify_concurrency_abort', completed_at: new Date().toISOString(),
-        error_message: `Theme write aborted — ${parts.join('; ')}`.slice(0, 500),
-      }).eq('id', run.id)
-      const msg = changed.length
-        ? `🛑 Your theme changed since we analyzed it (<code>${changed.map(escapeHtml).join(', ')}</code>), so I did <b>not</b> apply this — I won't overwrite your edit. Re-run the agent to analyze the current version.`
-        : `🛑 I couldn't verify that your theme is unchanged since analysis (<code>${unverifiable.map(escapeHtml).join(', ')}</code>), so I did <b>not</b> apply this — safer than risking an overwrite. Re-run the agent to analyze the current version.`
-      return sendMessage(chatId, msg)
-    }
-  }
-
-  // 1b. Created-file existence guard — a staged op:'created' file must still be
-  //     ABSENT live, or the upsert below would overwrite merchant content (and a
-  //     later rollback would DELETE it: planRollbackOps created → delete). No-op
-  //     today (all staged files are op:'modified'); guards the Stage-4 created path.
-  const createdFilenames = pending.files.filter(f => f.op === 'created').map(f => f.filename)
-  if (createdFilenames.length > 0) {
-    const cks = await queryThemeChecksums(shop, token, pending.themeId, createdFilenames)
-    if (!cks.ok) {
-      await supabase.from('agent_runs').update({
-        status: 'failed', error_message: `Pre-write existence re-query failed: ${cks.message}`.slice(0, 500),
-      }).eq('id', run.id)
-      return sendMessage(chatId, `❌ I couldn't verify your theme's current state, so I applied nothing. The agent will retry on the next run.`)
-    }
-    const collision = classifyCreatedCollisions(pending.files, cks.byFilename)
-    if (!collision.ok) {
-      await supabase.from('agent_runs').update({
-        status: 'shopify_concurrency_abort', completed_at: new Date().toISOString(),
-        error_message: `File I planned to create already exists: ${collision.collisions.join(', ')}`.slice(0, 500),
-      }).eq('id', run.id)
-      return sendMessage(chatId, `🛑 A file I planned to create (<code>${collision.collisions.map(escapeHtml).join(', ')}</code>) already exists on your theme, so I did <b>not</b> apply this — I won't overwrite it. Re-run the agent to analyze the current version.`)
-    }
-  }
-
-  // 1c. Persist the rollback basis (priorContent for every file) BEFORE the live
-  //     write. If the process crashes between the upsert and the shopify_deployed
-  //     flip, applied_write is already recorded so the change is recoverable rather
-  //     than an orphaned, un-rollbackable live edit. The confirm/partial/success
-  //     branches below overwrite applied_write with the ACTUAL landed set.
-  const intendedApplied = pending.files.map(f => ({ filename: f.filename, op: f.op, priorContent: f.priorContent ?? null }))
-  await supabase.from('agent_runs').update({
-    analysis_result: { ...run.analysis_result, applied_write: { themeId: pending.themeId, files: intendedApplied, upsertJobId: null } },
-  }).eq('id', run.id)
-
-  // 2. Apply — full-file upsert (immediately after the check; nothing slow between).
-  const up = await upsertThemeFiles(shop, token, pending.themeId, pending.files.map(f => ({ filename: f.filename, content: f.newContent })))
-  if (!up.ok) {
-    // TODO (re-consent, write stages): up.reason === 'unauthorized' (403) likely means
-    // this connection was authorized under the OLD read_themes-only scope. Surface a
-    // specific "reconnect your store to grant theme-write access" prompt (re-run Shopify
-    // OAuth) instead of this generic retry — a silent 403 is trust-breaking for a
-    // live-theme tool. The new write_themes scope only applies to connections authorized
-    // after Stage 2a deploys.
-    await supabase.from('agent_runs').update({
-      status: 'failed', error_message: `Shopify theme write failed: ${up.message}`.slice(0, 500),
-    }).eq('id', run.id)
-    return sendMessage(chatId, `❌ I couldn't apply the change to your live theme.\n\n<i>${escapeHtml(up.message)}</i>\n\nNothing was changed — the agent will retry on the next run.`)
-  }
-
-  // 3. Confirm (option a — trust the response: every requested file upserted, no userErrors).
-  const confirmed = confirmApplied(pending.files.map(f => f.filename), up.upsertedFilenames, up.userErrors)
-  if (!confirmed.ok) {
-    const detail = confirmed.reason === 'user_errors'
-      ? up.userErrors.map(e => e?.message).filter(Boolean).join('; ')
-      : `not applied: ${confirmed.missing.join(', ')}`
-    // Record whatever DID land (partial batch) as the rollback basis so a future
-    // rollback/cleanup can revert it — never orphan a landed file with no prior record.
-    // (Unreachable for today's single-file flow, where nothing-landed = clean fail; it
-    // matters once a run writes multiple files, e.g. the Stage-4 PostHog injection.)
-    const landed = resolveAppliedFiles(pending.files, up.upsertedFilenames)
-      .map(f => ({ filename: f.filename, op: f.op, priorContent: f.priorContent ?? null }))
-    await supabase.from('agent_runs').update({
-      status: 'failed', error_message: `Shopify theme write not confirmed: ${detail}`.slice(0, 500),
-      ...(landed.length ? { analysis_result: { ...run.analysis_result, applied_write: { themeId: pending.themeId, files: landed, upsertJobId: up.jobId ?? null } } } : {}),
-    }).eq('id', run.id)
-    return sendMessage(chatId, `❌ I couldn't confirm the change applied to your live theme.\n\n<i>${escapeHtml(detail)}</i>\n\nThe agent will retry on the next run.`)
-  }
-
-  // 4. Record the APPLIED set (partial-batch aware) as the rollback basis, then deploy.
-  const appliedResolved = resolveAppliedFiles(pending.files, up.upsertedFilenames)
-  // H4: re-query the POST-DEPLOY live checksum of each restorable (modified) file so a
-  // future rollback can optimistic-concurrency-check against the merchant's live theme
-  // (they may hand-edit during the ~48h before a rollback). Best-effort: a failed
-  // re-query leaves checksumMd5 null → that file's rollback degrades to the legacy
-  // unguarded restore (classifyConcurrency skips null recorded checksums).
-  const restorable = appliedResolved.filter(f => f.op === 'modified').map(f => f.filename)
-  let deployedCks = {}
-  if (restorable.length > 0) {
-    const q = await queryThemeChecksums(shop, token, pending.themeId, restorable)
-    if (q.ok) deployedCks = q.byFilename
-  }
-  const appliedFiles = appliedResolved.map(f => ({
-    filename: f.filename, op: f.op, priorContent: f.priorContent ?? null,
-    checksumMd5: f.op === 'modified' ? (deployedCks[f.filename] ?? null) : null,
-  }))
-  await supabase.from('agent_runs').update({
-    status: 'shopify_deployed', completed_at: new Date().toISOString(),
-    // upsertJobId: the themeFilesUpsert async job id — persisted for a future option-(b)
-    // confirm-via-poll upgrade; not polled today (confirmation stays option (a)).
-    analysis_result: { ...run.analysis_result, applied_write: { themeId: pending.themeId, files: appliedFiles, upsertJobId: up.jobId ?? null } },
-  }).eq('id', run.id)
-
-  // Business DNA — record 'pending' for a conversion fix (a PostHog-setup apply has no
-  // conversion logic to learn from). This gives the Shopify-direct path the SAME DNA
-  // lifecycle as the GitHub path (reconcileDeployed): promoted to measured_win/survived
-  // by promotePendingDNA after 7 days, or resolved to 'rollback' if a 48h-drop rollback
-  // is later approved (executeShopifyDirectRollback).
-  if (run.analysis_result?.setup_kind !== 'posthog') {
-    await supabase.from('agent_business_dna').insert({
-      subscription_id: run.subscription_id, run_id: run.id,
-      fix_type: run.analysis_result?.change_type || 'other',
-      outcome: 'pending',
-      notes: `Applied to live theme (YES): ${(run.analysis_result?.problem || '').slice(0, 400)}`,
-    })
-  }
-
-  // Stage 4: a PostHog-setup apply also stamps the install-once gate + gets its own copy.
-  // The setup proposal consumed the run the user actually asked for — resolving it
-  // starts the real analysis immediately instead of stranding them behind the cooldown.
-  if (run.analysis_result?.setup_kind === 'posthog') {
-    await supabase.from('agent_connections')
-      .update({ posthog_snippet_installed_at: new Date().toISOString() })
-      .eq('subscription_id', run.subscription_id)
-    const started = await startFollowupRun(supabase, run.subscription_id)
-    return sendMessage(chatId, started
-      ? `✅ Analytics installed on your live theme — Velyr can now measure your conversions. Starting your first analysis run now — I'll message you when it's ready.`
-      : `✅ Analytics installed on your live theme — but I couldn't start your analysis run automatically. Tap <b>Run now</b> in your dashboard to start it.`)
-  }
-  return sendMessage(chatId, `✅ Applied <code>${escapeHtml(appliedFiles.map(f => f.filename).join(', '))}</code> to your live theme.`)
-}
-
-// ─── SHOPIFY-DIRECT: rollback execution (YES on shopify_rollback_pending) ─────
-// Reverts ONLY the files that actually landed (applied_write), each by the op the pure
-// planner picks: modified → re-upsert priorContent; created → delete. Separate from the
-// GitHub PR-revert path (selected by status; no interleaved if(hasPR)).
-// TODO (deferred): a merchant-initiated one-tap "revert last change" command would reuse
-// this same executor against the most recent shopify_deployed run's applied_write — no
-// auto-proposal needed. Not built (parity with the GitHub flow's no-standalone-undo today).
-async function executeShopifyDirectRollback(run, conn, chatId) {
-  const applied = run.analysis_result?.applied_write
-  const files = Array.isArray(applied?.files) ? applied.files : []
-  const themeId = applied?.themeId
-  if (!themeId || files.length === 0) {
-    return sendMessage(chatId, `❌ I couldn't find what to roll back for this run. Nothing was changed.`)
-  }
-  // Atomically CLAIM (see applyShopifyDirectWrite): flip shopify_rollback_pending →
-  // 'running' so two concurrent YES messages can't both roll back; loser bails.
-  const { data: claimed } = await supabase.from('agent_runs')
-    .update({ status: 'running' }).eq('id', run.id).eq('status', 'shopify_rollback_pending').select('id')
-  if (!claimed || claimed.length === 0) return  // another invocation already owns this rollback
-
-  const tok = await refreshShopifyToken(supabase, conn)
-  if (!tok.ok) {
-    // Un-claim so the merchant can retry after reconnecting / transient recovery.
-    await supabase.from('agent_runs').update({ status: 'shopify_rollback_pending' }).eq('id', run.id)
-    return sendMessage(chatId, tok.reason === 'needs_reconsent'
-      ? `🔌 Your Shopify connection has expired — please reconnect your store to roll back.`
-      : `⚠️ I couldn't reach Shopify to refresh access just now, so I rolled back nothing. Please try again shortly.`)
-  }
-  const token = tok.accessToken
-  const shop = conn.shopify_shop_domain
-
-  const { ops, unrollbackable } = planRollbackOps(files)
-  let upserts = ops.filter(o => o.action === 'upsert')
-  const deletes = ops.filter(o => o.action === 'delete').map(o => o.filename)
-  const problems = []
-  const clobberGuard = []
-
-  // H4: before restoring a MODIFIED file, re-check the live theme still matches what
-  // WE deployed (checksumMd5 recorded at apply time). If the merchant hand-edited it
-  // since our change, do NOT overwrite their edit — drop it from the restore set and
-  // report it. classifyConcurrency skips files with a null recorded checksum (legacy
-  // runs deployed before this fix), so those degrade to the prior unguarded restore.
-  const guardable = files.filter(f => f.op === 'modified' && f.checksumMd5 != null).map(f => f.filename)
-  if (upserts.length > 0 && guardable.length > 0) {
-    const cks = await queryThemeChecksums(shop, token, themeId, guardable)
-    if (!cks.ok) {
-      await supabase.from('agent_runs').update({
-        status: 'failed', error_message: `Rollback pre-check checksum re-query failed: ${cks.message}`.slice(0, 500),
-      }).eq('id', run.id)
-      return sendMessage(chatId, `❌ I couldn't verify your theme's current state, so I rolled back nothing. Please review your theme in Shopify.`)
-    }
-    const concurrency = classifyConcurrency(files, cks.byFilename)
-    if (!concurrency.ok) {
-      const conflicts = new Set(concurrency.conflicts)
-      clobberGuard.push(...concurrency.conflicts)
-      upserts = upserts.filter(o => !conflicts.has(o.filename))
-    }
-  }
-
-  if (upserts.length > 0) {
-    const r = await upsertThemeFiles(shop, token, themeId, upserts.map(o => ({ filename: o.filename, content: o.content })))
-    if (!r.ok) problems.push(`restore failed: ${r.message}`)
-    else {
-      const c = confirmApplied(upserts.map(o => o.filename), r.upsertedFilenames, r.userErrors)
-      if (!c.ok) problems.push('restore not confirmed')
-    }
-  }
-  if (deletes.length > 0) {
-    const r = await deleteThemeFiles(shop, token, themeId, deletes)
-    if (!r.ok) problems.push(`delete failed: ${r.message}`)
-    // Mirror the upsert branch's confirmApplied: a transport-OK response can still
-    // carry userErrors (Shopify refused the delete) or omit the file from
-    // deletedThemeFiles — either way the file is still live, so it is NOT rolled back.
-    else if (Array.isArray(r.userErrors) && r.userErrors.length > 0) {
-      problems.push(`delete refused: ${r.userErrors.map(e => e.message).join(', ')}`)
-    } else {
-      const notDeleted = deletes.filter(fn => !(r.deletedFilenames || []).includes(fn))
-      if (notDeleted.length > 0) problems.push(`delete not confirmed for ${notDeleted.join(', ')}`)
-    }
-  }
-
-  if (problems.length > 0 || unrollbackable.length > 0 || clobberGuard.length > 0) {
-    const detail = [
-      ...problems,
-      ...(clobberGuard.length ? [`changed since deploy, not overwritten: ${clobberGuard.join(', ')}`] : []),
-      ...(unrollbackable.length ? [`no original content for ${unrollbackable.join(', ')}`] : []),
-    ].join('; ')
-    await supabase.from('agent_runs').update({
-      status: 'failed', error_message: `Rollback incomplete: ${detail}`.slice(0, 500),
-    }).eq('id', run.id)
-    return sendMessage(chatId, `⚠️ I couldn't fully roll back your theme.${clobberGuard.length ? ` You edited <code>${clobberGuard.map(escapeHtml).join(', ')}</code> since our change, so I left ${clobberGuard.length > 1 ? 'them' : 'it'} untouched.` : ''}${unrollbackable.length ? ` I don't have the original of <code>${unrollbackable.map(escapeHtml).join(', ')}</code>.` : ''} Please review your theme in Shopify.`)
-  }
-
-  await supabase.from('agent_runs').update({
-    status: 'shopify_rolled_back', completed_at: new Date().toISOString(),
-  }).eq('id', run.id)
-  // Resolve the fix's pending DNA to 'rollback' (mirror of reconcileDeployed's isRollback
-  // branch for GitHub). The 48h check no longer records rollback DNA at proposal time.
-  await supabase.from('agent_business_dna')
-    .update({ outcome: 'rollback' })
-    .eq('run_id', run.id).eq('outcome', 'pending')
-  return sendMessage(chatId, `🔄 Rolled back — your theme is restored to before this change.`)
-}
-
 // ─── APPROVE ────────────────────────────────────────────────────────────────
 async function handleApprove(runId, chatId) {
   // SG3a: authorize by the RUN's subscription being one this chat controls (across
@@ -731,13 +431,17 @@ async function handleApprove(runId, chatId) {
   // is dev-store-verified. Both branches keep the status off the success value on any
   // failure and send an honest message.
   if (run.status === 'shopify_awaiting_approval') {
-    return await applyShopifyDirectWrite(run, conn, chatId)
+    const r = await applyShopifyDirectWrite(supabase, run, conn)
+    if (r.noop) return  // another invocation already owns this approval
+    return sendMessage(chatId, r.message)
   }
   // A 48h bounce/revenue-drop check recommended a rollback (handleRollbackCheck set
   // 'shopify_rollback_pending' + stored applied_write). YES executes the rollback via
   // the same re-upsert(prior)/delete(created) strategy; NO (handleReject) keeps it.
   if (run.status === 'shopify_rollback_pending') {
-    return await executeShopifyDirectRollback(run, conn, chatId)
+    const r = await executeShopifyDirectRollback(supabase, run, conn)
+    if (r.noop) return
+    return sendMessage(chatId, r.message)
   }
 
   const octokit = await getOctokit(conn.github_installation_id)
@@ -875,39 +579,15 @@ async function handleReject(runId, chatId) {
   if (run.status !== 'waiting_approval' && run.status !== 'shopify_awaiting_approval' && run.status !== 'shopify_rollback_pending')
     return sendMessage(chatId, '⚠️ This run is no longer waiting for approval.')
 
-  // SG: a pure-Shopify forward proposal has no PR to close — reject is just a status
-  // flip + a short confirmation, returning before any GitHub close/reconcile logic.
-  if (run.status === 'shopify_awaiting_approval') {
-    const { data: claimed } = await supabase.from('agent_runs').update({
-      status: 'shopify_rejected', completed_at: new Date().toISOString(),
-    }).eq('id', run.id).eq('status', 'shopify_awaiting_approval').select('id')
-    if (!claimed || claimed.length === 0) return  // another invocation already handled it
-    // Stage 4: NO on the analytics-setup proposal = "don't ask again". Stamp the
-    // install-once gate (resolved) so it isn't re-proposed every run; the agent then
-    // runs on funnel-only signal. (A future "enable analytics" re-trigger is a TODO —
-    // this reuses posthog_snippet_installed_at as a resolved sentinel, no new column.)
-    if (run.analysis_result?.setup_kind === 'posthog') {
-      await supabase.from('agent_connections')
-        .update({ posthog_snippet_installed_at: new Date().toISOString() })
-        .eq('subscription_id', run.subscription_id)
-      // The decline is permanent (install-once gate stamped), so analysis is
-      // unblocked — start the run the setup proposal consumed.
-      const started = await startFollowupRun(supabase, run.subscription_id)
-      return sendMessage(chatId, started
-        ? `👍 No problem — I won't add analytics. Starting your analysis run from your funnel structure now. You can enable analytics later from your dashboard.`
-        : `👍 No problem — I won't add analytics. I couldn't start your analysis run automatically — tap <b>Run now</b> in your dashboard. You can enable analytics later from there too.`)
-    }
-    return sendMessage(chatId, `❌ <b>Skipped.</b> Nothing was changed in your theme — the agent will analyze again on the next run.\n\n<i>Optionally tell me why — reply <b>note &lt;reason&gt;</b> and I'll attach it to this run.</i>`)
-  }
-
-  // Stage 3: NO on a rollback proposal = KEEP the change live (the inverse of the
-  // forward flow). Flip back to shopify_deployed so a later check can re-evaluate.
-  if (run.status === 'shopify_rollback_pending') {
-    const { data: claimed } = await supabase.from('agent_runs').update({
-      status: 'shopify_deployed',
-    }).eq('id', run.id).eq('status', 'shopify_rollback_pending').select('id')
-    if (!claimed || claimed.length === 0) return  // another invocation already handled it
-    return sendMessage(chatId, `👍 Kept the change live — no rollback. I'll keep watching the metrics.`)
+  // SG: a pure-Shopify forward proposal / rollback proposal has no PR to close — reject
+  // is a status flip + confirmation, handled by the shared rejectShopifyDirect (also used
+  // by the dashboard Skip button). shopify_awaiting_approval → shopify_rejected (setup
+  // decline stamps the install gate + starts the analysis run); shopify_rollback_pending →
+  // shopify_deployed (keep the change live). Returns before any GitHub close/reconcile.
+  if (run.status === 'shopify_awaiting_approval' || run.status === 'shopify_rollback_pending') {
+    const r = await rejectShopifyDirect(supabase, run)
+    if (r.noop) return  // another invocation already handled it
+    return sendMessage(chatId, r.message)
   }
 
   // Close the PR + delete the agent/* branch on GitHub, then reconcile the DB

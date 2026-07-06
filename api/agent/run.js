@@ -8,6 +8,15 @@ import { decryptSecret } from '../_lib/secret-crypto.js'
 import { resolveAffectedScope, sessionize, bounceFromSessions } from '../_lib/route-scope.js'
 import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
 import { startFollowupRun } from '../_lib/edge-dispatch.js'
+import { applyShopifyDirectWrite, executeShopifyDirectRollback, rejectShopifyDirect } from '../_lib/shopify-approval.js'
+
+// Strip Telegram-HTML tags/entities from a shared-executor message so the dashboard
+// (which renders the result as plain text, not HTML) shows it cleanly. Decode &amp; last.
+function stripHtml(s) {
+  return String(s ?? '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+}
 
 // Stage 5.D: Octokit with automatic GitHub rate-limit / secondary-rate-limit
 // backoff (honors Retry-After). Mirrors the Edge Function.
@@ -1842,11 +1851,12 @@ async function handleTriggerRun(req, res, user) {
 // dashboard action and a Telegram reply racing each other is safe (one wins, one no-ops)
 // and lands the run in exactly the same state (incl. the A1 rollback branches).
 //
-// SCOPE: GitHub runs in 'waiting_approval' only. Shopify-direct theme approvals
-// (shopify_*) stay Telegram-only for now — their apply/rollback logic (optimistic
-// concurrency + live theme writes) lives in the Telegram handler and isn't worth
-// duplicating here; the action returns a clear 409 pointing the user to Telegram.
-// Ownership: the run must belong to one of the caller's own subscriptions (no IDOR).
+// Handles BOTH connection types: GitHub runs ('waiting_approval', merge/close the PR) and
+// Shopify-direct theme runs ('shopify_awaiting_approval' apply, 'shopify_rollback_pending'
+// rollback) via the shared api/_lib/shopify-approval.js executor — the exact same code the
+// Telegram YES/NO runs, so a dashboard action and a Telegram reply racing is safe. The
+// foreign-analytics choice is the one exception (it needs the edge Setup-PR build) → 409 →
+// Telegram. Ownership: the run must belong to one of the caller's own subscriptions (no IDOR).
 async function handleRunAction(req, res, user, action) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
   const runId = req.body?.run_id
@@ -1861,19 +1871,33 @@ async function handleRunAction(req, res, user, action) {
     .from('agent_runs').select('*').eq('id', runId).in('subscription_id', subIds).maybeSingle()
   if (!run) return res.status(404).json({ error: 'Run not found' })
 
-  // Shopify-direct theme approvals are Telegram-only for now.
-  if (String(run.status).startsWith('shopify_')) {
-    return res.status(409).json({ error: 'Theme approvals are handled in Telegram — reply to the approval message there.' })
-  }
-  if (run.status !== 'waiting_approval') {
-    return res.status(409).json({ error: 'This run is no longer awaiting approval.' })
-  }
-
   const { data: conn } = await supabase
     .from('agent_connections').select('*').eq('subscription_id', run.subscription_id).single()
   if (!conn) return res.status(404).json({ error: 'Connection not found' })
 
-  // ── Reject ──
+  // ── Shopify-direct theme runs: apply / rollback / reject via the SHARED executor —
+  // the exact same code the Telegram YES/NO runs (api/_lib/shopify-approval.js), so a
+  // dashboard tap racing a Telegram reply is safe (the executor's own CAS claim means one
+  // wins, one returns { noop }). The message is Telegram-HTML → strip tags for the JSON. ──
+  if (run.status === 'shopify_awaiting_approval' || run.status === 'shopify_rollback_pending') {
+    let r
+    if (action === 'reject_run') {
+      r = await rejectShopifyDirect(supabase, run)
+    } else if (run.status === 'shopify_rollback_pending') {
+      r = await executeShopifyDirectRollback(supabase, run, conn)
+    } else {
+      r = await applyShopifyDirectWrite(supabase, run, conn)
+    }
+    if (r.noop) return res.status(409).json({ error: 'This run is already being handled — refresh in a moment.' })
+    return res.status(200).json({ success: true, status: r.status, message: stripHtml(r.message) })
+  }
+
+  // Any other non-pending status (already deployed/rejected/rolled back, or a stale row).
+  if (run.status !== 'waiting_approval') {
+    return res.status(409).json({ error: 'This run is no longer awaiting approval.' })
+  }
+
+  // ── Reject (GitHub) ──
   if (action === 'reject_run') {
     await closeRejectedPr(conn, run, { close: true })
     const result = await reconcileRejected(supabase, run, { rejectLabel: 'dashboard' })

@@ -2020,16 +2020,24 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
 function RunDetail({run, onClose, onDecision, busy}) {
   const analysis = run.analysis_result||{}
   const funnel   = run.funnel_analysis
-  // C2: dashboard approve/reject for a pending GitHub run (waiting_approval + a PR).
-  // Shopify theme approvals (shopify_awaiting_approval) stay Telegram-only, so we gate on
-  // the GitHub status + pr_url. onDecision is absent in read-only contexts (public page).
-  const canDecide = typeof onDecision === 'function' && run.status === 'waiting_approval' && !!run.pr_url
+  // C2: dashboard approve/reject. GitHub fix runs (waiting_approval + a PR) merge/close the
+  // PR; Shopify-direct theme runs (shopify_awaiting_approval apply, shopify_rollback_pending
+  // rollback) go through the shared executor server-side. onDecision is absent in read-only
+  // contexts (public page). A rollback proposal flips the button meaning (approve = undo).
+  const isRollbackProposal = run.status === 'shopify_rollback_pending'
+  const isGithubPending    = run.status === 'waiting_approval' && !!run.pr_url
+  const isShopifyPending   = run.status === 'shopify_awaiting_approval' || isRollbackProposal
+  const canDecide = typeof onDecision === 'function' && (isGithubPending || isShopifyPending)
+  const approveLabel = isRollbackProposal ? '↩️ Roll back'
+    : run.status === 'shopify_awaiting_approval' ? '✓ Apply to live theme'
+    : '✓ Approve & merge'
+  const rejectLabel = isRollbackProposal ? 'Keep it' : 'Skip'
   const [decisionError, setDecisionError] = useState(null)
-  const [decisionDone, setDecisionDone] = useState(null)  // 'approve' | 'reject'
+  const [decisionDone, setDecisionDone] = useState(null)  // { decision, message, status }
   async function decide(decision) {
     setDecisionError(null)
     const r = await onDecision(run.id, decision)
-    if (r?.ok) setDecisionDone(decision)
+    if (r?.ok) setDecisionDone({ decision, message: r.message, status: r.status })
     else setDecisionError(r?.error || 'Could not complete that action.')
   }
   const fields   = [
@@ -2146,11 +2154,11 @@ function RunDetail({run, onClose, onDecision, busy}) {
               <button onClick={()=>decide('approve')} disabled={busy} className="v-press" style={{
                 borderRadius:9,padding:'12px',border:'none',cursor:busy?'default':'pointer',opacity:busy?0.6:1,
                 background:C.green,color:'#fff',fontSize:14,fontFamily:FONT.sans,fontWeight:600,
-              }}>{busy?'Working…':'✓ Approve & merge'}</button>
+              }}>{busy?'Working…':approveLabel}</button>
               <button onClick={()=>decide('reject')} disabled={busy} className="v-press" style={{
                 borderRadius:9,padding:'12px',border:`1px solid ${C.border}`,cursor:busy?'default':'pointer',opacity:busy?0.6:1,
                 background:C.bgSoft,color:C.text,fontSize:14,fontFamily:FONT.sans,fontWeight:500,
-              }}>Skip</button>
+              }}>{rejectLabel}</button>
             </div>
             {decisionError && <p style={{fontSize:12,color:C.redText||C.yellowText,marginTop:8}}>{decisionError}</p>}
             <p style={{fontSize:11,color:C.textMuted,marginTop:8}}>You can also reply YES / NO in Telegram — either works.</p>
@@ -2158,7 +2166,10 @@ function RunDetail({run, onClose, onDecision, busy}) {
         )}
         {decisionDone && (
           <p style={{fontSize:13,color:C.greenText,marginTop:20,fontWeight:500}}>
-            {decisionDone==='approve' ? '✓ Approved — the change is deploying now.' : '✓ Skipped — the agent will try again next run.'}
+            {decisionDone.message
+              || (decisionDone.decision==='approve'
+                    ? (isRollbackProposal ? '✓ Rolled back — your theme is restored.' : '✓ Approved — the change is deploying now.')
+                    : (isRollbackProposal ? '✓ Kept the change live.' : '✓ Skipped — the agent will try again next run.'))}
           </p>
         )}
         {run.pr_url&&(
@@ -2459,7 +2470,7 @@ export default function AgentDashboard({ navigate }) {
         body: JSON.stringify({ run_id: runId }),
       })
       const data = await res.json().catch(() => ({}))
-      if (res.ok && data.success) { await fetchData(); return { ok: true } }
+      if (res.ok && data.success) { await fetchData(); return { ok: true, message: data.message, status: data.status } }
       return { ok: false, error: data.error || 'Could not complete that action.' }
     } catch {
       return { ok: false, error: 'Network error. Please try again.' }
