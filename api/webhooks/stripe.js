@@ -31,6 +31,57 @@ function trialEndIso(sub) {
   return sub?.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null
 }
 
+// Minimal HTML escaping for values interpolated into the Bot-API HTML messages
+// below (C10 interpolates LLM-authored problem text). Twin of the escapeHtml in
+// telegram.js / run.js.
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+// C10: build a proof-of-value recap for the trial-end nudge. Reuses data the agent
+// already stored — deployed fixes + the matched-window bounce measurements — so the
+// customer converts with EVIDENCE, not a generic "add a card" ask. Returns '' when
+// there's nothing to show (a quiet trial keeps the plain nudge). Never throws.
+async function buildTrialRecap(subscriptionId) {
+  try {
+    const [{ data: runs }, { data: metrics }] = await Promise.all([
+      supabase.from('agent_runs')
+        .select('status, problem_description, analysis_result, completed_at')
+        .eq('subscription_id', subscriptionId)
+        .in('status', ['deployed', 'shopify_deployed'])
+        .order('completed_at', { ascending: false }).limit(10),
+      supabase.from('impact_metrics')
+        .select('metric_type, value_before, value_after')
+        .eq('subscription_id', subscriptionId)
+        .in('metric_type', ['site_wide_bounce_rate', 'route_scoped_bounce_rate', 'bounce_rate']),
+    ])
+    const deployed = runs || []
+    if (deployed.length === 0) return ''
+
+    const lines = deployed.slice(0, 3)
+      .map(r => `  ✅ ${escapeHtml((r.problem_description || r.analysis_result?.problem || 'Change deployed').slice(0, 70))}`)
+      .join('\n')
+
+    // Best measured bounce improvement across the trial (>=5pp = the measured_win bar).
+    const improvements = (metrics || [])
+      .filter(m => m.value_before != null && m.value_after != null)
+      .map(m => ({ pp: m.value_before - m.value_after, scoped: m.metric_type === 'route_scoped_bounce_rate' }))
+      .sort((a, b) => b.pp - a.pp)
+    const bestLine = (improvements.length && improvements[0].pp >= 5)
+      ? `\n📉 Best measured result: bounce down ${Math.round(improvements[0].pp)}pp ${improvements[0].scoped ? 'on the pages a change touched' : 'site-wide'} (correlation, not attribution)`
+      : ''
+
+    return `\n\n<b>What the agent shipped during your trial:</b>\n${lines}${deployed.length > 3 ? `\n  …and ${deployed.length - 3} more` : ''}${bestLine}`
+  } catch (err) {
+    console.warn('[trial-recap] build failed:', err?.message)
+    return ''
+  }
+}
+
 // Minimal Telegram send for webhook-driven alerts (e.g. trial_will_end). The
 // full bot lives in api/webhooks/telegram.js; here we only need a one-shot
 // HTML message, so we hit the Bot API directly. Best-effort — never throws.
@@ -226,14 +277,16 @@ export default async function handler(req, res) {
         const s = event.data.object
         const { data: sub } = await supabase
           .from('agent_subscriptions')
-          .select('telegram_chat_id')
+          .select('id, telegram_chat_id')
           .eq('stripe_customer_id', s.customer)
           .single()
         if (sub?.telegram_chat_id) {
+          // C10: lead with proof of what the agent shipped this trial, then the nudge.
+          const recap = await buildTrialRecap(sub.id)
           await sendTelegram(
             sub.telegram_chat_id,
-            '⏳ <b>Your Velyr trial ends in 3 days.</b>\n\n' +
-            "There's no card on file, so your Growth Agent will pause when the trial ends — you won't be charged.\n\n" +
+            '⏳ <b>Your Velyr trial ends in 3 days.</b>' + recap +
+            "\n\nThere's no card on file, so your Growth Agent will pause when the trial ends — you won't be charged.\n\n" +
             'To keep your improvements coming, add your card from your dashboard to continue at €29/mo. Cancel anytime.'
           )
         }
