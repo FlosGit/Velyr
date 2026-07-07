@@ -1925,6 +1925,9 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
   const [savingGoal,   setSavingGoal]   = useState(false)
   const [goalError,    setGoalError]    = useState(null)
   const [goalSaved,    setGoalSaved]    = useState(false)
+  // C5 measurement half: the structured, measurable twin of the free-text goal.
+  const [goalEvType,   setGoalEvType]   = useState(subscription?.conversion_goal_event?.type || 'click_text')
+  const [goalEvValue,  setGoalEvValue]  = useState(subscription?.conversion_goal_event?.value || '')
   // Danger-zone cancel (Kündigungsbutton, BGB §312k) — routes to the Stripe
   // Billing Portal where cancellation is confirmed and a receipt issued.
   const [cancelLoading, setCancelLoading] = useState(false)
@@ -1949,9 +1952,15 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
 
   async function saveGoal() {
     setGoalError(null); setGoalSaved(false)
+    if (goalEvType === 'pageview_path' && goalEvValue.trim() && !goalEvValue.trim().startsWith('/')) {
+      setGoalError('The goal page must be a site-relative path like /checkout'); return
+    }
     setSavingGoal(true)
     try {
-      const result = await onSaveSettings({ conversion_goal: goal.trim() || null })
+      const result = await onSaveSettings({
+        conversion_goal: goal.trim() || null,
+        conversion_goal_event: goalEvValue.trim() ? { type: goalEvType, value: goalEvValue.trim() } : null,
+      })
       if (result?.error) setGoalError(result.error)
       else               setGoalSaved(true)
     } catch (e) { setGoalError(e.message || 'Failed to save') }
@@ -2056,6 +2065,20 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
           onChange={e=>setGoal(e.target.value)}
           placeholder="e.g. clicks on the “Start free trial” button"
           style={{...monoInput,width:'100%',maxWidth:460}}/>
+        {/* C5 measurement half: the measurable event. Optional — with it set, every
+            deployed fix also gets a before/after goal-conversion measurement
+            (impact_metrics 'goal_conversion_rate') alongside bounce. */}
+        <p style={{fontSize:11.5,color:C.label,margin:'14px 0 8px'}}>Optional — make it measurable. Pick the event that counts as this goal, and the agent measures it before/after every deployed change:</p>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          <select value={goalEvType} onChange={e=>setGoalEvType(e.target.value)} style={{...monoInput,padding:'8px 10px'}}>
+            <option value="click_text">Click on a button/link with text…</option>
+            <option value="pageview_path">Visit to the page…</option>
+          </select>
+          <input type="text" value={goalEvValue} maxLength={120}
+            onChange={e=>setGoalEvValue(e.target.value)}
+            placeholder={goalEvType==='pageview_path' ? '/checkout' : 'Start free trial'}
+            style={{...monoInput,width:220}}/>
+        </div>
         <div style={{display:'flex',alignItems:'center',gap:12,marginTop:14,flexWrap:'wrap'}}>
           <button className="btn btn-primary v-press" onClick={saveGoal} disabled={savingGoal} style={{
             fontSize:12,fontWeight:500,borderRadius:8,padding:'9px 16px',opacity:savingGoal?0.6:1,
@@ -2124,7 +2147,7 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
 }
 
 // ─── RUN DETAIL MODAL ─────────────────────────────────────────────────────────
-function RunDetail({run, onClose, onDecision, busy}) {
+function RunDetail({run, onClose, onDecision, busy, goalImpact}) {
   const analysis = run.analysis_result||{}
   const funnel   = run.funnel_analysis
   // C2: dashboard approve/reject. GitHub fix runs (waiting_approval + a PR) merge/close the
@@ -2224,6 +2247,15 @@ function RunDetail({run, onClose, onDecision, busy}) {
                 <li key={i} style={{fontSize:12.5,color:C.textMuted,lineHeight:1.6,marginBottom:3}}>{b}</li>
               ))}
             </ul>
+          </div>
+        )}
+        {goalImpact&&typeof goalImpact.value_before==='number'&&typeof goalImpact.value_after==='number'&&(
+          <div style={{background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
+            <SectionLabel style={{marginBottom:5}}>Your goal, measured (deploy±2d)</SectionLabel>
+            <p style={{fontSize:13,color:C.text,lineHeight:1.65}}>
+              Goal conversion {goalImpact.value_before}% → {goalImpact.value_after}%
+              {' '}({goalImpact.value_after-goalImpact.value_before>=0?'+':''}{Math.round((goalImpact.value_after-goalImpact.value_before)*10)/10}pp — correlation, not attribution)
+            </p>
           </div>
         )}
         {Array.isArray(analysis.backlog)&&analysis.backlog.length>0&&(
@@ -2720,7 +2752,8 @@ export default function AgentDashboard({ navigate }) {
   return (
     <>
       <style>{CSS + MOTION_CSS}</style>
-      {selected&&<RunDetail run={selected} onClose={()=>setSelected(null)} onDecision={handleRunDecision} busy={runDecisionBusy}/>}
+      {selected&&<RunDetail run={selected} onClose={()=>setSelected(null)} onDecision={handleRunDecision} busy={runDecisionBusy}
+        goalImpact={impactMetrics.find(m=>m.run_id===selected.id&&m.metric_type==='goal_conversion_rate')}/>}
       {showDeleteConfirm&&(
         <DeleteConfirmModal
           onConfirm={handleDeleteAccount}

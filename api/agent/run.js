@@ -851,7 +851,7 @@ async function handleRollbackCheck(res) {
       // TELEGRAM_CHAT_ID, which would leak one tenant's change description to
       // the operator and never reach the owner. No chat bound → sends skipped.
       const { data: ownerSub } = await supabase.from('agent_subscriptions')
-        .select('telegram_chat_id').eq('id', run.subscription_id).single()
+        .select('telegram_chat_id, conversion_goal_event').eq('id', run.subscription_id).single()
       const ownerChatId = ownerSub?.telegram_chat_id || null
 
       const hostFilter = conn?.posthog_host_filter
@@ -1016,6 +1016,43 @@ async function handleRollbackCheck(res) {
         value_before: bounceBefore, value_after: bounceAfter,
         measured_at: new Date().toISOString(),
       })
+
+      // C5 (measurement half): matched-window GOAL conversion alongside bounce —
+      // "we measure what matters to your business", not just bounce. Sessions with
+      // ≥1 goal event / all sessions, same ±2d windows, same session floor (the
+      // totals already cleared it above). Strictly additive measurement: any
+      // failure is logged and skipped, and it NEVER feeds the rollback trigger.
+      const goalEvent = ownerSub?.conversion_goal_event
+      if (goalEvent?.type && goalEvent?.value) {
+        try {
+          const escVal = String(goalEvent.value).replace(/'/g, "''")
+          const goalWhere = goalEvent.type === 'pageview_path'
+            ? [...hostWhere, `properties.$pathname = '${escVal}'`]
+            : [...hostWhere, `properties.$event_type = 'click'`, `properties.$el_text ILIKE '%${escVal}%'`]
+          const goalQuery = (after, before) => ({
+            kind: 'EventsQuery', select: ['properties.$session_id'],
+            event: goalEvent.type === 'pageview_path' ? '$pageview' : '$autocapture',
+            after, before, limit: 2000, where: goalWhere,
+          })
+          const [goalBefore, goalAfter] = await Promise.all([
+            fetch(`${host}/api/projects/${projectId}/query/`, { method: 'POST', headers, body: JSON.stringify({ query: goalQuery(twoDaysBefore, deployedDate) }) }).then(r => r.json()),
+            fetch(`${host}/api/projects/${projectId}/query/`, { method: 'POST', headers, body: JSON.stringify({ query: goalQuery(deployedDate, twoDaysAfter) }) }).then(r => r.json()),
+          ])
+          // Unique sessions that fired the goal (a 2000-row cap can only undercount —
+          // conservative). Rates in %, one decimal.
+          const uniqSessions = rows => new Set((rows || []).map(r => r?.[0]).filter(Boolean)).size
+          const goalRateBefore = Math.round((uniqSessions(goalBefore?.results) / beforeSessions.size) * 1000) / 10
+          const goalRateAfter  = Math.round((uniqSessions(goalAfter?.results)  / afterSessions.size)  * 1000) / 10
+          await supabase.from('impact_metrics').insert({
+            run_id: run.id, subscription_id: run.subscription_id,
+            metric_type: 'goal_conversion_rate',
+            value_before: goalRateBefore, value_after: goalRateAfter,
+            measured_at: new Date().toISOString(),
+          })
+        } catch (goalErr) {
+          console.warn(`[rollback_check] goal-conversion measurement failed for run=${run.id}: ${goalErr?.message}`)
+        }
+      }
 
       // Also the idempotency marker for measured runs — surface a failure.
       const { error: measureLearnErr } = await supabase.from('agent_learnings').insert({
@@ -1754,6 +1791,27 @@ async function handleUpdateSettings(req, res, user) {
       updates.conversion_goal = null
     } else {
       updates.conversion_goal = String(body.conversion_goal).trim().slice(0, 300)
+    }
+  }
+
+  // C5 (measurement half): the OPTIONAL structured, measurable twin of the free-text
+  // goal — { type: 'click_text' | 'pageview_path', value }. handleRollbackCheck uses it
+  // to measure a matched-window goal_conversion_rate alongside bounce (measurement
+  // only, never a rollback trigger). Requires migration 20260707_conversion_goal_event.sql.
+  if (body.conversion_goal_event !== undefined) {
+    const ev = body.conversion_goal_event
+    if (ev === null || ev === '') {
+      updates.conversion_goal_event = null
+    } else {
+      const type = ev?.type
+      const value = String(ev?.value ?? '').trim()
+      if (!['click_text', 'pageview_path'].includes(type) || !value) {
+        return res.status(400).json({ error: 'conversion_goal_event must be { type: click_text | pageview_path, value }' })
+      }
+      if (type === 'pageview_path' && !/^\/[^\s<>"'`]{0,199}$/.test(value)) {
+        return res.status(400).json({ error: 'conversion_goal_event.value must be a site-relative path like /checkout' })
+      }
+      updates.conversion_goal_event = { type, value: value.slice(0, 120) }
     }
   }
 
