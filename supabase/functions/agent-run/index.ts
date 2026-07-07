@@ -1546,6 +1546,14 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
                 select: ['properties.$pathname', 'properties.$device_type', 'count()'],
                 where:  ['properties.$pathname is not null'] })
           .then((r: Response) => r.json()).catch(() => null)
+        // Dead clicks (posthog-js "dead clicks autocapture", $dead_click): clicks on
+        // elements that visibly did NOTHING — visitors expected interactivity that
+        // isn't there. Requires the project-level toggle (enabled 2026-07-07); zero
+        // rows until then, which renders as 'n/a'. Same isolation as rage-clicks.
+        const deadPromise = query({ kind: 'EventsQuery', event: '$dead_click', after: sevenDaysAgo, before: today, limit: 12, orderBy: ['count() DESC'],
+                select: ['properties.$pathname', 'properties.$device_type', 'count()'],
+                where:  ['properties.$pathname is not null'] })
+          .then((r: Response) => r.json()).catch(() => null)
         const [scrollRes, clicksRes] = await Promise.all([
           query({ kind: 'EventsQuery', event: '$pageleave',   after: sevenDaysAgo, before: today, limit: 24, orderBy: ['count() DESC'],
                   select: ['properties.$prev_pageview_pathname', 'properties.$device_type', 'avg(toFloat(properties.$prev_pageview_max_scroll_percentage))', 'count()'],
@@ -1606,7 +1614,23 @@ async function getPostHogAnalytics(posthogApiKey: string, posthogProjectId: stri
         const rageClicks = [...rageAgg.values()]
           .sort((a: any, b: any) => b.count - a.count).slice(0, 6)
           .map((e: any) => ({ path: e.path, count: e.count, mobileShare: e.deviced > 0 ? Math.round((e.mobile / e.deviced) * 100) : null }))
-        if (scrollByPage.length || topClicks.length || rageClicks.length) engagement = { scrollByPage, topClicks, rageClicks }
+        // Dead clicks: identical per-page aggregation (+ the null-means-unknown
+        // mobileShare rule) as rage-clicks above.
+        const dead = (await deadPromise) || {}
+        const deadAgg = new Map<string, any>()
+        for (const r of (dead.results || [])) {
+          const path = String(r[0] || '').trim()
+          const device = String(r[1] || ''), n = Number(r[2]) || 0
+          if (!path || n <= 0) continue
+          let e = deadAgg.get(path)
+          if (!e) { e = { path, count: 0, mobile: 0, deviced: 0 }; deadAgg.set(path, e) }
+          e.count += n
+          if (device) { e.deviced += n; if (device === 'Mobile') e.mobile += n }
+        }
+        const deadClicks = [...deadAgg.values()]
+          .sort((a: any, b: any) => b.count - a.count).slice(0, 6)
+          .map((e: any) => ({ path: e.path, count: e.count, mobileShare: e.deviced > 0 ? Math.round((e.mobile / e.deviced) * 100) : null }))
+        if (scrollByPage.length || topClicks.length || rageClicks.length || deadClicks.length) engagement = { scrollByPage, topClicks, rageClicks, deadClicks }
       } catch (err) {
         console.warn('PostHog engagement signals skipped (core analytics unaffected):', err)
       }
@@ -3199,6 +3223,8 @@ function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any)
     if (clicks) lines.push(`Most-clicked elements (autocapture): ${clicks}`)
     const rage = (eng?.rageClicks || []).slice(0, 5).map((r: any) => `${r.path} (${r.count}${r.mobileShare != null ? `, ${r.mobileShare}% mob` : ''})`).join(', ')
     if (rage) lines.push(`Rage-clicks (rapid repeated clicks in one spot = user frustration): ${rage}`)
+    const dead = (eng?.deadClicks || []).slice(0, 5).map((r: any) => `${r.path} (${r.count}${r.mobileShare != null ? `, ${r.mobileShare}% mob` : ''})`).join(', ')
+    if (dead) lines.push(`Dead clicks (clicks on elements that did nothing = expected interactivity is missing): ${dead}`)
   } else {
     lines.push('No analytics data available.')
   }
@@ -3312,7 +3338,8 @@ async function callAIForFix(
   }).join('; ') || 'n/a'}
 - Most-clicked elements (autocapture, by visible label; % mob = share of clicks from mobile): ${(eng.topClicks || []).slice(0, 6).map((c: any) => `"${c.text}" (${c.clicks}${c.mobileShare != null ? `, ${c.mobileShare}% mob` : ''})`).join(', ') || 'n/a'}
 - Rage-clicks (rapid repeated clicks in one spot = frustration — a broken/dead element, a misleading affordance, or a slow response; % mob = share from mobile): ${(eng.rageClicks || []).slice(0, 5).map((r: any) => `${r.path} (${r.count}${r.mobileShare != null ? `, ${r.mobileShare}% mob` : ''})`).join(', ') || 'n/a'}
-  Use scroll % to judge whether a section/CTA is actually seen, clicks to see what visitors engage with vs ignore, and rage-clicks to spot pages where something feels broken. When the mobile scroll depth is much lower than desktop, pair it with the attached mobile screenshot — the highest-impact fixes are usually above-the-fold on mobile. This is real behavior — prefer it over assumptions from code layout.` : ''
+- Dead clicks (clicks that produced NO visible reaction — visitors expected something clickable that isn't; % mob = share from mobile): ${(eng.deadClicks || []).slice(0, 5).map((r: any) => `${r.path} (${r.count}${r.mobileShare != null ? `, ${r.mobileShare}% mob` : ''})`).join(', ') || 'n/a'}
+  Use scroll % to judge whether a section/CTA is actually seen, clicks to see what visitors engage with vs ignore, and rage-clicks/dead clicks to spot pages where something feels broken or misleadingly inert. When the mobile scroll depth is much lower than desktop, pair it with the attached mobile screenshot — the highest-impact fixes are usually above-the-fold on mobile. This is real behavior — prefer it over assumptions from code layout.` : ''
   const analyticsContext = a ? `REAL ANALYTICS (last 7 days):
 - Pageviews: ${a.totalPageviews} · Sessions: ${a.uniqueVisitors} · Bounce: ${a.bounceRate}%
 - Mobile: ${a.mobilePercent != null ? `${a.mobilePercent}%` : 'unknown'} · vs last week: ${a.trafficChange != null ? `${a.trafficChange > 0 ? '+' : ''}${a.trafficChange}%` : 'first week'}
@@ -4456,7 +4483,7 @@ async function processGithubThemeConnection(
   const engForReceipt = analytics?.last7Days?.engagement
   const visitorsForReceipt = analytics?.last7Days?.uniqueVisitors
   const behavioralNote = engForReceipt
-    ? `scroll depth on ${engForReceipt.scrollByPage?.length || 0} page(s) and ${engForReceipt.topClicks?.length || 0} clicked element(s) inspected (PostHog autocapture, last 7 days)`
+    ? `scroll depth on ${engForReceipt.scrollByPage?.length || 0} page(s), ${engForReceipt.topClicks?.length || 0} clicked element(s), ${engForReceipt.rageClicks?.length || 0} rage-click page(s), and ${engForReceipt.deadClicks?.length || 0} dead-click page(s) inspected (PostHog autocapture, last 7 days)`
     : (typeof visitorsForReceipt === 'number' && visitorsForReceipt >= NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D
         ? 'none returned for the last 7 days (autocapture may be disabled)'
         : `not available — fewer than ${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions in the last 7 days`)
@@ -4956,7 +4983,7 @@ async function processConnection(conn: any) {
     const engForReceipt = analytics?.last7Days?.engagement
     const visitorsForReceipt = analytics?.last7Days?.uniqueVisitors
     const behavioralNote = engForReceipt
-      ? `scroll depth on ${engForReceipt.scrollByPage?.length || 0} page(s), ${engForReceipt.topClicks?.length || 0} clicked element(s), and ${engForReceipt.rageClicks?.length || 0} rage-click page(s) inspected (PostHog autocapture, last 7 days)`
+      ? `scroll depth on ${engForReceipt.scrollByPage?.length || 0} page(s), ${engForReceipt.topClicks?.length || 0} clicked element(s), ${engForReceipt.rageClicks?.length || 0} rage-click page(s), and ${engForReceipt.deadClicks?.length || 0} dead-click page(s) inspected (PostHog autocapture, last 7 days)`
       : (typeof visitorsForReceipt === 'number' && visitorsForReceipt >= NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D
           ? 'none returned for the last 7 days (autocapture may be disabled)'
           : `not available — fewer than ${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions in the last 7 days`)
