@@ -3245,6 +3245,11 @@ export interface FixResult {
   // Telegram on a skip; the owner replies with the existing `note <answer>` command,
   // which stores it as durable prompt context. Omitted unless genuinely useful.
   question_for_owner?: string
+  // C7: an OPTIONAL ranked backlog (max 3) of OTHER credible problems the model saw but
+  // ranked below the shipped fix — or saw while skipping. Rides analysis_result into the
+  // dashboard's "Next up" list (one-tap sets the focus_page_path pin). Sanitized
+  // post-parse like additional_edits: malformed entries are dropped, never fatal.
+  backlog?: Array<{ page_path: string; problem: string; expected_impact: string }>
 }
 
 async function callAIForFix(
@@ -3405,7 +3410,8 @@ Identify the single highest-impact conversion problem visible in this material. 
   "confidence_reason": "what about the inputs makes this more or less confident",
   "blind_spots": ["specific things you couldn't inspect that could change this assessment"],
   "rollback_signal": "what would tell us in 48h this didn't work",
-  "question_for_owner": "OPTIONAL — one specific question whose answer would materially improve future recommendations (business context you cannot scrape, e.g. 'What's the ONE action you want visitors to take on /pricing — start a trial, book a demo, or buy?'). Omit this field entirely unless a concrete answer would genuinely change your analysis. Never ask something inferable from the inputs."
+  "question_for_owner": "OPTIONAL — one specific question whose answer would materially improve future recommendations (business context you cannot scrape, e.g. 'What's the ONE action you want visitors to take on /pricing — start a trial, book a demo, or buy?'). Omit this field entirely unless a concrete answer would genuinely change your analysis. Never ask something inferable from the inputs.",
+  "backlog": [ { "page_path": "/pricing", "problem": "one-sentence description of another credible conversion problem", "expected_impact": "short phrase" } ]
 }
 CONSTRAINTS:
 - file_to_edit MUST be one of: ${allowedPaths.join(', ') || '(none)'}. Do not invent paths.
@@ -3413,7 +3419,8 @@ CONSTRAINTS:
 - additional_edits is OPTIONAL and capped at 2. Use it ONLY for edits the primary change REQUIRES to function (e.g. a constant AND its call site, or a component AND a helper it imports) — never to bundle unrelated improvements. Same rules per entry: path from the list above, find appears exactly once in that file. Omit it (or use []) for a normal single-file fix.
 ${editTypeConstraint}
 - Respect all BRAND GUARDRAILS above; never re-attempt anything on the NEVER DO AGAIN list.
-- If you cannot find a confident #1 problem, return { "skip": true, "reason": "..." } and we will not open a PR this week. A skip MAY also carry "question_for_owner" — a skip is exactly when the question reaches the owner, so if missing business context caused the skip, ask for it there.`
+- backlog is OPTIONAL (max 3): OTHER credible problems you considered and ranked below your #1, each with the site-relative page path it lives on (start with "/"). It becomes the owner's visible "next up" roadmap. Omit it when nothing else credible exists — never pad it.
+- If you cannot find a confident #1 problem, return { "skip": true, "reason": "..." } and we will not open a PR this week. A skip MAY also carry "question_for_owner" — a skip is exactly when the question reaches the owner, so if missing business context caused the skip, ask for it there. A skip may carry "backlog" too (near-credible problems worth watching).`
 
   let text: string
   try {
@@ -3454,6 +3461,19 @@ ${editTypeConstraint}
   // truthiness — replace:"" is a legitimate pure-deletion edit and must pass.
   if (!parsed.skip && (!parsed.problem || !parsed.file_to_edit || !parsed.code_change?.find || typeof parsed.code_change?.replace !== 'string')) {
     throw new Error(`Pass 2 response missing required fields: ${JSON.stringify(parsed).slice(0, 200)}`)
+  }
+  // C7: sanitize backlog on BOTH shapes (a skip's backlog is exactly the point —
+  // it turns a silent week into a visible roadmap). Malformed entries dropped.
+  {
+    const PATH_RE = /^\/[a-zA-Z0-9\-._~/]*$/
+    parsed.backlog = (Array.isArray(parsed.backlog) ? parsed.backlog : [])
+      .filter((b: any) => b && typeof b.page_path === 'string' && PATH_RE.test(b.page_path.trim()) && typeof b.problem === 'string' && b.problem.trim())
+      .map((b: any) => ({
+        page_path: b.page_path.trim().slice(0, 200),
+        problem: String(b.problem).trim().slice(0, 300),
+        expected_impact: typeof b.expected_impact === 'string' ? b.expected_impact.trim().slice(0, 200) : '',
+      }))
+      .slice(0, 3)
   }
   // Item 4: sanitize additional_edits — max 2, well-formed, never duplicating
   // the primary (or each other). Malformed entries are DROPPED, not fatal: the
@@ -4076,6 +4096,8 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
       supabase.from('agent_runs').update({
         status: 'skipped_low_confidence', current_step: 'done', completed_at: new Date().toISOString(),
         error_message: `Pass 2 skipped: ${fixResult.reason || 'no confident #1 problem'}`,
+        // C7: a skip still carries its backlog — the dashboard's "Next up" roadmap.
+        analysis_result: { skip: true, reason: fixResult.reason || null, backlog: fixResult.backlog || [] },
       }).eq('id', run.id),
       DB_TIMEOUT_MS, 'shopify_low_confidence_update',
     )
@@ -4386,6 +4408,8 @@ async function processGithubThemeConnection(
       supabase.from('agent_runs').update({
         status: 'skipped_low_confidence', current_step: 'done', completed_at: new Date().toISOString(),
         error_message: `Pass 2 skipped: ${fixResult.reason || 'no confident #1 problem'}`,
+        // C7: a skip still carries its backlog — the dashboard's "Next up" roadmap.
+        analysis_result: { skip: true, reason: fixResult.reason || null, backlog: fixResult.backlog || [] },
       }).eq('id', run.id),
       DB_TIMEOUT_MS, 'shopify_github_low_confidence_update',
     )
@@ -4888,6 +4912,8 @@ async function processConnection(conn: any) {
           status: 'skipped_low_confidence', current_step: 'done',
           completed_at: new Date().toISOString(),
           error_message: `Pass 2 skipped: ${fixResult.reason || 'no confident #1 problem'}`,
+          // C7: a skip still carries its backlog — the dashboard's "Next up" roadmap.
+          analysis_result: { skip: true, reason: fixResult.reason || null, backlog: fixResult.backlog || [] },
         }).eq('id', run.id),
         DB_TIMEOUT_MS, 'skipped_low_confidence_update'
       )

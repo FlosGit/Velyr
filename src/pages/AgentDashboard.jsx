@@ -910,7 +910,67 @@ function OverviewPage({runs, subscription, learnings, onSelectRun, onTogglePause
 }
 
 // ─── RUNS PAGE ────────────────────────────────────────────────────────────────
-function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[]}) {
+// C7: "Next up" — the latest run's backlog (other credible problems Pass 2 saw but
+// ranked below the shipped fix, persisted in analysis_result.backlog, skips included).
+// One tap pins an item via the existing focus_page_path machinery, so the next weekly
+// run biases toward it — the skip-week silence becomes a visible roadmap.
+function NextUpCard({runs, subscription, onSaveSettings}) {
+  const [saving, setSaving] = useState(null)   // page_path being saved
+  const [error, setError] = useState(null)
+  const latest = useMemo(() => {
+    const cutoff = Date.now() - 28 * 86400000   // a stale roadmap is worse than none
+    for (const r of runs) {
+      const items = r.analysis_result?.backlog
+      if (Array.isArray(items) && items.length > 0 && new Date(r.created_at).getTime() > cutoff) {
+        return { run: r, items: items.slice(0, 3) }
+      }
+    }
+    return null
+  }, [runs])
+  if (!latest) return null
+  const pinned = subscription?.focus_page_path || null
+
+  async function pin(item) {
+    if (saving) return
+    setSaving(item.page_path); setError(null)
+    try {
+      const result = await onSaveSettings({ focus_page_path: pinned === item.page_path ? null : item.page_path })
+      if (result?.error) setError(result.error)
+    } catch (e) { setError(e.message || 'Could not save') }
+    finally { setSaving(null) }
+  }
+
+  return (
+    <Card className="fade-up" style={{padding:'20px 24px',marginBottom:14}}>
+      <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
+        <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>Next up</p>
+        <p style={{fontSize:11.5,color:C.label}}>What the agent would tackle next — one tap schedules it for the next run.</p>
+      </div>
+      <div style={{marginTop:12,display:'flex',flexDirection:'column',gap:10}}>
+        {latest.items.map(item => {
+          const isPinned = pinned === item.page_path
+          const busy = saving === item.page_path
+          return (
+            <div key={item.page_path + item.problem} style={{display:'flex',alignItems:'center',gap:14,padding:'10px 12px',border:`1px solid ${C.border}`,borderRadius:10,background:C.bgSoft}}>
+              <div style={{flex:1,minWidth:0}}>
+                <span style={{fontFamily:FONT.mono,fontSize:12.5,color:C.ink}}>{item.page_path}</span>
+                <p style={{fontSize:12,color:C.textMuted,marginTop:3,lineHeight:1.5}}>{item.problem}{item.expected_impact?` · ${item.expected_impact}`:''}</p>
+              </div>
+              <button className="btn v-press" onClick={()=>pin(item)} disabled={!!saving} style={{
+                fontSize:11.5,fontWeight:500,border:'none',borderRadius:8,padding:'8px 14px',flexShrink:0,
+                background:isPinned?C.green:C.bgChip,color:isPinned?'#fff':C.ink,
+                opacity:busy?0.7:1,cursor:busy?'wait':'pointer',
+              }}>{busy?'…':isPinned?'Scheduled ✓':'Fix this next'}</button>
+            </div>
+          )
+        })}
+      </div>
+      {error && <p style={{fontSize:11.5,color:C.yellowText,marginTop:8}}>{error}</p>}
+    </Card>
+  )
+}
+
+function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[], subscription, onSaveSettings}) {
   const [filter, setFilter] = useState('all')
   // run_id → matched-window bounce measurement. Rows arrive newest-first
   // (measured_at desc), so first-write-wins keeps the latest measurement if a
@@ -976,6 +1036,8 @@ function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[]}) {
           })}
         </div>
       </div>
+
+      {onSaveSettings && <NextUpCard runs={runs} subscription={subscription} onSaveSettings={onSaveSettings}/>}
 
       {filtered.length===0 && (
         <Card className="fade-up" style={{padding:48,textAlign:'center'}}>
@@ -2152,6 +2214,18 @@ function RunDetail({run, onClose, onDecision, busy}) {
             </ul>
           </div>
         )}
+        {Array.isArray(analysis.backlog)&&analysis.backlog.length>0&&(
+          <div style={{background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:9,padding:'12px 14px',marginBottom:8}}>
+            <SectionLabel style={{marginBottom:6}}>Next up — what the agent would tackle next</SectionLabel>
+            <ul style={{margin:0,paddingLeft:18}}>
+              {analysis.backlog.map((b,i)=>(
+                <li key={i} style={{fontSize:12.5,color:C.textMuted,lineHeight:1.6,marginBottom:3}}>
+                  <span style={{fontFamily:FONT.mono,color:C.text}}>{b.page_path}</span> — {b.problem}{b.expected_impact?` (${b.expected_impact})`:''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {analysis.file_to_edit&&(
           <div style={{background:C.chipBg,border:'1px solid #DDE7DA',borderRadius:9,padding:'12px 14px',marginBottom:8}}>
             <SectionLabel style={{color:C.chipText,marginBottom:5}}>File edited</SectionLabel>
@@ -2881,7 +2955,8 @@ export default function AgentDashboard({ navigate }) {
                   )}
 
                   {activePage==='runs'&&(
-                    <RunsPage runs={runs} loading={loading} onSelect={setSelected} learnings={learnings} impactMetrics={impactMetrics}/>
+                    <RunsPage runs={runs} loading={loading} onSelect={setSelected} learnings={learnings} impactMetrics={impactMetrics}
+                      subscription={subscription} onSaveSettings={handleSaveSettings}/>
                   )}
 
                   {activePage==='network'&&(
