@@ -195,7 +195,8 @@ export default async function handler(req, res) {
               trial_end: trialEndIso(subscription),
               cancel_at_period_end: subscription.cancel_at_period_end === true,
             }
-            console.log('[webhook/checkout] subscription upsert payload:', payload)
+            // B9: never log the payload verbatim — it carries the customer email.
+            console.log('[webhook/checkout] subscription upsert payload:', { ...payload, email: payload.email ? 'has_email' : null })
             const result = await supabase
               .from('agent_subscriptions')
               .upsert(payload, { onConflict: 'user_id' })

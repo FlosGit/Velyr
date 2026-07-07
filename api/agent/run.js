@@ -281,6 +281,57 @@ async function promotePendingDNA() {
 // table. Logic unchanged; it reuses this file's `supabase` client (same project
 // + service-role key as the original) and runs under this file's cron auth, so
 // the standalone authorizeCron from the old file is no longer needed.
+// A19: delete rows older than `days` EXCEPT each group's newest row — that row is the
+// group's live baseline (competitor diff base / dashboard site-network render) and must
+// survive a subscription being paused longer than the window; a flat cutoff delete
+// would silently drop it. Conservative by construction: any select error → no delete;
+// a truncated freshness page only means we KEEP more newest-old rows than needed.
+// Bounded pages per daily run — successive crons drain any backlog.
+async function gcKeepNewestPerGroup(supabase, { table, timeCol, groupCols, label, days = 90, pageSize = 500 }) {
+  try {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+    const { data: oldRows, error: oldErr } = await supabase
+      .from(table).select(['id', timeCol, ...groupCols].join(', '))
+      .lt(timeCol, cutoff)
+      .order(timeCol, { ascending: false })
+      .limit(pageSize)
+    if (oldErr) {
+      if (oldErr.code !== '42P01') console.warn(`[enforce-subscriptions] ${label} GC select failed:`, oldErr.message)
+      return
+    }
+    if (!oldRows?.length) return
+
+    // Groups that have at least one row INSIDE the window keep their baseline there —
+    // all their old rows are deletable, including the newest old one.
+    const groupKey = r => groupCols.map(c => r[c]).join(' ')
+    const { data: freshRows, error: freshErr } = await supabase
+      .from(table).select(groupCols.join(', ')).gte(timeCol, cutoff).limit(2000)
+    if (freshErr) {
+      if (freshErr.code !== '42P01') console.warn(`[enforce-subscriptions] ${label} GC freshness check failed:`, freshErr.message)
+      return
+    }
+    const freshGroups = new Set((freshRows || []).map(groupKey))
+
+    const seenNewestOld = new Set()
+    const deletable = []
+    for (const r of oldRows) {           // newest-first: a group's first old row is its newest old row
+      const k = groupKey(r)
+      if (!seenNewestOld.has(k)) {
+        seenNewestOld.add(k)
+        if (freshGroups.has(k)) deletable.push(r.id)   // fresh baseline exists → old baseline deletable
+        continue
+      }
+      deletable.push(r.id)
+    }
+    if (deletable.length) {
+      const { error: delErr } = await supabase.from(table).delete().in('id', deletable.slice(0, pageSize))
+      if (delErr) console.warn(`[enforce-subscriptions] ${label} GC delete failed:`, delErr.message)
+    }
+  } catch (e) {
+    console.warn(`[enforce-subscriptions] ${label} GC failed:`, e?.message || String(e))
+  }
+}
+
 async function handleEnforceSubscriptions(res) {
   const now = new Date().toISOString()
   const { error } = await supabase
@@ -342,19 +393,19 @@ async function handleEnforceSubscriptions(res) {
   // daily-cron piggyback like the GCs above; tolerate 42P01 (table not yet migrated).
   //
   // 1. agent_competitor_snapshots — one row per tracked URL per weekly run. The diff
-  //    logic only reads the newest snapshot per URL, so anything older than 90d is dead
-  //    weight (a competitor still tracked keeps its recent baseline within the window).
-  const snapCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
-  const { error: snapGcErr } = await supabase
-    .from('agent_competitor_snapshots').delete().lt('captured_at', snapCutoff)
-  if (snapGcErr && snapGcErr.code !== '42P01') console.warn('[enforce-subscriptions] competitor-snapshot GC failed:', snapGcErr.message)
-
-  // 2. agent_site_network — one nodes/edges JSON blob per run. The dashboard reads only
-  //    the newest per subscription, so 90d+ history is pure storage.
-  const netCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
-  const { error: netGcErr } = await supabase
-    .from('agent_site_network').delete().lt('created_at', netCutoff)
-  if (netGcErr && netGcErr.code !== '42P01') console.warn('[enforce-subscriptions] site-network GC failed:', netGcErr.message)
+  //    logic reads the newest snapshot per URL, so old rows are dead weight — EXCEPT a
+  //    group's newest row, which is its diff baseline: a subscription paused >90d must
+  //    not lose it (a flat cutoff delete would, silently costing one re-baseline).
+  // 2. agent_site_network — one nodes/edges JSON blob per run; the dashboard renders the
+  //    newest per subscription, which likewise must survive a >90d pause.
+  await gcKeepNewestPerGroup(supabase, {
+    table: 'agent_competitor_snapshots', timeCol: 'captured_at',
+    groupCols: ['subscription_id', 'competitor_url'], label: 'competitor-snapshot',
+  })
+  await gcKeepNewestPerGroup(supabase, {
+    table: 'agent_site_network', timeCol: 'captured_at',
+    groupCols: ['subscription_id'], label: 'site-network',
+  })
 
   // 3. screenshots storage bucket — every capture uploads a UUID-keyed PNG and nothing
   //    ever deleted them. List a bounded page (oldest first), and delete only objects
@@ -370,15 +421,34 @@ async function handleEnforceSubscriptions(res) {
       .filter(o => o?.name?.endsWith('.png') && o?.created_at && new Date(o.created_at).getTime() < shotCutoff)
       .map(o => o.name)
     if (oldNames.length) {
-      const { data: refRows } = await supabase
-        .from('agent_runs').select('screenshot_before, screenshot_after')
+      // The reference sweep must PROVABLY complete before anything is deleted: an
+      // un-paginated select silently caps at 1000 rows (an incomplete `referenced`
+      // set would delete still-shown screenshots), and an ignored error would empty
+      // the set entirely. Paginate to exhaustion; abort the GC on any error or on a
+      // suspiciously unterminated pagination — deleting late is free, deleting a
+      // referenced object is permanent.
       const referenced = new Set()
-      for (const r of (refRows || [])) {
-        for (const u of [r.screenshot_before, r.screenshot_after]) {
-          if (typeof u === 'string') { const seg = u.split('/').pop(); if (seg) referenced.add(seg) }
+      const PAGE = 1000
+      let from = 0
+      let sweepComplete = false
+      for (let page = 0; page < 50; page++) {   // 50k runs — far beyond current scale
+        const { data: refRows, error: refErr } = await supabase
+          .from('agent_runs').select('screenshot_before, screenshot_after')
+          .or('screenshot_before.not.is.null,screenshot_after.not.is.null')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (refErr) { console.warn('[enforce-subscriptions] screenshot GC reference sweep failed:', refErr.message); break }
+        for (const r of (refRows || [])) {
+          for (const u of [r.screenshot_before, r.screenshot_after]) {
+            if (typeof u === 'string') { const seg = u.split('/').pop(); if (seg) referenced.add(seg) }
+          }
         }
+        if (!refRows || refRows.length < PAGE) { sweepComplete = true; break }
+        from += PAGE
       }
-      const toDelete = oldNames.filter(n => !referenced.has(n)).slice(0, 100)
+      // Incomplete reference set → skip deletion entirely today (never `return`
+      // here — the daily cron's remaining work below must still run).
+      const toDelete = sweepComplete ? oldNames.filter(n => !referenced.has(n)).slice(0, 100) : []
       if (toDelete.length) {
         const { error: rmErr } = await supabase.storage.from('screenshots').remove(toDelete)
         if (rmErr) console.warn('[enforce-subscriptions] screenshot GC remove failed:', rmErr.message)
@@ -1900,6 +1970,10 @@ async function handleRunAction(req, res, user, action) {
       r = await applyShopifyDirectWrite(supabase, run, conn)
     }
     if (r.noop) return res.status(409).json({ error: 'This run is already being handled — refresh in a moment.' })
+    // An executor 'failed' outcome (Shopify unreachable, token dead, …) is NOT a success —
+    // report it as one and the UI styles a failure as done. Concurrency abort et al. are
+    // honest terminal outcomes and stay 200.
+    if (r.status === 'failed') return res.status(502).json({ success: false, error: stripHtml(r.message), status: 'failed' })
     return res.status(200).json({ success: true, status: r.status, message: stripHtml(r.message) })
   }
 
@@ -1913,6 +1987,16 @@ async function handleRunAction(req, res, user, action) {
     await closeRejectedPr(conn, run, { close: true })
     const result = await reconcileRejected(supabase, run, { rejectLabel: 'dashboard' })
     if (result.kind === 'noop') return res.status(200).json({ success: true, status: run.status, already: true })
+    // Declining a ROLLBACK proposal keeps the change live: the run flips back to
+    // 'deployed', not 'rejected' — report the state the DB actually landed in.
+    if (result.kind === 'rollback_declined') {
+      return res.status(200).json({ success: true, status: 'deployed', kind: result.kind, message: 'Rollback declined — the change stays live and the agent keeps watching its metrics.' })
+    }
+    // Parity with the Telegram NO + GitHub-close paths: a declined Setup-PR still
+    // starts the analysis run it consumed.
+    if (result.kind === 'setup_declined' || result.kind === 'foreign_declined') {
+      await startFollowupRun(supabase, run.subscription_id)
+    }
     return res.status(200).json({ success: true, status: 'rejected', kind: result.kind })
   }
 
@@ -1937,7 +2021,8 @@ async function handleRunAction(req, res, user, action) {
   if (prInfo.merged) {
     const r = await reconcileDeployed(supabase, run, prInfo.merge_commit_sha, { approvalLabel: 'dashboard, already merged' })
     if (r.kind === 'setup_installed') await startFollowupRun(supabase, run.subscription_id)
-    return res.status(200).json({ success: true, status: r.kind === 'rollback_executed' ? 'rolled_back' : 'deployed', already: true })
+    const rolledBack = r.kind === 'rollback_executed'
+    return res.status(200).json({ success: true, status: rolledBack ? 'rolled_back' : 'deployed', already: true, ...(rolledBack ? { message: 'Rolled back — your site is restored to the previous version.' } : {}) })
   }
   if (prInfo.state === 'closed') return res.status(409).json({ error: 'The pull request is closed (not merged).' })
   if (prInfo.mergeable === false) return res.status(409).json({ error: 'The PR is not mergeable (a conflict with the base branch). Resolve it on GitHub, then retry.' })
@@ -1958,5 +2043,6 @@ async function handleRunAction(req, res, user, action) {
     await startFollowupRun(supabase, run.subscription_id)
     return res.status(200).json({ success: true, status: 'deployed', kind: 'setup_installed' })
   }
-  return res.status(200).json({ success: true, status: result.kind === 'rollback_executed' ? 'rolled_back' : 'deployed', kind: result.kind })
+  const rolledBack = result.kind === 'rollback_executed'
+  return res.status(200).json({ success: true, status: rolledBack ? 'rolled_back' : 'deployed', kind: result.kind, ...(rolledBack ? { message: 'Rolled back — your site is restored to the previous version.' } : {}) })
 }

@@ -2057,9 +2057,13 @@ function RunDetail({run, onClose, onDecision, busy}) {
   // PR; Shopify-direct theme runs (shopify_awaiting_approval apply, shopify_rollback_pending
   // rollback) go through the shared executor server-side. onDecision is absent in read-only
   // contexts (public page). A rollback proposal flips the button meaning (approve = undo).
-  const isRollbackProposal = run.status === 'shopify_rollback_pending'
+  // A GitHub rollback proposal is a 'waiting_approval' run whose PR is the REVERT PR
+  // (rollback_reason stamped by the 48h check) — approving it undoes the change. Without
+  // this check it renders as a normal fix approval and the button meaning is inverted.
+  const isRollbackProposal = run.status === 'shopify_rollback_pending' ||
+    (run.status === 'waiting_approval' && run.rollback_reason === 'metrics_dropped')
   const isGithubPending    = run.status === 'waiting_approval' && !!run.pr_url
-  const isShopifyPending   = run.status === 'shopify_awaiting_approval' || isRollbackProposal
+  const isShopifyPending   = run.status === 'shopify_awaiting_approval' || run.status === 'shopify_rollback_pending'
   const canDecide = typeof onDecision === 'function' && (isGithubPending || isShopifyPending)
   const approveLabel = isRollbackProposal ? '↩️ Roll back'
     : run.status === 'shopify_awaiting_approval' ? '✓ Apply to live theme'
@@ -2225,7 +2229,7 @@ function RunDetail({run, onClose, onDecision, busy}) {
           <p style={{fontSize:13,color:C.greenText,marginTop:20,fontWeight:500}}>
             {decisionDone.message
               || (decisionDone.decision==='approve'
-                    ? (isRollbackProposal ? '✓ Rolled back — your theme is restored.' : '✓ Approved — the change is deploying now.')
+                    ? (isRollbackProposal ? '✓ Rolled back — your site is restored to the previous version.' : '✓ Approved — the change is deploying now.')
                     : (isRollbackProposal ? '✓ Kept the change live.' : '✓ Skipped — the agent will try again next run.'))}
           </p>
         )}
@@ -2511,13 +2515,15 @@ export default function AgentDashboard({ navigate }) {
     setActionLoading(false)
   }
 
-  // C2: approve (merge) or reject (close) the pending GitHub run from the dashboard —
-  // the web twin of the Telegram YES/NO. Reuses the same server-side reconcile + CAS, so
-  // racing a Telegram reply is safe. Returns { ok } | { ok:false, error } for inline
-  // display; refreshes on success. Shopify theme approvals stay Telegram-only (409).
+  // C2: approve or reject the pending run from the dashboard — the web twin of the
+  // Telegram YES/NO for GitHub runs (merge/close the PR) AND Shopify-direct theme runs
+  // (apply / rollback via the shared executor). Reuses the same server-side reconcile +
+  // CAS, so racing a Telegram reply is safe. Returns { ok } | { ok:false, error } for
+  // inline display; refreshes on success.
   const [runDecisionBusy, setRunDecisionBusy] = useState(false)
   async function handleRunDecision(runId, decision) {
-    if (runDecisionBusy || isDemo) return { ok: false, error: 'Unavailable in demo mode.' }
+    if (isDemo) return { ok: false, error: 'Unavailable in demo mode.' }
+    if (runDecisionBusy) return { ok: false, error: 'Still working on the previous action…' }
     setRunDecisionBusy(true)
     try {
       const token = await getToken()

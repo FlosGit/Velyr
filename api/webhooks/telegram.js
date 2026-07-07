@@ -361,7 +361,10 @@ async function findLatestRejectedRunForChat(chatId) {
     .eq('subscription_id', subscriptionId)
     // A13: a Shopify-direct NO lands the fix in 'shopify_rejected', not 'rejected', so
     // `note <reason>` after one previously answered "No recently skipped run".
-    .in('status', ['rejected', 'shopify_rejected'])
+    // C11: the owner-question message ("Reply note <answer>") accompanies a
+    // 'skipped_low_confidence' run — without it here, the archetypal C11 customer
+    // (only skips, no rejections) got "No recently skipped run" and the answer was lost.
+    .in('status', ['rejected', 'shopify_rejected', 'skipped_low_confidence'])
     .eq('run_type', 'conversion_fix')
     .order('completed_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
@@ -734,25 +737,33 @@ async function handleNote(runId, reason, chatId) {
 
   const { data: run } = await supabase
     .from('agent_runs')
-    .select('subscription_id, analysis_result')
+    .select('subscription_id, analysis_result, status')
     .eq('id', runId)
     .eq('subscription_id', subId)
     .maybeSingle()
 
   if (!run) return sendMessage(chatId, '❌ Run not found.')
 
+  // C11: a note on a REJECTED run explains the rejection → 'negative' (feeds the
+  // never-do-again block). A note on a SKIPPED run is the owner ANSWERING the agent's
+  // question (or volunteering context) — storing that as 'negative' inverted its
+  // meaning into an anti-pattern. 'neutral' + metric_type 'manual' rows are injected
+  // as OWNER CONTEXT by the edge fn's fetchBusinessDNA.
+  const isRejection = run.status === 'rejected' || run.status === 'shopify_rejected'
   await supabase.from('agent_learnings').insert({
     subscription_id: run.subscription_id,
     run_id: runId,
     change_type: run.analysis_result?.change_type || 'other',
     summary: reason,
-    outcome: 'negative',
+    outcome: isRejection ? 'negative' : 'neutral',
     metric_type: 'manual',
     delta: 0,
     confidence: 'low'
   })
 
-  await sendMessage(chatId, `🧬 <b>Note saved to Business DNA.</b>\n<i>"${escapeHtml(reason)}"</i>\n\nThe agent will factor this in on the next run.`)
+  await sendMessage(chatId, isRejection
+    ? `🧬 <b>Note saved to Business DNA.</b>\n<i>"${escapeHtml(reason)}"</i>\n\nThe agent will factor this in on the next run.`
+    : `🧬 <b>Answer saved.</b>\n<i>"${escapeHtml(reason)}"</i>\n\nThe agent will use this as business context in every future run.`)
 }
 
 // ─── COMPETITOR ───────────────────────────────────────────────────────────────
@@ -912,6 +923,9 @@ export default async function handler(req, res) {
         // Postgres duplicate-key error code → we've already handled this update
         if (insertErr.code === '23505') {
           console.log(`[telegram] duplicate update_id ${updateId} — skipping`)
+          // A redelivered callback_query still needs its ACK or the user's button
+          // spinner runs until Telegram times out.
+          if (body.callback_query?.id) await answerCallbackQuery(body.callback_query.id)
           return res.status(200).json({ ok: true, deduped: true })
         }
         // Any other DB error: log but proceed (better to risk a double-fire
