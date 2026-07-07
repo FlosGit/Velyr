@@ -4036,7 +4036,7 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   // GitHub-derived), so it's built exactly as the GitHub path builds it.
   const posthogApiKey = (await decryptSecret(conn.posthog_api_key)) || Deno.env.get('POSTHOG_API_KEY')!
   const competitorUrls = await getCompetitorUrls(conn.subscription_id)
-  const [analytics, pageSpeed, previousFixes, recentlyRejected, legacyDna, competitorData, guardrails, businessDna] = await Promise.all([
+  const [analytics, pageSpeed, previousFixes, recentlyRejected, legacyDna, competitorData, guardrails, businessDna, competitorChanges] = await Promise.all([
     getPostHogAnalytics(
       posthogApiKey,
       conn.posthog_project_id || Deno.env.get('POSTHOG_PROJECT_ID')!,
@@ -4050,7 +4050,15 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     competitorUrls.length > 0 ? fetchCompetitorData(competitorUrls) : Promise.resolve(null),
     fetchBrandGuardrails(conn.subscription_id),
     loadBusinessDNA(conn.subscription_id),
+    // C8 parity: the Shopify pipelines now snapshot+diff competitors too — the
+    // alert below used to fire only on the plain-GitHub path.
+    scanCompetitorsForChanges(conn.subscription_id, competitorUrls),
   ])
+  // C8: proactive competitor alert — fires regardless of how this run ends
+  // (fix, skip, abort). Best-effort; a send failure never affects the run.
+  if (competitorChanges?.length && subRow?.telegram_chat_id) {
+    await sendCompetitorAlert(subRow.telegram_chat_id, competitorChanges)
+  }
   const revenue = subRow?.stripe_revenue_connected
     ? await getStripeRevenuePerVisitor(subRow.stripe_account_id || null, analytics)
     : null
@@ -4358,7 +4366,7 @@ async function processGithubThemeConnection(
   // derived; nothing GitHub-write-related).
   const posthogApiKey = (await decryptSecret(conn.posthog_api_key)) || Deno.env.get('POSTHOG_API_KEY')!
   const competitorUrls = await getCompetitorUrls(conn.subscription_id)
-  const [analytics, pageSpeed, previousFixes, recentlyRejected, legacyDna, competitorData, guardrails, businessDna] = await Promise.all([
+  const [analytics, pageSpeed, previousFixes, recentlyRejected, legacyDna, competitorData, guardrails, businessDna, competitorChanges] = await Promise.all([
     getPostHogAnalytics(
       posthogApiKey,
       conn.posthog_project_id || Deno.env.get('POSTHOG_PROJECT_ID')!,
@@ -4372,7 +4380,15 @@ async function processGithubThemeConnection(
     competitorUrls.length > 0 ? fetchCompetitorData(competitorUrls) : Promise.resolve(null),
     fetchBrandGuardrails(conn.subscription_id),
     loadBusinessDNA(conn.subscription_id),
+    // C8 parity: the Shopify pipelines now snapshot+diff competitors too — the
+    // alert below used to fire only on the plain-GitHub path.
+    scanCompetitorsForChanges(conn.subscription_id, competitorUrls),
   ])
+  // C8: proactive competitor alert — fires regardless of how this run ends
+  // (fix, skip, abort). Best-effort; a send failure never affects the run.
+  if (competitorChanges?.length && subRow?.telegram_chat_id) {
+    await sendCompetitorAlert(subRow.telegram_chat_id, competitorChanges)
+  }
   const revenue = subRow?.stripe_revenue_connected
     ? await getStripeRevenuePerVisitor(subRow.stripe_account_id || null, analytics)
     : null
