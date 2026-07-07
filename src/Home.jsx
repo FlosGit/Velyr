@@ -522,7 +522,7 @@ function Hero({ navigate }) {
           <button className="btn-ghost" style={{ width:'auto' }} onClick={() => scrollTo('growth-agent')}>See how it works</button>
         </div>
         <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:14, letterSpacing:'.01em' }}>
-          14-day free trial · You approve every change · Cancel anytime
+          14-day free trial · €29/month after · You approve every change · Cancel anytime
         </p>
       </div>
     </section>
