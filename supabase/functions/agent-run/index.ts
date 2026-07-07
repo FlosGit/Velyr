@@ -1053,14 +1053,19 @@ function escapeHtml(s: unknown): string {
 // routes a tap to handleApprove/handleReject (which authorize it against the chat's subs).
 // `variant`: 'fix' (apply/skip a change) or 'foreign' (add-analytics/skip). Text YES/NO
 // still works alongside — the buttons are purely additive.
-function approvalKeyboard(runId: string, variant: 'fix' | 'foreign' = 'fix') {
+function approvalKeyboard(runId: string, variant: 'fix' | 'foreign' = 'fix', withPreview = false) {
   const [yes, no] = variant === 'foreign'
     ? ['✅ Add analytics', '❌ Skip']
     : ['✅ Apply', '❌ Skip']
-  return { inline_keyboard: [[
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [[
     { text: yes, callback_data: `approve:${runId}` },
     { text: no,  callback_data: `reject:${runId}` },
-  ]] }
+  ]]
+  // C4: only the plain-GitHub fix PR gets a Preview button — its CI (Vercel/Netlify)
+  // builds a preview deployment the webhook can screenshot. Theme-repo PRs sync via
+  // Shopify (no CI preview) and Shopify-direct approvals have no PR at all.
+  if (withPreview) rows.push([{ text: '🔍 Preview', callback_data: `preview:${runId}` }])
+  return { inline_keyboard: rows }
 }
 
 // Telegram failure-mode notification used when we cap a subscription out.
@@ -3632,7 +3637,9 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
 // The single approval callsite. Honesty-first: hypothesis + expected metric +
 // file + first blind spot, with the full receipt in the PR. RA7 owns the final
 // wording of THIS message (every other Telegram message stays byte-identical).
-async function sendTelegramNotification(fixResult: FixResult, pr: any, runId: string, chatId: string) {
+// withPreview (C4): true only on the plain-GitHub path — adds the 🔍 Preview button
+// (the Telegram webhook resolves the PR's CI preview deployment + screenshots it).
+async function sendTelegramNotification(fixResult: FixResult, pr: any, runId: string, chatId: string, withPreview = false) {
   const em = fixResult.expected_metric
   const expected = em
     ? `${em.direction} ${em.metric} ~${em.magnitude_pp}pp (${fixResult.confidence || 'unknown'} confidence)`
@@ -3655,7 +3662,7 @@ Tap a button below (or reply <b>YES</b> to merge / <b>NO</b> to reject). Full re
 
   const response = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML', disable_web_page_preview: false, reply_markup: approvalKeyboard(runId) }),
+    body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML', disable_web_page_preview: false, reply_markup: approvalKeyboard(runId, 'fix', withPreview) }),
   })
   const data = await response.json()
   if (!data.ok) console.error('Telegram error:', data.description)
@@ -5012,7 +5019,8 @@ async function processConnection(conn: any) {
     if (!chatId) {
       slog('warn', 'no_chat_for_notify', { runId: run.id, subscriptionId: conn.subscription_id })
     } else {
-      const messageId = await sendTelegramNotification(fixResult, pr, run.id, chatId).catch((e: any) => {
+      // C4: withPreview — this is the plain-GitHub path whose CI builds a PR preview.
+      const messageId = await sendTelegramNotification(fixResult, pr, run.id, chatId, true).catch((e: any) => {
         slog('warn', 'approval_notify_failed', { runId: run.id, error: e?.message })
         return null
       })

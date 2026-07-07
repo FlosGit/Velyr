@@ -4,6 +4,7 @@ import { getOctokit } from '../_lib/github-app.js'
 import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
 import { dispatchAgentRun, startFollowupRun } from '../_lib/edge-dispatch.js'
 import { applyShopifyDirectWrite, executeShopifyDirectRollback, rejectShopifyDirect } from '../_lib/shopify-approval.js'
+import { captureScreenshot } from '../_lib/screenshot.js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -730,6 +731,68 @@ async function handleStatus(chatId) {
   await sendMessage(chatId, msg)
 }
 
+// ─── C4: PREVIEW (inline button on GitHub approval messages) ──────────────────
+// Vercel/Netlify already build a preview deployment per PR; surface it as "current
+// vs proposed" — the preview URL always, a before/after photo pair when
+// ScreenshotOne is configured. ONE bounded pass, no polling: if CI hasn't finished
+// the user taps Preview again in a minute. Authorization mirrors handleApprove
+// (the run must belong to a chat-authorized subscription; callback_data is only a
+// pointer, never trusted).
+async function handlePreview(runId, chatId) {
+  const subIds = await getChatAuthorizedSubIds(chatId)
+  if (subIds.length === 0) return notifyInactive(chatId)
+  const { data: run } = await supabase
+    .from('agent_runs').select('*')
+    .eq('id', runId).in('subscription_id', subIds).maybeSingle()
+  if (!run) return sendMessage(chatId, '❌ Run not found.')
+  if (run.status !== 'waiting_approval' || !run.pr_number) {
+    return sendMessage(chatId, 'ℹ️ This run has no open PR to preview.')
+  }
+  const { data: conn } = await supabase
+    .from('agent_connections').select('*')
+    .eq('subscription_id', run.subscription_id).maybeSingle()
+  if (!conn?.github_installation_id) return sendMessage(chatId, '❌ GitHub connection not found.')
+
+  try {
+    const octokit = await getOctokit(conn.github_installation_id)
+    const owner = conn.github_repo_owner, repo = conn.github_repo_name
+    const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: run.pr_number })
+    // Vercel/Netlify register a GitHub Deployment for the PR head sha; the successful
+    // deployment status carries environment_url. Newest first, 3 deployments is plenty.
+    const { data: deployments } = await octokit.rest.repos.listDeployments({ owner, repo, sha: pr.head.sha, per_page: 3 })
+    let previewUrl = null
+    for (const d of (deployments || [])) {
+      const { data: statuses } = await octokit.rest.repos.listDeploymentStatuses({ owner, repo, deployment_id: d.id, per_page: 5 })
+      const ok = (statuses || []).find(s => s.state === 'success' && s.environment_url)
+      if (ok) { previewUrl = ok.environment_url; break }
+    }
+    if (!previewUrl) {
+      return sendMessage(chatId, '⏳ No finished preview deployment for this PR yet — your CI may still be building. Tap 🔍 Preview again in a minute.')
+    }
+
+    // Before-shot was captured at analysis time; the after-shot renders the CI
+    // preview now. Both best-effort — the URL message below is the guaranteed part.
+    const afterShot = await captureScreenshot(supabase, previewUrl)
+    const beforeShot = run.screenshot_before || null
+    if (afterShot && beforeShot) {
+      await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMediaGroup`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          media: [
+            { type: 'photo', media: beforeShot, caption: 'Before — your live site today' },
+            { type: 'photo', media: afterShot,  caption: 'After — with the proposed change (PR preview)' },
+          ],
+        }),
+      }).catch(err => console.warn('[telegram] preview media group failed:', err?.message))
+    }
+    await sendMessage(chatId, `🔍 <b>PR preview</b>\n\n<a href="${escapeHtml(previewUrl)}">${escapeHtml(previewUrl)}</a>\n\nThis is your site <b>with</b> the proposed change, built by your own CI. Reply YES to apply it or NO to skip.`)
+  } catch (err) {
+    console.error('[telegram] preview failed:', err?.message)
+    await sendMessage(chatId, '❌ Could not fetch the PR preview from GitHub — you can open the PR itself to find your CI’s preview link.')
+  }
+}
+
 // ─── NOTE ─────────────────────────────────────────────────────────────────────
 async function handleNote(runId, reason, chatId) {
   const subId = await getActiveSubId(chatId)
@@ -947,12 +1010,15 @@ export default async function handler(req, res) {
     if (cbq) {
       const cbChatId = cbq.message?.chat?.id
       const data = typeof cbq.data === 'string' ? cbq.data : ''
-      const m = /^(approve|reject):(.+)$/.exec(data)
-      await answerCallbackQuery(cbq.id)   // stop the button spinner regardless
+      const m = /^(approve|reject|preview):(.+)$/.exec(data)
+      // Stop the button spinner immediately; a preview tap gets a status toast
+      // because its work (GitHub lookup + screenshot) takes a few seconds.
+      await answerCallbackQuery(cbq.id, m?.[1] === 'preview' ? '📸 Looking for the PR preview…' : undefined)
       if (m && cbChatId != null) {
         const [, action, runId] = m
-        if (action === 'approve') await handleApprove(runId, cbChatId)
-        else                      await handleReject(runId, cbChatId)
+        if (action === 'approve')      await handleApprove(runId, cbChatId)
+        else if (action === 'reject')  await handleReject(runId, cbChatId)
+        else                           await handlePreview(runId, cbChatId)
       }
       return res.status(200).json({ ok: true })
     }
