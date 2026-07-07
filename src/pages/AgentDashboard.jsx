@@ -2021,6 +2021,18 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
             )}
           </div>
         )}
+        {/* C12: embeddable win badge — renders the latest MEASURED win (deploy±2d
+            bounce pair) as a self-contained SVG anyone can hotlink. Only shown once
+            the timeline is actually public (same is_public gate server-side). */}
+        {publicUrl && isPublic && (
+          <div className="reveal-in" style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${C.borderSoft}`}}>
+            <p style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:6}}>Win badge for your site</p>
+            <img src={`/api/agent/run?action=win_badge&slug=${subscription.public_slug}`} alt="Velyr win badge preview" width="320" height="64" style={{display:'block',marginBottom:8}}/>
+            <input readOnly onFocus={e=>e.target.select()} value={`<a href="https://velyr.io/agent/${subscription.public_slug}"><img src="https://velyr.io/api/agent/run?action=win_badge&slug=${subscription.public_slug}" alt="Optimized weekly by Velyr" width="320" height="64"></a>`}
+              style={{...monoInput,width:'100%',fontSize:11,color:C.textMuted}}/>
+            <p style={{fontSize:11,color:C.label,marginTop:6}}>Paste this into your site's footer — it updates automatically with your latest measured win. A larger share card lives at <span style={{fontFamily:FONT.mono}}>?action=win_card</span>.</p>
+          </div>
+        )}
         {!isPublic && subscription?.is_public && (
           <div className="reveal-in" style={{display:'flex',alignItems:'center',gap:10,marginTop:16,paddingTop:16,borderTop:`1px solid ${C.borderSoft}`}}>
             <button className="btn btn-primary v-press" onClick={savePublic} disabled={savingPublic} style={{

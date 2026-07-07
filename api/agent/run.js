@@ -9,6 +9,7 @@ import { resolveAffectedScope, sessionize, bounceFromSessions } from '../_lib/ro
 import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/run-reconcile.js'
 import { startFollowupRun } from '../_lib/edge-dispatch.js'
 import { applyShopifyDirectWrite, executeShopifyDirectRollback, rejectShopifyDirect } from '../_lib/shopify-approval.js'
+import { buildWinBadgeSvg, buildWinCardSvg } from '../_lib/win-card.js'
 
 // Strip Telegram-HTML tags/entities from a shared-executor message so the dashboard
 // (which renders the result as plain text, not HTML) shows it cleanly. Decode &amp; last.
@@ -475,6 +476,11 @@ export default async function handler(req, res) {
   // GET /api/agent/run?action=public-timeline&slug=florian
   if (action === 'public-timeline') {
     return handlePublicTimeline(req, res)
+  }
+  // ── C12: PUBLIC WIN BADGE / SHARE CARD (no auth, SVG) ────────────────────
+  // GET /api/agent/run?action=win_badge&slug=florian · ?action=win_card&slug=…
+  if (action === 'win_badge' || action === 'win_card') {
+    return handleWinBadge(req, res, action)
   }
 
   // ── Authenticated user actions (Supabase JWT) ─────────────────────────────
@@ -1604,6 +1610,66 @@ async function getPostHogAnalytics(posthogApiKey, posthogProjectId, posthogHost 
 // ════════════════════════════════════════════════════════════════════════════
 
 const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/
+
+// ─── C12: PUBLIC WIN BADGE / SHARE CARD (SVG, no auth) ────────────────────────
+// Same visibility gate as the public timeline (public_slug + is_public). Serves a
+// self-contained SVG: `win_badge` is the small embeddable ("Optimized weekly by
+// Velyr — last win −Xpp bounce"), `win_card` the larger before/after share card.
+// Everything interpolated is escaped in api/_lib/win-card.js; only denormalized
+// fields are projected (never analysis_result wholesale — Stage 4.11).
+async function handleWinBadge(req, res, kind) {
+  const slug = (req.query?.slug || '').toLowerCase().trim()
+  if (!slug || !SLUG_REGEX.test(slug)) return res.status(404).json({ error: 'Not found' })
+
+  const { data: sub } = await supabase
+    .from('agent_subscriptions')
+    .select('id, public_slug, is_public')
+    .eq('public_slug', slug).eq('is_public', true).maybeSingle()
+  if (!sub) return res.status(404).json({ error: 'Not found' })
+
+  const { data: conn } = await supabase
+    .from('agent_connections').select('website_url')
+    .eq('subscription_id', sub.id).maybeSingle()
+  let siteHost = ''
+  try { siteHost = new URL(conn?.website_url).hostname } catch { /* keep '' */ }
+
+  // Newest measured IMPROVEMENT (bounce went down). Legacy 'bounce_rate' rows count.
+  const { data: metrics } = await supabase
+    .from('impact_metrics')
+    .select('run_id, metric_type, value_before, value_after, measured_at')
+    .eq('subscription_id', sub.id)
+    .in('metric_type', ['site_wide_bounce_rate', 'route_scoped_bounce_rate', 'bounce_rate'])
+    .order('measured_at', { ascending: false }).limit(20)
+  const win = (metrics || []).find(m =>
+    typeof m.value_before === 'number' && typeof m.value_after === 'number' && m.value_after < m.value_before)
+
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8')
+  res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400')
+
+  if (kind === 'win_badge' || !win) {
+    // win_card with no measured win degrades to the badge layout — it tells the
+    // "no measured win yet" story honestly instead of 404ing an embedded image.
+    return res.status(200).send(buildWinBadgeSvg({
+      siteHost,
+      win: win ? { deltaPp: win.value_after - win.value_before, scope: win.metric_type } : null,
+    }))
+  }
+
+  // win_card: include the measured run's problem line (denormalized column only).
+  let problem = ''
+  if (win.run_id) {
+    const { data: run } = await supabase
+      .from('agent_runs').select('problem_description')
+      .eq('id', win.run_id).maybeSingle()
+    problem = run?.problem_description || ''
+  }
+  return res.status(200).send(buildWinCardSvg({
+    siteHost, problem,
+    before: win.value_before, after: win.value_after,
+    deltaPp: win.value_after - win.value_before,
+    scope: win.metric_type, measuredAt: win.measured_at,
+  }))
+}
 
 // ─── Public Timeline (no auth) ────────────────────────────────────────────────
 async function handlePublicTimeline(req, res) {
