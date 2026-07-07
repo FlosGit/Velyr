@@ -303,7 +303,7 @@ async function gcKeepNewestPerGroup(supabase, { table, timeCol, groupCols, label
 
     // Groups that have at least one row INSIDE the window keep their baseline there —
     // all their old rows are deletable, including the newest old one.
-    const groupKey = r => groupCols.map(c => r[c]).join(' ')
+    const groupKey = r => groupCols.map(c => r[c]).join('|')
     const { data: freshRows, error: freshErr } = await supabase
       .from(table).select(groupCols.join(', ')).gte(timeCol, cutoff).limit(2000)
     if (freshErr) {
