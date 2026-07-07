@@ -113,6 +113,65 @@ export async function upsertThemeFiles(shop, token, themeId, files, apiVersion) 
   }
 }
 
+// ── Theme-level operations (C3 preview themes) ───────────────────────────────
+// themeDuplicate / themeDelete exist only from Admin API 2026-07 (the file-level
+// mutations above are pinned to 2026-04). Theme-level ops therefore pin their OWN
+// version and never inherit DEFAULT_API_VERSION. Both need write_themes + the
+// theme-modification exemption (granted — ticket 68049335). Shapes are verified
+// against a dev store via scripts/shopify-dv-verify.mjs steps (5)/(6) BEFORE the
+// AGENT_SHOPIFY_PREVIEW_THEMES flag may be enabled.
+const THEME_OPS_API_VERSION = '2026-07'
+
+// Duplicates a theme (unpublished copy). Returns { ok: true, themeId, name } or
+// { ok: false, reason, message }. themeId is the NUMERIC id extracted from the gid,
+// ready for https://<shop>/?preview_theme_id=<id>.
+export async function duplicateTheme(shop, token, themeId, name, apiVersion) {
+  const mutation = `mutation VelyrThemeDuplicate($id: ID!, $name: String) {
+    themeDuplicate(id: $id, name: $name) {
+      newTheme { id name role }
+      userErrors { field message }
+    }
+  }`
+  let res, json
+  try {
+    ({ res, json } = await post(shop, token, apiVersion || THEME_OPS_API_VERSION, { query: mutation, variables: { id: gid(themeId), name } }))
+  } catch (err) {
+    return { ok: false, reason: 'request_failed', message: `themeDuplicate threw: ${err?.message || String(err)}` }
+  }
+  if (res.status === 401 || res.status === 403) return { ok: false, reason: 'unauthorized', message: `Shopify returned ${res.status} on themeDuplicate` }
+  if (!res.ok || json?.errors) return { ok: false, reason: 'graphql_error', message: `themeDuplicate failed (HTTP ${res.status}): ${JSON.stringify(json?.errors || {}).slice(0, 300)}` }
+  const payload = json?.data?.themeDuplicate || {}
+  if (payload.userErrors?.length) return { ok: false, reason: 'user_errors', message: payload.userErrors.map(e => e.message).join('; ') }
+  const newGid = payload.newTheme?.id || ''
+  const numericId = newGid.split('/').pop()
+  if (!numericId) return { ok: false, reason: 'no_theme', message: 'themeDuplicate returned no newTheme id' }
+  return { ok: true, themeId: numericId, name: payload.newTheme?.name || name || '' }
+}
+
+// Deletes an entire theme (used ONLY to remove Velyr-created preview duplicates —
+// callers must guard that the id is a Velyr preview theme, never the live theme).
+// Returns { ok: true, deletedThemeId } or { ok: false, reason, message }.
+export async function deleteTheme(shop, token, themeId, apiVersion) {
+  const mutation = `mutation VelyrThemeDelete($id: ID!) {
+    themeDelete(id: $id) {
+      deletedThemeId
+      userErrors { field message }
+    }
+  }`
+  let res, json
+  try {
+    ({ res, json } = await post(shop, token, apiVersion || THEME_OPS_API_VERSION, { query: mutation, variables: { id: gid(themeId) } }))
+  } catch (err) {
+    return { ok: false, reason: 'request_failed', message: `themeDelete threw: ${err?.message || String(err)}` }
+  }
+  if (res.status === 401 || res.status === 403) return { ok: false, reason: 'unauthorized', message: `Shopify returned ${res.status} on themeDelete` }
+  if (!res.ok || json?.errors) return { ok: false, reason: 'graphql_error', message: `themeDelete failed (HTTP ${res.status}): ${JSON.stringify(json?.errors || {}).slice(0, 300)}` }
+  const payload = json?.data?.themeDelete || {}
+  if (payload.userErrors?.length) return { ok: false, reason: 'user_errors', message: payload.userErrors.map(e => e.message).join('; ') }
+  if (!payload.deletedThemeId) return { ok: false, reason: 'not_deleted', message: 'themeDelete returned no deletedThemeId' }
+  return { ok: true, deletedThemeId: payload.deletedThemeId }
+}
+
 // ── Delete (rollback of a CREATED file) ──────────────────────────────────────
 // filenames: [string]. Returns { ok: true, deletedFilenames, userErrors } or
 // { ok: false, reason, message }.

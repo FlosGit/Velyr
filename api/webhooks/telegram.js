@@ -5,6 +5,9 @@ import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/r
 import { dispatchAgentRun, startFollowupRun } from '../_lib/edge-dispatch.js'
 import { applyShopifyDirectWrite, executeShopifyDirectRollback, rejectShopifyDirect } from '../_lib/shopify-approval.js'
 import { captureScreenshot } from '../_lib/screenshot.js'
+import { refreshShopifyToken } from '../_lib/shopify-token-refresh.js'
+import { duplicateTheme, deleteTheme, upsertThemeFiles } from '../_lib/shopify-theme-io.js'
+import { normalizePendingWrite } from '../_lib/shopify-rollback.js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -745,6 +748,8 @@ async function handlePreview(runId, chatId) {
     .from('agent_runs').select('*')
     .eq('id', runId).in('subscription_id', subIds).maybeSingle()
   if (!run) return sendMessage(chatId, '❌ Run not found.')
+  // C3: a Shopify-direct approval previews via a throwaway duplicate theme.
+  if (run.status === 'shopify_awaiting_approval') return handleShopifyThemePreview(run, chatId)
   if (run.status !== 'waiting_approval' || !run.pr_number) {
     return sendMessage(chatId, 'ℹ️ This run has no open PR to preview.')
   }
@@ -791,6 +796,71 @@ async function handlePreview(runId, chatId) {
     console.error('[telegram] preview failed:', err?.message)
     await sendMessage(chatId, '❌ Could not fetch the PR preview from GitHub — you can open the PR itself to find your CI’s preview link.')
   }
+}
+
+// ─── C3: SHOPIFY-DIRECT THEME PREVIEW (flag-gated, default OFF) ────────────────
+// Stages the pending fix onto a throwaway DUPLICATE of the analyzed theme and
+// replies with Shopify's native ?preview_theme_id link — the merchant sees the
+// change on their real store before anything touches the live theme. The duplicate
+// is deleted when they decide (cleanupPreviewTheme in shopify-approval.js).
+//
+// GATE: AGENT_SHOPIFY_PREVIEW_THEMES=1 (Vercel env; the edge fn shows the button
+// under its own copy of the flag). Enable ONLY after scripts/shopify-dv-verify.mjs
+// steps (5)+(6) — themeDuplicate/themeDelete are Admin API 2026-07 shapes and were
+// NOT dev-store-exercised when this shipped.
+async function handleShopifyThemePreview(run, chatId) {
+  if (process.env.AGENT_SHOPIFY_PREVIEW_THEMES !== '1') {
+    return sendMessage(chatId, 'ℹ️ Theme previews aren’t enabled yet — reply YES / NO, or check the Find/Replace above.')
+  }
+  const { data: conn } = await supabase
+    .from('agent_connections').select('*')
+    .eq('subscription_id', run.subscription_id).maybeSingle()
+  if (!conn?.shopify_shop_domain) return sendMessage(chatId, '❌ Shopify connection not found.')
+  const shop = conn.shopify_shop_domain
+
+  const previewMsg = (themeId) =>
+    `🔍 <b>Preview ready</b>\n\n<a href="https://${escapeHtml(shop)}/?preview_theme_id=${encodeURIComponent(themeId)}">View your store WITH the proposed change</a>\n\nThat's a throwaway copy — your live theme is untouched. I'll delete it automatically when you decide. Reply YES to apply / NO to skip.`
+
+  // Reuse the preview this run already created (second tap = same link).
+  if (run.analysis_result?.preview_theme_id) {
+    return sendMessage(chatId, previewMsg(run.analysis_result.preview_theme_id))
+  }
+
+  const pending = normalizePendingWrite(run.analysis_result?.pending_write)
+  if (!pending.themeId || pending.files.length === 0) {
+    return sendMessage(chatId, '❌ I couldn’t find the prepared change for this run, so there’s nothing to preview.')
+  }
+  const tok = await refreshShopifyToken(supabase, conn)
+  if (!tok.ok) {
+    return sendMessage(chatId, tok.reason === 'needs_reconsent'
+      ? '🔌 Your Shopify connection has expired — reconnect your store, then tap Preview again.'
+      : '⚠️ Couldn’t reach Shopify just now — tap Preview again in a minute.')
+  }
+
+  const dup = await duplicateTheme(shop, tok.accessToken, pending.themeId, `Velyr preview ${new Date().toISOString().slice(0, 10)}`)
+  if (!dup.ok) {
+    return sendMessage(chatId, `❌ Couldn’t create a preview copy of your theme.\n\n<i>${escapeHtml(dup.message || '')}</i>\n\nA full theme library (Shopify caps stores at 20 themes) is the usual cause — delete an unused theme and tap Preview again.`)
+  }
+  const up = await upsertThemeFiles(shop, tok.accessToken, dup.themeId, pending.files.map(f => ({ filename: f.filename, content: f.newContent })))
+  if (!up.ok || (up.userErrors || []).length > 0) {
+    // Never leave a half-written preview behind.
+    await deleteTheme(shop, tok.accessToken, dup.themeId).catch(() => {})
+    return sendMessage(chatId, '❌ Couldn’t stage the change onto the preview copy — nothing to preview. Your live theme is untouched.')
+  }
+
+  // Persist the preview id for reuse + decide-time cleanup — but ONLY while the run
+  // is still awaiting approval. The status condition means a racing YES (which CAS-
+  // claims status='running', then writes applied_write into analysis_result) can
+  // never have its rollback basis clobbered by this update; worst case the id isn't
+  // recorded and this one duplicate lingers until manually deleted.
+  const { data: freshRun } = await supabase.from('agent_runs')
+    .select('analysis_result').eq('id', run.id).eq('status', 'shopify_awaiting_approval').maybeSingle()
+  if (freshRun) {
+    await supabase.from('agent_runs')
+      .update({ analysis_result: { ...freshRun.analysis_result, preview_theme_id: dup.themeId } })
+      .eq('id', run.id).eq('status', 'shopify_awaiting_approval')
+  }
+  return sendMessage(chatId, previewMsg(dup.themeId))
 }
 
 // ─── NOTE ─────────────────────────────────────────────────────────────────────

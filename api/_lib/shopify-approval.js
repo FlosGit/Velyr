@@ -13,7 +13,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { refreshShopifyToken } from './shopify-token-refresh.js'
-import { queryThemeChecksums, upsertThemeFiles, deleteThemeFiles } from './shopify-theme-io.js'
+import { queryThemeChecksums, upsertThemeFiles, deleteThemeFiles, deleteTheme } from './shopify-theme-io.js'
 import {
   normalizePendingWrite, classifyConcurrency, confirmApplied, resolveAppliedFiles,
   planRollbackOps, classifyCreatedCollisions,
@@ -28,6 +28,20 @@ function escapeHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+// C3: delete the run's throwaway preview theme (if the merchant tapped 🔍 Preview)
+// once they decide. Strictly best-effort — a leftover preview only occupies one of
+// the store's theme slots; it never affects the outcome. Deliberately NO
+// analysis_result mutation here: racing the applied_write writes below could
+// clobber the rollback basis.
+async function cleanupPreviewTheme(shop, token, run) {
+  const previewId = run.analysis_result?.preview_theme_id
+  if (!previewId || !shop || !token) return
+  try {
+    const del = await deleteTheme(shop, token, previewId)
+    if (!del.ok) console.warn(`[shopify-approval] preview theme ${previewId} not deleted: ${del.message}`)
+  } catch (e) { console.warn(`[shopify-approval] preview theme cleanup threw: ${e?.message}`) }
 }
 
 // ─── FORWARD APPLY (approve on shopify_awaiting_approval) ─────────────────────
@@ -50,6 +64,11 @@ export async function applyShopifyDirectWrite(supabase, run, conn) {
   }
   const token = tok.accessToken
   const shop = conn.shopify_shop_domain
+
+  // C3: the merchant has decided — the preview theme (if any) has served its
+  // purpose. Deleting it up-front keeps this a single call site regardless of
+  // which terminal branch below wins.
+  await cleanupPreviewTheme(shop, token, run)
 
   // 1. Optimistic concurrency (STRICT: a null analysis-time checksum aborts).
   const modifiedFiles      = pending.files.filter(f => f.op === 'modified')
@@ -266,6 +285,16 @@ export async function rejectShopifyDirect(supabase, run) {
       status: 'shopify_rejected', completed_at: new Date().toISOString(),
     }).eq('id', run.id).eq('status', 'shopify_awaiting_approval').select('id')
     if (!claimed || claimed.length === 0) return { noop: true }
+    // C3: drop the throwaway preview theme, if one was created. Needs a fresh
+    // token — fetched only when a preview actually exists (the common NO has none).
+    if (run.analysis_result?.preview_theme_id) {
+      const { data: conn } = await supabase.from('agent_connections')
+        .select('*').eq('subscription_id', run.subscription_id).maybeSingle()
+      if (conn?.shopify_shop_domain) {
+        const tok = await refreshShopifyToken(supabase, conn)
+        if (tok.ok) await cleanupPreviewTheme(conn.shopify_shop_domain, tok.accessToken, run)
+      }
+    }
     // NO on the analytics-setup proposal = don't ask again + start the analysis run.
     if (run.analysis_result?.setup_kind === 'posthog') {
       await supabase.from('agent_connections')

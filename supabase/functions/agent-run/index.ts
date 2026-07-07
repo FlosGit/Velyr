@@ -1061,9 +1061,10 @@ function approvalKeyboard(runId: string, variant: 'fix' | 'foreign' = 'fix', wit
     { text: yes, callback_data: `approve:${runId}` },
     { text: no,  callback_data: `reject:${runId}` },
   ]]
-  // C4: only the plain-GitHub fix PR gets a Preview button — its CI (Vercel/Netlify)
-  // builds a preview deployment the webhook can screenshot. Theme-repo PRs sync via
-  // Shopify (no CI preview) and Shopify-direct approvals have no PR at all.
+  // C4/C3: the 🔍 Preview button. Plain-GitHub fix PRs always get it (their CI
+  // builds a preview deployment the webhook screenshots); Shopify-direct approvals
+  // get it only behind AGENT_SHOPIFY_PREVIEW_THEMES (throwaway duplicate theme +
+  // ?preview_theme_id link). Theme-repo PRs never do (Shopify sync has no CI preview).
   if (withPreview) rows.push([{ text: '🔍 Preview', callback_data: `preview:${runId}` }])
   return { inline_keyboard: rows }
 }
@@ -4231,9 +4232,15 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
     `\n\n<b>Find:</b>\n<pre>${escapeHtml(primaryChange.find.slice(0, 600))}</pre>\n<b>Replace:</b>\n<pre>${escapeHtml(primaryChange.replace.slice(0, 600))}</pre>` +
     (stagedFiles.length > 1 ? `\n<i>(primary change shown; ${stagedFiles.length - 1} companion edit${stagedFiles.length > 2 ? 's' : ''} the fix requires ride${stagedFiles.length > 2 ? '' : 's'} along — YES applies all, NO skips all)</i>` : '') +
     `\n\nTap a button below (or reply <b>YES</b> to apply to your live theme / <b>NO</b> to skip).`
+  // C3 (flag-gated, default OFF): the 🔍 Preview button makes the Telegram webhook
+  // stage the fix onto a throwaway DUPLICATE theme and reply with Shopify's native
+  // ?preview_theme_id link — the merchant sees the change on their real store before
+  // it touches the live theme. Enable ONLY after scripts/shopify-dv-verify.mjs
+  // steps (5)+(6) pass on a dev store; the same flag must be set on Vercel.
+  const withThemePreview = Deno.env.get('AGENT_SHOPIFY_PREVIEW_THEMES') === '1'
   const tgRes = await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: approvalMsg, parse_mode: 'HTML', reply_markup: approvalKeyboard(run.id) }),
+    body: JSON.stringify({ chat_id: chatId, text: approvalMsg, parse_mode: 'HTML', reply_markup: approvalKeyboard(run.id, 'fix', withThemePreview) }),
   }).catch(() => null)
   const tgData = tgRes ? await tgRes.json().catch(() => ({})) : {}
   if (!tgData.ok) console.error('[shopify] approval telegram error:', tgData.description)
