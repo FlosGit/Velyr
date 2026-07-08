@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { demoData } from '../data/demoData'
 import { startCheckout } from '../utils/startCheckout.js'
@@ -142,6 +142,13 @@ const CSS = `
   .reveal-in { animation: reveal .25s ease both; }
   .pulse-dot { animation: pulse 2.4s ease-in-out infinite; }
   .spin      { animation: spin .7s linear infinite; }
+  /* Live-run loading ring — sits next to the active step so a run in progress
+     is visibly "working" even between checkpoint updates. */
+  .step-spinner {
+    display:inline-block; width:15px; height:15px; border-radius:50%;
+    border:2px solid #E3E0D3; border-top-color:${C.accent};
+    animation: spin .8s linear infinite; vertical-align:middle; flex:none;
+  }
   /* Page transition: re-triggered by keying the wrapper on the active tab. */
   .page-in   { animation: fadeUp .35s cubic-bezier(.22,.61,.36,1) both; }
 
@@ -284,6 +291,8 @@ const CURRENT_STEP_TO_ID = {
   checking_seasonal:     'seasonal',
   reading_dna:           'read_dna',
   mapping_funnel:        'map_funnel',
+  ranking_components:    'analyze',   // LLM Pass 1 — part of "finding the biggest issue"
+  reading_deep_context:  'analyze',   // deep read feeding Pass 2
   finding_biggest_issue: 'analyze',
   taking_screenshot:     'screenshot',
   writing_fix:           'write_fix',
@@ -292,6 +301,33 @@ const CURRENT_STEP_TO_ID = {
   // Legacy short ids kept for backwards-compat with older runs in the DB
   fetch_repo:'fetch_repo', fetch_ph:'fetch_ph', map_funnel:'map_funnel',
   write_fix:'write_fix',   open_pr:'open_pr',   notify:'notify',
+}
+
+// The edge function only checkpoints a SUBSET of AGENT_STEPS — several UI steps
+// happen inside one checkpoint's window (competitors/seasonal/DNA all run under
+// 'pulling_analytics'; the before-screenshots are captured while Pass 2 runs;
+// the PR/staging happens under 'writing_fix'). Each checkpoint therefore covers
+// a RANGE of UI step indices [enter, holdUntil]: the displayed step enters at
+// `enter` and may slowly drift up to `holdUntil` while waiting for the next
+// checkpoint, so the timeline walks through every step instead of jumping
+// several at once and then sitting still.
+const CURRENT_STEP_RANGE = {
+  fetching_repo:         [0, 0],
+  pulling_analytics:     [1, 4],
+  scanning_competitors:  [2, 4],
+  checking_seasonal:     [3, 4],
+  reading_dna:           [4, 4],
+  mapping_funnel:        [5, 5],
+  ranking_components:    [6, 6],
+  reading_deep_context:  [6, 6],
+  finding_biggest_issue: [6, 7],
+  taking_screenshot:     [7, 7],
+  writing_fix:           [8, 9],
+  opening_pr:            [9, 9],
+  sending_notification:  [10, 10],
+  // Legacy short ids
+  fetch_repo: [0, 0], fetch_ph: [1, 4], map_funnel: [5, 5],
+  write_fix: [8, 9],  open_pr: [9, 9],  notify: [10, 10],
 }
 
 function deriveAgentStep(run) {
@@ -319,6 +355,45 @@ function deriveAgentStep(run) {
     default:
       return -1
   }
+}
+
+// While a run is live the DB only exposes sparse checkpoints and the dashboard
+// polls, so rendering run.current_step directly makes the timeline jump several
+// steps at once and then freeze — it reads as broken. This hook turns the sparse
+// checkpoints into a sequential walk: when a new checkpoint lands it catches up
+// one step at a time, and while waiting for the next checkpoint it slowly drifts
+// through the steps that checkpoint is known to cover (CURRENT_STEP_RANGE).
+// Monotonic: never backwards, never past the current checkpoint's window — so a
+// run that skips mid-analysis never shows "Writing fix".
+const STEP_CATCHUP_MS = 900    // pace when a checkpoint confirms progress
+const STEP_DRIFT_MS   = 8000   // pace through a checkpoint's covered window
+function useAnimatedRunStep(run) {
+  const runId   = run?.id || null
+  const running = run?.status === 'running'
+  const step    = running ? (run.current_step || null) : null
+  const [idx, setIdx] = useState(0)
+  const lastMoveRef = useRef(0)
+  useEffect(() => { setIdx(0); lastMoveRef.current = Date.now() }, [runId])
+  useEffect(() => {
+    if (!runId || !running) return
+    // null = row just inserted, first checkpoint pending → hold at step 1.
+    // Unknown non-null value (future checkpoint id) → mid, like deriveAgentStep.
+    const midIdx = Math.floor((AGENT_STEPS.length - 1) / 2)
+    const [enter, holdUntil] = step == null ? [0, 0] : (CURRENT_STEP_RANGE[step] || [midIdx, midIdx])
+    const tick = () => {
+      const now = Date.now()
+      setIdx(prev => {
+        if (prev < enter && now - lastMoveRef.current >= STEP_CATCHUP_MS) { lastMoveRef.current = now; return prev + 1 }
+        if (prev >= enter && prev < holdUntil && now - lastMoveRef.current >= STEP_DRIFT_MS) { lastMoveRef.current = now; return prev + 1 }
+        return prev
+      })
+    }
+    tick()
+    const t = setInterval(tick, 450)
+    return () => clearInterval(t)
+  }, [runId, running, step])
+  if (!run) return -1
+  return running ? idx : deriveAgentStep(run)
 }
 
 // Shared Stripe Billing Portal opener (subscription card + danger-zone cancel).
@@ -538,7 +613,7 @@ function PendingApprovalCard({run}) {
 }
 
 // ─── STATUS HERO (Overview) ───────────────────────────────────────────────────
-function StatusHero({subscription, runs, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, onSelectRun}) {
+function StatusHero({subscription, runs, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, onSelectRun, liveStepIdx, runStarting}) {
   const isPaused  = subscription?.status==='paused'
   const activeRun = runs.find(r=>r.status==='running')
   const isRunning = !!activeRun
@@ -549,7 +624,9 @@ function StatusHero({subscription, runs, onTogglePause, actionLoading, onTrigger
   // also what stops a double-run right after the post-onboarding auto-run), or
   // within the 24h manual-run cooldown (last_manual_run_at). Scheduled cron runs
   // and the auto-run never set last_manual_run_at, so they don't consume it.
-  const inFlight             = isRunning || pending.length > 0
+  // runStarting covers the dispatch gap: trigger_run succeeded but the edge
+  // function hasn't inserted the run row yet.
+  const inFlight             = isRunning || runStarting || pending.length > 0
   const lastManualMs         = subscription?.last_manual_run_at ? new Date(subscription.last_manual_run_at).getTime() : 0
   const manualCooldownLeftMs = lastManualMs ? Math.max(0, 24*3600000 - (Date.now() - lastManualMs)) : 0
   const runNowDisabled       = isPaused || inFlight || manualCooldownLeftMs > 0 || triggerLoading
@@ -560,7 +637,7 @@ function StatusHero({subscription, runs, onTogglePause, actionLoading, onTrigger
 
   const target = useMemo(() => nextMonday9am(), [])
   const countdown = useCountdown(target)
-  const stepIdx = isRunning ? deriveAgentStep(activeRun) : -1
+  const stepIdx = isRunning ? (liveStepIdx ?? deriveAgentStep(activeRun)) : -1
 
   const now = new Date()
   const weekMs = 7*24*3600000
@@ -575,6 +652,10 @@ function StatusHero({subscription, runs, onTogglePause, actionLoading, onTrigger
     heroBig=`Step ${Math.max(stepIdx,0)+1} of ${AGENT_STEPS.length}`
     heroNote=AGENT_STEPS[stepIdx]?.label ? `${AGENT_STEPS[stepIdx].label} — ${AGENT_STEPS[stepIdx].desc}` : 'Analyzing your site…'
     heroProgress=Math.round(((Math.max(stepIdx,0)+1)/AGENT_STEPS.length)*100)
+  } else if (runStarting) {
+    heroLabel='AGENT RUNNING'; heroDot=C.yellow
+    heroBig='Starting run…'; heroNote='Dispatching your agent — the first step begins in a moment.'
+    heroProgress=4
   } else {
     heroLabel='AGENT IDLE · NEXT RUN IN'; heroDot=C.green
     heroBig=countdown.str||'—'; heroNote='Every Monday · 9:00 am'; heroProgress=Math.round(weekProgress)
@@ -598,7 +679,10 @@ function StatusHero({subscription, runs, onTogglePause, actionLoading, onTrigger
           <span className="pulse-dot" style={{width:8,height:8,borderRadius:'50%',background:heroDot,display:'inline-block',flexShrink:0}}/>
           <SectionLabel style={{marginBottom:0}}>{heroLabel}</SectionLabel>
         </div>
-        <p style={{fontFamily:FONT.serif,fontSize:'clamp(32px, 4vw, 44px)',lineHeight:1,fontWeight:500,color:C.ink,minHeight:44}}>{heroBig}</p>
+        <p style={{fontFamily:FONT.serif,fontSize:'clamp(32px, 4vw, 44px)',lineHeight:1,fontWeight:500,color:C.ink,minHeight:44,display:'flex',alignItems:'center',gap:12}}>
+          {heroBig}
+          {(isRunning||runStarting)&&<span className="step-spinner" aria-hidden="true"/>}
+        </p>
         <p style={{fontSize:12,color:C.textMuted,marginTop:10}}>{heroNote}</p>
         <div style={{height:4,background:'#EDEBE0',borderRadius:2,marginTop:16,overflow:'hidden'}}>
           <div style={{height:'100%',width:`${heroProgress}%`,background:C.accent,borderRadius:2,transition:'width 1s ease'}}/>
@@ -880,7 +964,7 @@ function AgentLearningStrip({learnings, onGoDna}) {
 }
 
 // ─── OVERVIEW PAGE ────────────────────────────────────────────────────────────
-function OverviewPage({runs, subscription, learnings, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, onGoRuns, onGoGuardrails, onGoDna}) {
+function OverviewPage({runs, subscription, learnings, onSelectRun, onTogglePause, actionLoading, onTriggerRun, triggerLoading, triggerMessage, onGoRuns, onGoGuardrails, onGoDna, liveStepIdx, runStarting}) {
   const pendingRun = runs.find(isAwaitingApproval)
 
   return (
@@ -892,6 +976,7 @@ function OverviewPage({runs, subscription, learnings, onSelectRun, onTogglePause
         onTogglePause={onTogglePause} actionLoading={actionLoading}
         onTriggerRun={onTriggerRun} triggerLoading={triggerLoading}
         triggerMessage={triggerMessage} onSelectRun={onSelectRun}
+        liveStepIdx={liveStepIdx} runStarting={runStarting}
       />
 
       <KpiRow runs={runs}/>
@@ -1152,7 +1237,7 @@ const NODE_STATUS_DOT = {
   problem:         '#c2573d',
 }
 
-function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
+function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl, liveStepIdx }) {
   const [selectedNode, setSelectedNode] = useState(null)
   const activeRun = runs.find(r => r.status === 'running') || null
   const isRunning = !!activeRun
@@ -1170,11 +1255,9 @@ function NetworkPage({ runs, siteNetwork, structurePreview, websiteUrl }) {
 
   let statusText, statusColor
   if (isRunning) {
-    const stepId    = activeRun.current_step && CURRENT_STEP_TO_ID[activeRun.current_step]
-    const stepLabel = stepId
-      ? (AGENT_STEPS.find(s => s.id === stepId)?.label || activeRun.current_step)
-      : 'Running'
-    statusText  = `Running now · ${stepLabel.toLowerCase()}`
+    const stepIdx   = liveStepIdx ?? deriveAgentStep(activeRun)
+    const stepLabel = AGENT_STEPS[stepIdx]?.label || 'Running'
+    statusText  = `Running now · step ${Math.max(stepIdx,0)+1}/${AGENT_STEPS.length} · ${stepLabel.toLowerCase()}`
     statusColor = C.accent
   } else if (lastRun) {
     const next = nextMonday9am()
@@ -2147,7 +2230,7 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
 }
 
 // ─── RUN DETAIL MODAL ─────────────────────────────────────────────────────────
-function RunDetail({run, onClose, onDecision, busy, goalImpact}) {
+function RunDetail({run, onClose, onDecision, busy, goalImpact, liveStepIdx}) {
   const analysis = run.analysis_result||{}
   const funnel   = run.funnel_analysis
   // C2: dashboard approve/reject. GitHub fix runs (waiting_approval + a PR) merge/close the
@@ -2217,7 +2300,13 @@ function RunDetail({run, onClose, onDecision, busy, goalImpact}) {
               left-to-right then wrap; checkmarks show how far the run got. */}
           <div style={{display:'flex',flexWrap:'wrap',gap:'12px 12px'}}>
             {AGENT_STEPS.map((step,i)=>{
-              const stepI=deriveAgentStep(run), done=i<=stepI, failed=run.status==='failed'&&i===stepI
+              // Live run: the animated step index (in sync with the hero) drives the
+              // walk-through; the step in progress spins instead of showing an early ✓.
+              const isLiveRun = run.status==='running'
+              const stepI  = isLiveRun ? (liveStepIdx ?? deriveAgentStep(run)) : deriveAgentStep(run)
+              const active = isLiveRun && i===stepI
+              const done   = isLiveRun ? i<stepI : i<=stepI
+              const failed = run.status==='failed'&&i===stepI
               return (
                 <div key={step.id} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,width:58}}>
                   <div style={{
@@ -2225,9 +2314,9 @@ function RunDetail({run, onClose, onDecision, busy, goalImpact}) {
                     background:failed?C.red:done?C.accent:C.borderSoft,
                     display:'flex',alignItems:'center',justifyContent:'center',color:done||failed?'#fff':C.textLight,
                   }}>
-                    {failed?'✕':done?'✓':''}
+                    {failed?'✕':done?'✓':active?<span className="step-spinner" style={{width:13,height:13}} aria-hidden="true"/>:''}
                   </div>
-                  <p style={{fontSize:9,color:done?C.accent:C.textLight,textAlign:'center',lineHeight:1.3}}>{step.label}</p>
+                  <p style={{fontSize:9,color:done||active?C.accent:C.textLight,textAlign:'center',lineHeight:1.3,fontWeight:active?500:400}}>{step.label}</p>
                 </div>
               )
             })}
@@ -2408,6 +2497,17 @@ export default function AgentDashboard({ navigate }) {
   const [siteNetwork,     setSiteNetwork]     = useState(null)   // agent_site_network latest row
   const [structurePreview,setStructurePreview]= useState(null)   // site_structure_preview row (pre-first-run fallback)
   const [websiteUrl,      setWebsiteUrl]      = useState(null)   // agent_connections.website_url
+  // Set on a successful trigger_run dispatch. Covers the gap until the edge
+  // function inserts the 'running' row (hero shows "Starting run…", fast poll
+  // watches for the row); cleared when the row appears or after 90s.
+  const [runKickoff,      setRunKickoff]      = useState(null)
+
+  // Live-run step animation, hoisted so hero, network tab and run modal all
+  // show the same step. -1 when nothing is running.
+  const liveRun     = runs.find(r => r.status === 'running') || null
+  const hasLiveRun  = !!liveRun
+  const liveStepIdx = useAnimatedRunStep(liveRun)
+  const runStarting = !hasLiveRun && runKickoff != null
 
   // Demo mode: /agent?demo=true loads hardcoded data, bypasses Supabase.
   const isDemo = useMemo(
@@ -2506,6 +2606,43 @@ export default function AgentDashboard({ navigate }) {
     const interval=setInterval(fetchData,30000)
     return()=>clearInterval(interval)
   },[user, isDemo])
+
+  // Fast poll while a run is live (or one was just triggered): the 30s cadence
+  // leaves the step timeline frozen for most of a 2–4 min run. Light query —
+  // agent_runs only; the 30s fetchData keeps everything else fresh.
+  useEffect(() => {
+    if (!user || isDemo || !subscription?.id) return
+    if (runKickoff && Date.now() - runKickoff >= 90000) { setRunKickoff(null); return }
+    if (!hasLiveRun && !runKickoff) return
+    const subId = subscription.id
+    let cancelled = false
+    async function pollRuns() {
+      const { data } = await supabase.from('agent_runs').select('*')
+        .eq('subscription_id', subId).order('created_at', { ascending: false }).limit(50)
+      if (!cancelled && data) setRuns(data)
+    }
+    const t = setInterval(pollRuns, 4000)
+    // Expire the kickoff window so the fast poll shuts off if no run row ever appears
+    // (dispatch succeeded but the edge function died before the insert).
+    const expire = runKickoff && !hasLiveRun
+      ? setTimeout(() => setRunKickoff(null), Math.max(0, 90000 - (Date.now() - runKickoff)))
+      : null
+    return () => { cancelled = true; clearInterval(t); if (expire) clearTimeout(expire) }
+  }, [user, isDemo, subscription?.id, hasLiveRun, runKickoff])
+
+  // The kickoff placeholder is done the moment the real 'running' row lands.
+  useEffect(() => {
+    if (hasLiveRun && runKickoff) setRunKickoff(null)
+  }, [hasLiveRun, runKickoff])
+
+  // When a live run finishes (running → any terminal/pending status), do one full
+  // fetchData so funnel pages, network graph and impact metrics reflect it
+  // immediately instead of waiting out the 30s cycle.
+  const prevLiveRunRef = useRef(false)
+  useEffect(() => {
+    if (prevLiveRunRef.current && !hasLiveRun && user && !isDemo) fetchData()
+    prevLiveRunRef.current = hasLiveRun
+  }, [hasLiveRun, user, isDemo])
 
   // Fast poll: if Stripe confirms payment but the agent_subscriptions row
   // hasn't been written by the webhook yet, re-fetch every 2s for ~16s so
@@ -2681,6 +2818,10 @@ export default function AgentDashboard({ navigate }) {
           setSubscription(prev => prev ? { ...prev, last_manual_run_at: new Date().toISOString() } : prev)
         }
         setTriggerMessage({ text: 'Run started — your agent is analyzing now.', error: false })
+        // Immediate "Starting run…" state + 4s fast poll until the edge function
+        // inserts the running row — without this the dashboard sits unchanged for
+        // up to 30s after the click and looks broken.
+        setRunKickoff(Date.now())
         fetchData()
       } else {
         setTriggerMessage({ text: data.error || 'Could not start the run. Please try again.', error: true })
@@ -2739,7 +2880,7 @@ export default function AgentDashboard({ navigate }) {
   }
 
   const pending   = runs.filter(isAwaitingApproval).length
-  const isRunning = runs.some(r=>r.status==='running')
+  const isRunning = hasLiveRun || runStarting
   const isPaused  = subscription?.status==='paused'
 
   if(authLoading) return (
@@ -2752,7 +2893,10 @@ export default function AgentDashboard({ navigate }) {
   return (
     <>
       <style>{CSS + MOTION_CSS}</style>
-      {selected&&<RunDetail run={selected} onClose={()=>setSelected(null)} onDecision={handleRunDecision} busy={runDecisionBusy}
+      {/* Resolve the freshest copy of the selected run so an open modal live-updates
+          while the run progresses (selected itself is a snapshot from click time). */}
+      {selected&&<RunDetail run={runs.find(r=>r.id===selected.id)||selected} onClose={()=>setSelected(null)} onDecision={handleRunDecision} busy={runDecisionBusy}
+        liveStepIdx={liveRun&&liveRun.id===selected.id?liveStepIdx:null}
         goalImpact={impactMetrics.find(m=>m.run_id===selected.id&&m.metric_type==='goal_conversion_rate')}/>}
       {showDeleteConfirm&&(
         <DeleteConfirmModal
@@ -2996,6 +3140,7 @@ export default function AgentDashboard({ navigate }) {
                       onGoRuns={()=>setActivePage('runs')}
                       onGoGuardrails={()=>setActivePage('guardrails')}
                       onGoDna={()=>setActivePage('dna')}
+                      liveStepIdx={liveStepIdx} runStarting={runStarting}
                     />
                   )}
 
@@ -3010,6 +3155,7 @@ export default function AgentDashboard({ navigate }) {
                       siteNetwork={siteNetwork}
                       structurePreview={structurePreview}
                       websiteUrl={websiteUrl}
+                      liveStepIdx={liveStepIdx}
                     />
                   )}
 
