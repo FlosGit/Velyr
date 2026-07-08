@@ -40,7 +40,7 @@ Routes (matched in `App.jsx`):
 
 Articles are markdown in `content/blog/*.md`; `scripts/lib/blog.mjs` is the single source of truth (`loadArticles`), consumed by `scripts/vite-plugin-blog.mjs` (serves `/blog-index.json` + `/blog/<slug>.json` in dev, emits them into `dist/` at build) and by `scripts/prerender.mjs` (static per-route HTML with route-specific meta/JSON-LD, `sitemap.xml`, `llms-full.txt`, then the IndexNow ping). `npm run build` asserts parity via `scripts/assert-blog-parity.mjs` + `scripts/assert-hogql-safe.mjs`.
 
-**Marketing claims live in five places that must stay in sync**: `src/Home.jsx` (landing), `index.html` (title/meta/OG/JSON-LD + the crawler-visible `<noscript>` block), `public/llms.txt`, `src/data/faqs.js` (FAQ page + FAQPage JSON-LD + prerendered /faq), and the `ROUTES` descriptions in `scripts/prerender.mjs`. When product framing changes (e.g. Shopify support), sweep all five. `og-image.png` is a rendered image and needs a manual re-render when the headline changes. Keep `faqs.js` dependency-free (no JSX/imports) — `prerender.mjs` imports it directly in Node.
+**Marketing claims live in five places that must stay in sync**: `src/Home.jsx` (landing), `index.html` (title/meta/OG/JSON-LD; the once-documented `<noscript>` block no longer exists), `public/llms.txt`, `src/data/faqs.js` (FAQ page + FAQPage JSON-LD + prerendered /faq), and the `ROUTES` descriptions in `scripts/prerender.mjs`. When product framing changes (e.g. Shopify support), sweep all five. `og-image.png` is a rendered image and needs a manual re-render when the headline changes. Keep `faqs.js` dependency-free (no JSX/imports) — `prerender.mjs` imports it directly in Node.
 
 ### Agent System
 
