@@ -174,6 +174,33 @@ function authorizeCron(req) {
 // captureScreenshot moved to api/_lib/screenshot.js (C4: the Telegram webhook's
 // preview button needs the identical capture → storage pipeline).
 
+// B6: fetch an EventsQuery window's rows, paginated past the per-request row cap.
+// Returns { rows, complete } — complete=false means maxPages full pages came back
+// and a residual tail was left behind (callers log it; the sample is still 5×
+// the old single-page cap). Any HTTP/parse failure ends pagination with what we
+// have so far — same failure surface as the old single fetch.
+async function fetchWindowRows(host, projectId, headers, baseQuery, maxPages = 5) {
+  const PAGE = 2000
+  const rows = []
+  for (let page = 0; page < maxPages; page++) {
+    let batch = []
+    try {
+      const res = await fetch(`${host}/api/projects/${projectId}/query/`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ query: { ...baseQuery, limit: PAGE, offset: page * PAGE } }),
+      })
+      const json = await res.json()
+      batch = json?.results || []
+    } catch (err) {
+      console.warn(`[fetchWindowRows] page ${page} failed: ${err?.message} — continuing with ${rows.length} rows`)
+      return { rows, complete: false }
+    }
+    rows.push(...batch)
+    if (batch.length < PAGE) return { rows, complete: true }
+  }
+  return { rows, complete: false }
+}
+
 // (recordDNA removed — DNA is now written only at approval time: reconcileDeployed
 // for GitHub, applyShopifyDirectWrite for Shopify-direct. The 48h rollback check
 // only measures; it never inserts DNA. See handleRollbackCheck.)
@@ -899,17 +926,18 @@ async function handleRollbackCheck(res) {
       const twoDaysAfter  = new Date(deployedAt.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString()
       const headers       = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
 
-      const [beforeRes, afterRes] = await Promise.all([
-        fetch(`${host}/api/projects/${projectId}/query/`, {
-          method: 'POST', headers,
-          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'properties.$pathname'], event: '$pageview', after: twoDaysBefore, before: deployedDate, limit: 2000, where: hostWhere } }),
-        }),
-        fetch(`${host}/api/projects/${projectId}/query/`, {
-          method: 'POST', headers,
-          body: JSON.stringify({ query: { kind: 'EventsQuery', select: ['properties.$session_id', 'properties.$pathname'], event: '$pageview', after: deployedDate, before: twoDaysAfter, limit: 2000, where: hostWhere } }),
-        }),
+      // B6: paginate past the 2000-row EventsQuery cap. A site with >2000 pageviews
+      // in a ±2d window used to truncate silently with unknown ordering bias in the
+      // bounce sample. The windows are fixed historical ranges, so offset pagination
+      // is stable; bounded pages keep a viral site from stalling the cron.
+      const baseWindowQuery = { kind: 'EventsQuery', select: ['properties.$session_id', 'properties.$pathname'], event: '$pageview', where: hostWhere }
+      const [before, after] = await Promise.all([
+        fetchWindowRows(host, projectId, headers, { ...baseWindowQuery, after: twoDaysBefore, before: deployedDate }),
+        fetchWindowRows(host, projectId, headers, { ...baseWindowQuery, after: deployedDate, before: twoDaysAfter }),
       ])
-      const [before, after] = await Promise.all([beforeRes.json(), afterRes.json()])
+      if (!before.complete || !after.complete) {
+        console.warn(`[rollback_check] run=${run.id}: pageview sample capped at ${before.rows.length}/${after.rows.length} rows — bounce computed on a partial (but 5x larger than before) sample`)
+      }
 
       // Stage 3.5: raise the noise floor. The previous `> 10 sessions` was
       // statistical noise — at 11 sessions one bouncer moves the rate by 9
@@ -933,8 +961,8 @@ async function handleRollbackCheck(res) {
         : [run.analysis_result?.file_to_edit].filter(Boolean)
       const scope = resolveAffectedScope(touchedFiles, { fileToRoute: fileToRoutePath })
 
-      const beforeSessions = sessionize(before.results)
-      const afterSessions  = sessionize(after.results)
+      const beforeSessions = sessionize(before.rows)
+      const afterSessions  = sessionize(after.rows)
 
       // Site-wide first: it is both the insufficient-data gate and the
       // fallback population (guard b) when the scoped sample is under the floor.
