@@ -315,6 +315,9 @@ async function gcKeepNewestPerGroup(supabase, { table, timeCol, groupCols, label
 }
 
 async function handleEnforceSubscriptions(res) {
+  // One shared clock for every time-boxed pass below (backfill + visual check):
+  // their deadlines are only honest against the WHOLE invocation's budget.
+  const handlerStart = Date.now()
   const now = new Date().toISOString()
   const { error } = await supabase
     .from('agent_subscriptions')
@@ -444,10 +447,15 @@ async function handleEnforceSubscriptions(res) {
   // daily cron (in addition to the weekly rollback_check) so a deployed run's
   // after-shot lands within ~24h instead of waiting up to a week for Wednesday.
   // Internally capped + time-boxed; best-effort, must not fail the sweep above.
-  const afterShotsCaptured = await backfillAfterScreenshots(Date.now())
+  const afterShotsCaptured = await backfillAfterScreenshots(handlerStart)
     .catch(e => { console.error('[enforce-subscriptions] after-screenshot backfill failed:', e); return 0 })
 
-  return res.json({ ok: true, ran_at: now, afterShotsCaptured })
+  // Item 3: visual verification of deployed runs that now have both shots.
+  // Bounded + best-effort like everything above; shares the handler clock.
+  const visualChecks = await runVisualChecks(handlerStart)
+    .catch(e => { console.error('[enforce-subscriptions] visual check failed:', e); return 0 })
+
+  return res.json({ ok: true, ran_at: now, afterShotsCaptured, visualChecks })
 }
 
 export default async function handler(req, res) {
@@ -762,6 +770,153 @@ async function backfillAfterScreenshots(handlerStart) {
     }
   }
   return captured
+}
+
+// ─── VISUAL VERIFICATION (item 3, 2026-07-08) ─────────────────────────────────
+// A deployed run can be merged yet visually inert — the customer's CI never
+// redeployed, the CSS got overridden, the change sits below the fold. Once a
+// run has BOTH root-page screenshots (before at analysis time, after via the
+// backfill above), one bounded vision-LLM call asks: is the intended change
+// actually visible? The verdict lands in agent_runs.visual_check (migration
+// 20260708_visual_check.sql); a "not_visible" pings the owner on Telegram and
+// stamps the run's DNA note so future prompts know the fix never rendered.
+// Both shots show the site ROOT only, so a change on another page maps to
+// 'not_assessable' (terminal: never re-checked, never alarmed on) — the prompt
+// encodes that rule explicitly.
+// Runs inside the daily enforce_subscriptions cron: full budget headroom there,
+// and the verdict lands ≤24h after the after-shot exists.
+
+// Same model the edge fn uses (OpenRouter slug — dot, not the native dash).
+const VISUAL_CHECK_MODEL = 'anthropic/claude-sonnet-4.6'
+// Cost-accounting twin of LLM_PRICING_EUR_PER_M in supabase/functions/agent-run/
+// index.ts (same env overrides, same defaults) — keep in sync.
+const VISUAL_LLM_EUR_PER_M = {
+  INPUT:  Number(process.env.LLM_INPUT_EUR_PER_M  || '3.0'),
+  OUTPUT: Number(process.env.LLM_OUTPUT_EUR_PER_M || '15.0'),
+}
+
+async function runVisualChecks(handlerStart) {
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) { console.warn('[visual-check] OPENROUTER_API_KEY not set — skipping'); return 0 }
+  const CHECK_MAX      = 2      // per daily invocation; backlog drains across days
+  const DEADLINE_MS    = 40000  // never START a check past this elapsed (shared handler clock)
+  const LLM_TIMEOUT_MS = 15000
+  // Only recent pairs: without a floor, the first deploy of this feature would
+  // sweep the entire run history two-per-day for months.
+  const sinceIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
+
+  const { data: candidates, error } = await supabase
+    .from('agent_runs')
+    .select('id, subscription_id, problem_description, pages_fixed, analysis_result, screenshot_before, screenshot_after')
+    .in('status', DEPLOYED_STATUSES)
+    .not('screenshot_before', 'is', null)
+    .not('screenshot_after', 'is', null)
+    .is('visual_check', null)
+    .gte('completed_at', sinceIso)
+    .order('completed_at', { ascending: false })
+    .limit(CHECK_MAX)
+  if (error) {
+    // 42703 = visual_check column missing (migration not applied yet) — skip quietly.
+    if (error.code !== '42703') console.warn('[visual-check] candidate select failed:', error.message)
+    return 0
+  }
+
+  let checked = 0
+  for (const run of candidates || []) {
+    if (Date.now() - handlerStart > DEADLINE_MS) break
+    try {
+      const fix = run.analysis_result || {}
+      const replaceSnippet = (fix.code_change?.replace || '').slice(0, 800)
+      const prompt = `Two screenshots of the same website's ROOT page ("/", desktop 1280×800) are attached: FIRST the page BEFORE a code change was deployed, SECOND the page ~48h AFTER.
+
+The deployed change:
+- Problem it addressed: ${run.problem_description || fix.problem || 'unknown'}
+- Files edited: ${(run.pages_fixed || []).join(', ') || 'unknown'}
+- New code inserted (excerpt): ${replaceSnippet || 'unknown'}
+
+Question: is the intended change VISIBLE in the AFTER screenshot?
+Rules:
+- "visible": you can point at a concrete difference matching the change.
+- "not_visible": the change should plausibly appear on this root page, but the AFTER shot shows no trace of it (and both shots render fine).
+- "not_assessable": the edited files/route would not render on the root page, the change is not visual (logic/analytics/meta), or either screenshot looks blank/broken.
+Respond with JSON only: {"verdict":"visible"|"not_visible"|"not_assessable","detail":"one short sentence"}`
+
+      const llmRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: VISUAL_CHECK_MODEL,
+          max_tokens: 200,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: run.screenshot_before } },
+              { type: 'image_url', image_url: { url: run.screenshot_after } },
+            ],
+          }],
+        }),
+        signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+      })
+      if (!llmRes.ok) { console.warn(`[visual-check] run=${run.id} LLM HTTP ${llmRes.status}`); continue }
+      const json = await llmRes.json()
+
+      // Wallet accounting rides the existing per-subscription RPC, best-effort.
+      const u = json?.usage
+      if (u && run.subscription_id) {
+        await supabase.rpc('agent_llm_usage_increment', {
+          p_subscription_id: run.subscription_id,
+          p_period:          new Date().toISOString().slice(0, 7),
+          p_input_tokens:    u.prompt_tokens || 0,
+          p_output_tokens:   u.completion_tokens || 0,
+          p_cost_eur:        ((u.prompt_tokens || 0) / 1e6) * VISUAL_LLM_EUR_PER_M.INPUT
+                           + ((u.completion_tokens || 0) / 1e6) * VISUAL_LLM_EUR_PER_M.OUTPUT,
+        }).then(() => {}, () => {})
+      }
+
+      const text = json?.choices?.[0]?.message?.content || ''
+      let parsed = null
+      try { parsed = JSON.parse(text.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, '')) } catch {}
+      const verdict = ['visible', 'not_visible', 'not_assessable'].includes(parsed?.verdict) ? parsed.verdict : null
+      if (!verdict) { console.warn(`[visual-check] run=${run.id} unparseable verdict:`, text.slice(0, 120)); continue }
+      const detail = String(parsed.detail || '').slice(0, 300)
+
+      // IS NULL re-assert: a concurrent invocation can't double-write.
+      await supabase.from('agent_runs')
+        .update({ visual_check: { verdict, detail, model: VISUAL_CHECK_MODEL, checked_at: new Date().toISOString() } })
+        .eq('id', run.id)
+        .is('visual_check', null)
+      checked++
+
+      if (verdict === 'not_visible') {
+        // Feed the DNA: the run's entry (written at approval) learns the fix
+        // never rendered — future prompts read DNA notes as outcome context.
+        const { data: dnaRow } = await supabase.from('agent_business_dna')
+          .select('id, notes').eq('run_id', run.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle()
+        if (dnaRow) {
+          await supabase.from('agent_business_dna')
+            .update({ notes: `${dnaRow.notes || ''} | visual check 48h+: change NOT visible on the live root page (${detail})`.slice(0, 500) })
+            .eq('id', dnaRow.id)
+        }
+        const { data: subRow } = await supabase.from('agent_subscriptions')
+          .select('telegram_chat_id').eq('id', run.subscription_id).single()
+        if (subRow?.telegram_chat_id) {
+          await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: subRow.telegram_chat_id,
+              text: `👀 <b>Velyr Visual Check</b>\n\n<b>Change:</b> ${escapeHtml(run.problem_description || 'recent change')}\n\nThe change was approved and merged, but ~48h later it does <b>not</b> appear on your live landing page.\n<i>${escapeHtml(detail)}</i>\n\nMost common cause: your hosting hasn't redeployed since the merge. Worth a quick look.`,
+              parse_mode: 'HTML',
+            }),
+          }).catch(() => {})
+        }
+      }
+    } catch (e) {
+      console.error(`[visual-check] run=${run.id}:`, e?.message)
+    }
+  }
+  return checked
 }
 
 // Stage 3: propose a Shopify-direct rollback (no PR). Sends the YES/NO Telegram, pins
@@ -1716,7 +1871,9 @@ async function handlePublicTimeline(req, res) {
   // (already denormalized at run time) and use it directly.
   const [runsRes, dnaRes, imRes] = await Promise.all([
     supabase.from('agent_runs')
-      .select('id, status, created_at, completed_at, problem_description, screenshot_before, screenshot_after, bounce_rate_before, bounce_rate_after, score_before, score_after, pr_url, competitor_changes, pages_fixed')
+      // problem_title: the ONLY analysis_result field projected (->> extracts the
+      // one string) — the Stage-4.11 no-wholesale-analysis_result rule still holds.
+      .select('id, status, created_at, completed_at, problem_description, problem_title:analysis_result->>problem_title, screenshot_before, screenshot_after, bounce_rate_before, bounce_rate_after, score_before, score_after, pr_url, competitor_changes, pages_fixed')
       .eq('subscription_id', sub.id)
       .order('created_at', { ascending: false }).limit(50),
     supabase.from('agent_business_dna')
@@ -1746,6 +1903,7 @@ async function handlePublicTimeline(req, res) {
       id: r.id, status: r.status,
       date: r.completed_at || r.created_at,
       problem: r.problem_description || null,
+      problem_title: r.problem_title || null,
       screenshot_before: r.screenshot_before, screenshot_after: r.screenshot_after,
       // bounce_rate_after feeds the trend chart (every point shares the same
       // 48h-post-deploy methodology). The BEFORE column is deliberately not
@@ -1894,7 +2052,11 @@ async function handleReenableSnippet(req, res, user) {
   if (!sub) return res.status(404).json({ error: 'No subscription found' })
   const { error } = await supabase
     .from('agent_connections')
-    .update({ posthog_snippet_declined: false, posthog_snippet_retry_count: 0 })
+    // Item 6: also clear installed_at. Legacy Shopify declines falsely stamped it
+    // (the old overload), which made this button a no-op for those merchants.
+    // Clearing it is safe for genuinely-installed connections too: both detection
+    // paths re-derive a real install from the marker on the next run and re-stamp.
+    .update({ posthog_snippet_declined: false, posthog_snippet_retry_count: 0, posthog_snippet_installed_at: null })
     .eq('subscription_id', sub.id)
   if (error) return res.status(500).json({ error: error.message })
   return res.status(200).json({ success: true })

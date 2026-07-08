@@ -99,9 +99,14 @@ function RunCard({ run }) {
         }}>{badge.label}</span>
       </div>
 
-      <p style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 22, fontWeight: 300, color: C.text, lineHeight: 1.3, letterSpacing: '-.01em', marginBottom: 18 }}>
-        {run.problem || 'No problem description'}
+      {/* Short problem_title as headline when the run carries one; the full
+          problem text moves to a smaller line below. Old runs: unchanged. */}
+      <p style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 22, fontWeight: 300, color: C.text, lineHeight: 1.3, letterSpacing: '-.01em', marginBottom: run.problem_title ? 6 : 18 }}>
+        {run.problem_title || run.problem || 'No problem description'}
       </p>
+      {run.problem_title && run.problem && (
+        <p style={{ fontSize: 13, color: C.textLight, lineHeight: 1.55, marginBottom: 18 }}>{run.problem}</p>
+      )}
 
       {(run.screenshot_before || run.screenshot_after) && (
         <div className="ap-screenshot-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>

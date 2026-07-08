@@ -263,6 +263,16 @@ function fmt(iso) {
   return new Date(iso).toLocaleDateString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})
 }
 
+// Short one-line title for run list rows. New runs carry the agent's own
+// problem_title (≤60 chars, Pass 2); older runs only have the full 1–2 sentence
+// `problem`, so cap that at a word boundary — the full text stays in the run
+// detail view. Never sentence-split: problem texts contain dotted file names
+// ("Home.jsx") that would truncate mid-thought.
+function runTitle(analysis) {
+  const t = analysis?.problem_title || analysis?.problem || ''
+  return t.length > 72 ? t.slice(0, 72).replace(/\s+\S*$/, '') + '…' : t
+}
+
 function nextMonday9am() {
   const now=new Date(), day=now.getDay()
   const daysUntil = day===1?(now.getHours()<9?0:7):(8-day)%7||7
@@ -740,7 +750,7 @@ function KpiRow({runs}) {
   const thisWeek = runs.filter(r=>new Date(r.created_at)>oneWeekAgo&&isLive(r)).length
   const firstRun = runs.length ? runs[runs.length-1] : null
   const sinceStr = firstRun ? new Date(firstRun.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'}) : null
-  const pendingHint = pending[0]?.analysis_result?.problem
+  const pendingHint = pending[0] ? runTitle(pending[0].analysis_result) : null
 
   const kpis = [
     {
@@ -811,7 +821,7 @@ function ActivityCard({runs, onSelectRun, onGoRuns}) {
             <StatusDotIcon status={run.status}/>
             <div style={{minWidth:0}}>
               <p style={{fontSize:13,fontWeight:500,lineHeight:1.35,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                {analysis.problem || (STATUS[run.status]?.label || 'Run')}
+                {runTitle(analysis) || (STATUS[run.status]?.label || 'Run')}
               </p>
               <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4}}>
                 {analysis.file_to_edit && <FileChip>{analysis.file_to_edit.split('/').pop()}</FileChip>}
@@ -1151,7 +1161,7 @@ function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[], subs
                   <StatusDotIcon status={run.status}/>
                   <div style={{minWidth:0}}>
                     <p style={{fontSize:13,fontWeight:500,lineHeight:1.4,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                      {analysis.problem||'Analysis pending…'}
+                      {runTitle(analysis)||'Analysis pending…'}
                     </p>
                     <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4,flexWrap:'wrap'}}>
                       {analysis.file_to_edit && <FileChip>{analysis.file_to_edit.split('/').pop()}</FileChip>}
@@ -2292,7 +2302,17 @@ function RunDetail({run, onClose, onDecision, busy, goalImpact, liveStepIdx}) {
           <span style={{fontSize:11,color:C.textLight}}>{new Date(run.created_at).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>
         </div>
         {analysis.problem&&(
-          <h3 style={{fontFamily:FONT.serif,fontWeight:500,fontSize:24,letterSpacing:'-.01em',marginBottom:20,color:C.ink,lineHeight:1.25}}>{analysis.problem}</h3>
+          /* New runs: short problem_title as the heading, full 1–2 sentence
+             problem as body copy below. Old runs (no title): problem stays the
+             heading, no duplicate paragraph. */
+          <div style={{marginBottom:20}}>
+            <h3 style={{fontFamily:FONT.serif,fontWeight:500,fontSize:24,letterSpacing:'-.01em',color:C.ink,lineHeight:1.25}}>
+              {analysis.problem_title||analysis.problem}
+            </h3>
+            {analysis.problem_title&&(
+              <p style={{fontSize:12.5,color:C.textMuted,lineHeight:1.55,marginTop:8}}>{analysis.problem}</p>
+            )}
+          </div>
         )}
         <div style={{background:C.bgSoft,border:`1px solid ${C.border}`,borderRadius:10,padding:'14px 16px',marginBottom:16}}>
           <SectionLabel style={{marginBottom:12}}>What the agent did</SectionLabel>

@@ -1,0 +1,11 @@
+-- Item 3 (2026-07-08): 48h visual verification.
+-- A deployed run can be merged yet visually inert (customer CI never redeployed,
+-- CSS overridden, change below the fold). Once a run has both root-page
+-- screenshots, the daily enforce_subscriptions cron (api/agent/run.js
+-- runVisualChecks) asks a vision LLM whether the intended change is actually
+-- visible and stores the verdict here:
+--   { "verdict": "visible" | "not_visible" | "not_assessable",
+--     "detail": "<one sentence>", "model": "<slug>", "checked_at": "<iso>" }
+-- NULL = not checked yet (also the re-check guard: the writer re-asserts
+-- IS NULL, so a verdict is written exactly once).
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS visual_check jsonb;

@@ -2791,8 +2791,14 @@ async function captureScreenshot(url: string, viewport: { width?: number; height
 // Target page: the owner's focus pin when set — a REAL, PostHog-derived path
 // (agent_funnel_pages.page_path: visitors actually loaded it) — else the site
 // root. NEVER a fileToRoutePath-derived guess (the black-frame root cause).
-type FixShots = { pagePath: string; desktop: Promise<string | null>; mobile: Promise<string | null> }
-type FixScreenshots = { pagePath: string; desktopUrl: string | null; mobileUrl: string | null }
+type FixShots = { pagePath: string; desktop: Promise<string | null>; mobile: Promise<string | null>; mobileSmall: Promise<string | null> }
+// Optional second page group: the top-ranked component's own page (GitHub path
+// only) — desktop + one mobile width, bounded cost. See startRankedPageShots.
+type RankedPageShots = { pagePath: string; desktop: Promise<string | null>; mobile: Promise<string | null> }
+type FixScreenshots = {
+  pagePath: string; desktopUrl: string | null; mobileUrl: string | null; mobileSmallUrl: string | null
+  ranked?: { pagePath: string; desktopUrl: string | null; mobileUrl: string | null }
+}
 
 function startFixScreenshots(websiteUrl: string | null, focusPagePath: string | null): FixShots | null {
   if (!websiteUrl) return null
@@ -2802,7 +2808,45 @@ function startFixScreenshots(websiteUrl: string | null, focusPagePath: string | 
     pagePath: pinned || '/',
     desktop: captureScreenshot(target),
     mobile:  captureScreenshot(target, { width: 390, height: 844, scale: 2 }),
+    // Second mobile width: the small-viewport end of the real device range
+    // (360×640). A fixed banner / fold-overlap claim that holds on 390×844 can
+    // be false (or worse) here — attaching both lets Pass 2 CONFIRM a
+    // mobile-layout premise instead of hedging it into blind_spots.
+    mobileSmall: captureScreenshot(target, { width: 360, height: 640, scale: 2 }),
   }
+}
+
+// Item 2 (2026-07-08): after Pass-1 ranking, also capture the highest-ranked
+// component's OWN page — the fix usually lands there, and a root-only capture
+// leaves Pass 2 blind on e.g. /pricing. Guarded three ways: the file must map
+// to a clean route via fileToRoutePath, that route must be PostHog-REAL (views
+// in last7Days.topPages — never a derived guess alone; the black-frame lesson),
+// and it must differ from the page already captured. Desktop + one mobile width
+// (bounded cost); awaited under the same model-input budget as the primary set.
+function startRankedPageShots(
+  websiteUrl: string | null,
+  rankerResult: RankerResult,
+  analytics: any,
+  primaryPagePath: string,
+): RankedPageShots | null {
+  if (!websiteUrl) return null
+  const realPaths = new Set<string>()
+  for (const p of analytics?.last7Days?.topPages || []) {
+    if (p?.path && (p.views ?? 0) > 0) realPaths.add(String(p.path))
+  }
+  if (!realPaths.size) return null
+  for (const r of rankerResult.ranked || []) {
+    const route = fileToRoutePath(r.path)
+    if (!route || !route.startsWith('/') || route === primaryPagePath) continue
+    if (!realPaths.has(route) && !realPaths.has(route + '/')) continue
+    const target = websiteUrl.replace(/\/+$/, '') + route
+    return {
+      pagePath: route,
+      desktop: captureScreenshot(target),
+      mobile:  captureScreenshot(target, { width: 390, height: 844, scale: 2 }),
+    }
+  }
+  return null
 }
 
 // HARD model-input budget (option 1, 2026-07-05): if the captures haven't both
@@ -2811,22 +2855,63 @@ function startFixScreenshots(websiteUrl: string | null, focusPagePath: string | 
 // screenshot_before artifact, so a budget miss costs the model input only.
 const FIX_SCREENSHOT_BUDGET_MS = Number(Deno.env.get('AGENT_FIX_SCREENSHOT_BUDGET_MS') || '20000')
 
-async function awaitShotsForModel(shots: FixShots | null, runId: string): Promise<FixScreenshots | null> {
-  if (!shots) return null
+// Race a settled-promise group against what's LEFT of a shared deadline.
+// Returns null on deadline (the promises keep running for later reuse).
+async function raceSettledUntil<T>(settled: Promise<PromiseSettledResult<T>[]>, deadlineAt: number): Promise<PromiseSettledResult<T>[] | null> {
+  const remaining = deadlineAt - Date.now()
+  if (remaining <= 0) return null
   let timer: number | undefined
-  const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), FIX_SCREENSHOT_BUDGET_MS) as unknown as number })
-  const both = Promise.allSettled([shots.desktop, shots.mobile])
-  const raced = await Promise.race([both, timeout])
+  const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), remaining) as unknown as number })
+  const raced = await Promise.race([settled, timeout])
   clearTimeout(timer)
-  if (raced === 'timeout') {
-    slog('warn', 'fix_screenshot_budget_exceeded', { runId, budgetMs: FIX_SCREENSHOT_BUDGET_MS })
-    return null
+  return raced === 'timeout' ? null : (raced as PromiseSettledResult<T>[])
+}
+
+async function awaitShotsForModel(shots: FixShots | null, runId: string, rankedShots: RankedPageShots | null = null): Promise<FixScreenshots | null> {
+  if (!shots && !rankedShots) return null
+  // ONE shared budget, but the ranked-page group is strictly ADDITIVE: it is
+  // raced separately against the leftover deadline, so a slow ranked capture
+  // can only cost itself — never the primary set (whose semantics stay exactly
+  // pre-item-2). Both groups' captures run concurrently regardless.
+  const deadlineAt = Date.now() + FIX_SCREENSHOT_BUDGET_MS
+  const val = (r: PromiseSettledResult<string | null> | undefined) => (r && r.status === 'fulfilled') ? r.value : null
+
+  let d: string | null = null, m: string | null = null, ms: string | null = null
+  if (shots) {
+    const primary = await raceSettledUntil(Promise.allSettled([shots.desktop, shots.mobile, shots.mobileSmall]), deadlineAt)
+    if (primary === null) {
+      slog('warn', 'fix_screenshot_budget_exceeded', { runId, budgetMs: FIX_SCREENSHOT_BUDGET_MS })
+      return null
+    }
+    ;[d, m, ms] = primary.map(val)
   }
-  const [d, m] = raced as PromiseSettledResult<string | null>[]
-  const desktopUrl = d.status === 'fulfilled' ? d.value : null
-  const mobileUrl  = m.status === 'fulfilled' ? m.value : null
-  if (!desktopUrl && !mobileUrl) return null
-  return { pagePath: shots.pagePath, desktopUrl, mobileUrl }
+
+  let ranked: FixScreenshots['ranked']
+  if (rankedShots) {
+    const rr = await raceSettledUntil(Promise.allSettled([rankedShots.desktop, rankedShots.mobile]), deadlineAt)
+    if (rr === null) {
+      slog('warn', 'ranked_page_screenshot_budget_exceeded', { runId, pagePath: rankedShots.pagePath })
+    } else {
+      const [rd, rm] = rr.map(val)
+      if (rd || rm) ranked = { pagePath: rankedShots.pagePath, desktopUrl: rd, mobileUrl: rm }
+    }
+  }
+
+  if (!d && !m && !ms && !ranked) return null
+  return { pagePath: shots?.pagePath ?? '/', desktopUrl: d, mobileUrl: m, mobileSmallUrl: ms, ranked }
+}
+
+// Honest receipt line: which live screenshots ACTUALLY reached Pass 2 (the
+// post-budget FixScreenshots, not the started captures). Item 1, 2026-07-08.
+function screenshotReceiptNote(s: FixScreenshots | null): string {
+  if (!s) return 'none — no live screenshot reached the model this run (capture failed or exceeded the input budget); Pass 2 was instructed to make no visual claims'
+  const parts: string[] = []
+  if (s.desktopUrl)     parts.push(`desktop 1280×800 of "${s.pagePath}"`)
+  if (s.mobileUrl)      parts.push(`mobile 390×844 of "${s.pagePath}"`)
+  if (s.mobileSmallUrl) parts.push(`small mobile 360×640 of "${s.pagePath}"`)
+  if (s.ranked?.desktopUrl) parts.push(`desktop 1280×800 of "${s.ranked.pagePath}"`)
+  if (s.ranked?.mobileUrl)  parts.push(`mobile 390×844 of "${s.ranked.pagePath}"`)
+  return `${parts.join(', ')} — live renders captured at analysis time`
 }
 
 // Best-effort before-screenshot artifact for the two Shopify paths (parity with
@@ -3267,6 +3352,11 @@ function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any)
 export interface FixResult {
   skip?: boolean
   reason?: string
+  // Short (≤60 chars requested, hard-capped at 80 post-parse) plain-language
+  // headline for list surfaces (dashboard run rows). `problem` stays the full
+  // 1–2 sentence description shown in detail views. Optional: older runs and a
+  // model that omits it fall back to `problem` client-side.
+  problem_title?: string
   problem?: string
   hypothesis?: string
   ranked_higher_than?: string
@@ -3400,11 +3490,22 @@ ${funnelAnalysis.funnelPages.filter((p: any) => p.views > 0).map((p: any) => `- 
   // the sentinels; the images themselves ride as image_url blocks (callLLMCapped).
   const shotUrls: string[] = []
   const shotDescs: string[] = []
-  if (screenshots?.desktopUrl) { shotUrls.push(screenshots.desktopUrl); shotDescs.push('desktop 1280×800') }
-  if (screenshots?.mobileUrl)  { shotUrls.push(screenshots.mobileUrl);  shotDescs.push('mobile 390×844') }
+  const primaryPage = screenshots?.pagePath || '/'
+  if (screenshots?.desktopUrl)     { shotUrls.push(screenshots.desktopUrl);     shotDescs.push(`desktop 1280×800 of "${primaryPage}"`) }
+  if (screenshots?.mobileUrl)      { shotUrls.push(screenshots.mobileUrl);      shotDescs.push(`mobile 390×844 of "${primaryPage}"`) }
+  if (screenshots?.mobileSmallUrl) { shotUrls.push(screenshots.mobileSmallUrl); shotDescs.push(`small mobile 360×640 of "${primaryPage}"`) }
+  // Item 2: the top-ranked component's own page (PostHog-real route), when it
+  // differs from the primary page — so a /pricing fix is grounded in /pricing.
+  if (screenshots?.ranked?.desktopUrl) { shotUrls.push(screenshots.ranked.desktopUrl); shotDescs.push(`desktop 1280×800 of "${screenshots.ranked.pagePath}"`) }
+  if (screenshots?.ranked?.mobileUrl)  { shotUrls.push(screenshots.ranked.mobileUrl);  shotDescs.push(`mobile 390×844 of "${screenshots.ranked.pagePath}"`) }
+  // Always non-empty: the no-screenshot case gets an explicit "don't make visual
+  // claims" instruction instead of silence, so a run whose captures failed can't
+  // ship a fix on an unverifiable visual premise (the "cannot confirm the cookie
+  // banner overlaps the CTA" blind-spot class).
   const screenshotContext = shotUrls.length
-    ? `SCREENSHOTS ATTACHED (${shotDescs.join(', then ')}): the CURRENT live rendering of "${screenshots!.pagePath}". Ground every claim about visual hierarchy, above-the-fold content, or what a visitor actually sees in these images — when a screenshot contradicts an assumption derived from the code, trust the screenshot. If an image looks blank or broken, say so in blind_spots and make no visual claims from it.`
-    : ''
+    ? `SCREENSHOTS ATTACHED, in order: ${shotDescs.join(', then ')}. These are CURRENT live renderings of the named page(s). Ground every claim about visual hierarchy, above-the-fold content, or what a visitor actually sees in these images — when a screenshot contradicts an assumption derived from the code, trust the screenshot. If an image looks blank or broken, say so in blind_spots and make no visual claims from it.
+VISUAL-CLAIM RULE: if your #1 problem rests on a visual or layout claim (an element overlapping another, content above/below the fold, a fixed banner covering a CTA, mobile rendering issues), you MUST verify that claim in the attached screenshots BEFORE proposing the fix — state in "hypothesis" which screenshot shows it and what exactly you see. The mobile viewport(s) are attached precisely so you can confirm mobile-layout claims: never list something these images already answer as a blind spot. If the attached screenshots do NOT show the problem, do not propose it on visual grounds — pick a different problem or skip.`
+    : `SCREENSHOTS: none available this run. Do not make visual claims, and do not propose a fix whose premise is purely visual (element overlap, fold position, spacing, mobile rendering) — you cannot confirm it. Pick a problem verifiable from the code and analytics inputs instead, or skip.`
 
   // Per-BLOCK sentinels: each untrusted block gets its OWN fresh uuid, generated
   // per Pass-2 call. A shared id would let an injection in any one block close
@@ -3450,6 +3551,7 @@ ${sealed(`[13] ${findFailuresContext || 'PREVIOUS LOCATE-FAILURES: none'}`)}
 ${guardrailsContext ? `${guardrailsContext}\n` : ''}${ownerGoalContext ? `${ownerGoalContext}\n` : ''}${ownerFocusContext ? `${ownerFocusContext}\n` : ''}${screenshotContext ? `${screenshotContext}\n` : ''}
 Identify the single highest-impact conversion problem visible in this material. Return JSON only (no markdown) with this EXACT schema:
 {
+  "problem_title": "plain-language headline of the problem, MAX 60 characters (shown as the run's title in the owner's dashboard, e.g. 'Mobile hero CTA lacks price anchoring') — no trailing period",
   "problem": "1-2 sentence description of what's broken",
   "hypothesis": "why this is the problem, referencing specific evidence from the inputs",
   "ranked_higher_than": "what other candidate problems you considered and why you ranked them lower",
@@ -3481,7 +3583,7 @@ ${editTypeConstraint}
     // Image-bearing call failed (provider image fetch / multimodal hiccup) —
     // one retry without images, so a screenshot can never cost the weekly fix.
     slog('warn', 'fix_call_image_retry', { subscriptionId, error: String(err?.message || err).slice(0, 200) })
-    text = await callLLMCapped(subscriptionId, system, user.replace(screenshotContext, 'SCREENSHOTS: unavailable this run — do not make visual claims.'), LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix')
+    text = await callLLMCapped(subscriptionId, system, user.replace(screenshotContext, 'SCREENSHOTS: none available this run. Do not make visual claims, and do not propose a fix whose premise is purely visual (element overlap, fold position, spacing, mobile rendering) — you cannot confirm it. Pick a problem verifiable from the code and analytics inputs instead, or skip.'), LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix')
   }
 
   // Consume the one-shot focus pin now that Pass 2 has run with it — even a
@@ -3513,6 +3615,12 @@ ${editTypeConstraint}
   if (!parsed.skip && (!parsed.problem || !parsed.file_to_edit || !parsed.code_change?.find || typeof parsed.code_change?.replace !== 'string')) {
     throw new Error(`Pass 2 response missing required fields: ${JSON.stringify(parsed).slice(0, 200)}`)
   }
+  // problem_title: display-only, so malformed values are dropped (fall back to
+  // `problem` client-side), never fatal. Hard cap 80 chars — the prompt asks 60,
+  // and JSON.stringify drops `undefined` so it never pollutes analysis_result.
+  parsed.problem_title = typeof parsed.problem_title === 'string' && parsed.problem_title.trim()
+    ? parsed.problem_title.trim().slice(0, 80)
+    : undefined
   // C7: sanitize backlog on BOTH shapes (a skip's backlog is exactly the point —
   // it turns a silent week into a visible roadmap). Malformed entries dropped.
   {
@@ -3642,6 +3750,7 @@ interface ReceiptCtx {
   lintInfo: LintInfo
   runId: string
   behavioralNote: string   // honest one-liner: which behavioral signals (scroll/clicks) were inspected, or why not
+  screenshotNote: string   // honest one-liner: which live screenshots Pass 2 saw (screenshotReceiptNote)
   // SG3b: for a theme run, the branch Shopify syncs to the live theme. null/undefined
   // (all non-theme runs, and theme runs with no override) → use the repo default branch.
   connectedBranch?: string | null
@@ -3752,6 +3861,7 @@ async function createPR(octokit: any, owner: string, repo: string, fixResult: Fi
     lintInfo:     receipt.lintInfo,
     runId:        receipt.runId,
     behavioralNote: receipt.behavioralNote,
+    screenshotNote: receipt.screenshotNote,
   })
 
   const { data: pr } = await octokit.rest.pulls.create({
@@ -3776,7 +3886,9 @@ async function sendTelegramNotification(fixResult: FixResult, pr: any, runId: st
   // HTML mode: problem / file_to_edit (file paths routinely contain '_') /
   // blindSpot are uncontrolled LLM-or-path values — this is the message that
   // was failing with "can't find end of the entity" on an underscore.
-  const message = `🤖 <b>Velyr Growth Agent</b>
+  // problem_title leads when present (item 4, 2026-07-08) — the YES/NO decision
+  // headline; the full problem stays as the hypothesis line.
+  const message = `🤖 <b>Velyr Growth Agent</b>${fixResult.problem_title ? `\n\n<b>${escapeHtml(fixResult.problem_title)}</b>` : ''}
 
 📊 <b>Hypothesis:</b> ${escapeHtml(fixResult.problem)}
 🎯 <b>Expected:</b> ${escapeHtml(expected)}
@@ -3893,9 +4005,11 @@ const VELYR_POSTHOG_MARKER_CLOSE = '<!-- /Velyr Analytics -->'
 // A shopify_direct store emits no analytics until this loader is in the theme. Rather
 // than auto-writing the live theme, this stages a pending_write and routes it through
 // the SAME Stage-3 apply path (YES → applyShopifyDirectWrite: optimistic-concurrency
-// checked, recorded as a rollback-able applied_write). Gated once per connection on
-// posthog_snippet_installed_at. Returns 'proposed' (caller returns from the run, await
-// approval) or 'continue' (already installed / can't inject → run the conversion analysis).
+// checked, recorded as a rollback-able applied_write). Gated once per connection at the
+// call site on posthog_snippet_installed_at OR posthog_snippet_declined (item 6: decline
+// stamps the honest declined flag, not installed_at). Returns 'proposed' (caller returns
+// from the run, await approval) or 'continue' (already installed / can't inject → run the
+// conversion analysis).
 async function maybeProposeShopifyPostHogSetup(
   conn: any, run: any, subRow: any, accessToken: string,
 ): Promise<'proposed' | 'continue'> {
@@ -4114,7 +4228,10 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   // the loader into layout/theme.liquid (approval → the Stage-3 apply path) and return;
   // conversion analysis resumes on the next run. Placed BEFORE the no-files check so a
   // sparse theme still gets analytics (the snippet is independent of conversion files).
-  if (!conn.posthog_snippet_installed_at) {
+  // Item 6 (2026-07-08): a declined proposal no longer stamps installed_at (that
+  // overload made "declined" read as "analytics active") — declined is its own
+  // flag here, same as the GitHub path's maybeRunSnippetSetup gate.
+  if (!conn.posthog_snippet_installed_at && !conn.posthog_snippet_declined) {
     const setup = await maybeProposeShopifyPostHogSetup(conn, run, subRow, accessToken)
     if (setup === 'proposed') return
   }
@@ -4379,6 +4496,7 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   const primaryChange = editList[0].change
   const approvalMsg =
     `🤖 <b>Velyr — Shopify theme fix ready for approval</b>\n\n` +
+    (fixResult.problem_title ? `<b>${escapeHtml(fixResult.problem_title)}</b>\n\n` : '') +
     `<b>Problem:</b> ${escapeHtml(fixResult.problem || '—')}\n` +
     `<b>File${stagedFiles.length > 1 ? 's' : ''}:</b> <code>${escapeHtml(stagedFiles.map(f => f.filename).join(', '))}</code>` +
     (fixResult.confidence ? `\n<b>Confidence:</b> ${escapeHtml(fixResult.confidence)}` : '') +
@@ -4624,6 +4742,7 @@ async function processGithubThemeConnection(
         : `not available — fewer than ${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions in the last 7 days`)
   const themeReceiptCtx: ReceiptCtx = {
     mapResult: shopMap, graph, rankerResult, deepContext, lintInfo, runId: run.id, behavioralNote,
+    screenshotNote: screenshotReceiptNote(fixScreens),
     // SG3b: target the Shopify-connected branch (null → repo default).
     connectedBranch: conn.shopify_connected_branch ?? null,
   }
@@ -5071,6 +5190,11 @@ async function processConnection(conn: any) {
     // ── Site network snapshot (best-effort; shared writer) ───────────────────
     await writeSiteNetworkSnapshot(conn.subscription_id, run.id, mapResult.framework, graph, rankerResult)
 
+    // Item 2: now that the ranking exists, also capture the top-ranked
+    // component's own page (PostHog-real routes only) — overlaps the deep-read
+    // + Pass-2 latency exactly like the primary captures.
+    const rankedShots = startRankedPageShots(conn.website_url, rankerResult, analytics, fixShots?.pagePath ?? '/')
+
     // Stage RA4: deep-read the ranked components (+ supporting files) within a
     // byte budget. rankerResult + mapResult.repoTree are threaded in explicitly
     // (one getBlob per file). Consumed by RA5's Pass-2 prompt (callAIForFix) and
@@ -5095,7 +5219,7 @@ async function processConnection(conn: any) {
       supabase.from('agent_runs').update({ current_step: 'finding_biggest_issue' }).eq('id', run.id),
       DB_TIMEOUT_MS, 'step_finding_biggest_issue_update'
     )
-    const fixScreens = await awaitShotsForModel(fixShots, run.id)
+    const fixScreens = await awaitShotsForModel(fixShots, run.id, rankedShots)
     const fixResult = await callAIForFix(
       conn.subscription_id, mapResult, deepContext, rankerResult,
       analytics, pageSpeed, dna, competitorData, funnelAnalysis, revenue, previousFixes, guardrails,
@@ -5145,6 +5269,7 @@ async function processConnection(conn: any) {
           : `not available — fewer than ${NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D} sessions in the last 7 days`)
     const receiptCtx: ReceiptCtx = {
       mapResult, graph, rankerResult, deepContext, lintInfo, runId: run.id, behavioralNote,
+      screenshotNote: screenshotReceiptNote(fixScreens),
     }
     let effectiveFix = fixResult
     let prResult = await createPR(octokit, conn.github_repo_owner, conn.github_repo_name, effectiveFix, receiptCtx)

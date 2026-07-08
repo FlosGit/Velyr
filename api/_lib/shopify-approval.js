@@ -302,9 +302,14 @@ export async function rejectShopifyDirect(supabase, run) {
       }
     }
     // NO on the analytics-setup proposal = don't ask again + start the analysis run.
+    // Item 6 (2026-07-08): stamp the honest `posthog_snippet_declined` flag (the same
+    // one the GitHub Setup-PR decline path uses) — NOT posthog_snippet_installed_at,
+    // which used to be overloaded here and made "declined" indistinguishable from
+    // "analytics active". The propose-gate (maybeProposeShopifyPostHogSetup caller)
+    // honors declined, and the dashboard's reenable_snippet action clears it.
     if (run.analysis_result?.setup_kind === 'posthog') {
       await supabase.from('agent_connections')
-        .update({ posthog_snippet_installed_at: new Date().toISOString() })
+        .update({ posthog_snippet_declined: true })
         .eq('subscription_id', run.subscription_id)
       const started = await startFollowupRun(supabase, run.subscription_id)
       return { status: 'shopify_rejected', message: started
