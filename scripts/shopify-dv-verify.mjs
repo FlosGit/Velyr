@@ -22,7 +22,7 @@
 //       given theme, then (6) themeDelete removes it. Steps 5+6 must BOTH pass before
 //       AGENT_SHOPIFY_PREVIEW_THEMES may be enabled; 1–4 alone still gate live writes.
 
-import { upsertThemeFiles, deleteThemeFiles, queryThemeChecksums, duplicateTheme, deleteTheme } from '../api/_lib/shopify-theme-io.js'
+import { upsertThemeFiles, deleteThemeFiles, queryThemeChecksums, duplicateTheme, deleteTheme, waitForThemeReady } from '../api/_lib/shopify-theme-io.js'
 
 const shop = process.env.SHOPIFY_SHOP
 const token = process.env.SHOPIFY_TOKEN
@@ -87,6 +87,11 @@ try {
   check('(5) themeDuplicate (2026-07)', dup.ok && !!dup.themeId, dup.ok ? `new theme ${dup.themeId} "${dup.name}"` : dup.message)
   if (dup.ok && dup.themeId) {
     console.log(`      preview URL shape: https://${shop}/?preview_theme_id=${dup.themeId}`)
+    // (5b) themeDuplicate is ASYNC — the duplicate stays `processing: true` while
+    // Shopify copies its files, and delete/upsert fail until it flips. Production
+    // (handleShopifyThemePreview) waits the same way before staging the fix.
+    const ready = await waitForThemeReady(shop, token, dup.themeId, { timeoutMs: 90000 })
+    check('(5b) waitForThemeReady (processing poll)', ready.ok, ready.ok ? 'processing finished' : ready.message)
     const delTheme = await deleteTheme(shop, token, dup.themeId)
     check('(6) themeDelete (2026-07)', delTheme.ok, delTheme.ok ? `deleted ${delTheme.deletedThemeId}` : `${delTheme.message} — DELETE THEME ${dup.themeId} ("${dupName}") MANUALLY in the dev-store admin`)
   } else {

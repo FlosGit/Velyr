@@ -39,7 +39,13 @@ async function cleanupPreviewTheme(shop, token, run) {
   const previewId = run.analysis_result?.preview_theme_id
   if (!previewId || !shop || !token) return
   try {
-    const del = await deleteTheme(shop, token, previewId)
+    let del = await deleteTheme(shop, token, previewId)
+    // themeDuplicate is async — deciding within seconds of tapping Preview can hit
+    // "can't delete until it has finished uploading". One short retry covers it.
+    if (!del.ok && /finished uploading/i.test(del.message || '')) {
+      await new Promise(r => setTimeout(r, 5000))
+      del = await deleteTheme(shop, token, previewId)
+    }
     if (!del.ok) console.warn(`[shopify-approval] preview theme ${previewId} not deleted: ${del.message}`)
   } catch (e) { console.warn(`[shopify-approval] preview theme cleanup threw: ${e?.message}`) }
 }

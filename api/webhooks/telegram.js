@@ -6,7 +6,7 @@ import { dispatchAgentRun, startFollowupRun } from '../_lib/edge-dispatch.js'
 import { applyShopifyDirectWrite, executeShopifyDirectRollback, rejectShopifyDirect } from '../_lib/shopify-approval.js'
 import { captureScreenshot } from '../_lib/screenshot.js'
 import { refreshShopifyToken } from '../_lib/shopify-token-refresh.js'
-import { duplicateTheme, deleteTheme, upsertThemeFiles } from '../_lib/shopify-theme-io.js'
+import { duplicateTheme, deleteTheme, upsertThemeFiles, waitForThemeReady } from '../_lib/shopify-theme-io.js'
 import { normalizePendingWrite } from '../_lib/shopify-rollback.js'
 
 const supabase = createClient(
@@ -821,9 +821,24 @@ async function handleShopifyThemePreview(run, chatId) {
   const previewMsg = (themeId) =>
     `🔍 <b>Preview ready</b>\n\n<a href="https://${escapeHtml(shop)}/?preview_theme_id=${encodeURIComponent(themeId)}">View your store WITH the proposed change</a>\n\nThat's a throwaway copy — your live theme is untouched. I'll delete it automatically when you decide. Reply YES to apply / NO to skip.`
 
-  // Reuse the preview this run already created (second tap = same link).
-  if (run.analysis_result?.preview_theme_id) {
-    return sendMessage(chatId, previewMsg(run.analysis_result.preview_theme_id))
+  // Status-conditioned analysis_result merge: ONLY while the run is still awaiting
+  // approval. A racing YES CAS-claims status='running' first and then writes
+  // applied_write into analysis_result — the condition makes it impossible for this
+  // update to clobber that rollback basis; worst case a state change isn't recorded
+  // and one duplicate lingers until manually deleted.
+  const persistPreviewState = async (patch) => {
+    const { data: freshRun } = await supabase.from('agent_runs')
+      .select('analysis_result').eq('id', run.id).eq('status', 'shopify_awaiting_approval').maybeSingle()
+    if (!freshRun) return
+    await supabase.from('agent_runs')
+      .update({ analysis_result: { ...freshRun.analysis_result, ...patch } })
+      .eq('id', run.id).eq('status', 'shopify_awaiting_approval')
+  }
+
+  // Fully staged preview → second tap just re-sends the same link.
+  let previewId = run.analysis_result?.preview_theme_id || null
+  if (previewId && run.analysis_result?.preview_staged === true) {
+    return sendMessage(chatId, previewMsg(previewId))
   }
 
   const pending = normalizePendingWrite(run.analysis_result?.pending_write)
@@ -837,30 +852,39 @@ async function handleShopifyThemePreview(run, chatId) {
       : '⚠️ Couldn’t reach Shopify just now — tap Preview again in a minute.')
   }
 
-  const dup = await duplicateTheme(shop, tok.accessToken, pending.themeId, `Velyr preview ${new Date().toISOString().slice(0, 10)}`)
-  if (!dup.ok) {
-    return sendMessage(chatId, `❌ Couldn’t create a preview copy of your theme.\n\n<i>${escapeHtml(dup.message || '')}</i>\n\nA full theme library (Shopify caps stores at 20 themes) is the usual cause — delete an unused theme and tap Preview again.`)
+  if (!previewId) {
+    const dup = await duplicateTheme(shop, tok.accessToken, pending.themeId, `Velyr preview ${new Date().toISOString().slice(0, 10)}`)
+    if (!dup.ok) {
+      return sendMessage(chatId, `❌ Couldn’t create a preview copy of your theme.\n\n<i>${escapeHtml(dup.message || '')}</i>\n\nA full theme library (Shopify caps stores at 20 themes) is the usual cause — delete an unused theme and tap Preview again.`)
+    }
+    previewId = dup.themeId
+    // Persist BEFORE staging: themeDuplicate is ASYNC (dev-store-verified — the
+    // duplicate stays `processing` while Shopify copies its files). If the wait
+    // below times out, the next tap must RESUME this duplicate, not stack a new one.
+    await persistPreviewState({ preview_theme_id: previewId, preview_staged: false })
   }
-  const up = await upsertThemeFiles(shop, tok.accessToken, dup.themeId, pending.files.map(f => ({ filename: f.filename, content: f.newContent })))
+
+  const ready = await waitForThemeReady(shop, tok.accessToken, previewId, { timeoutMs: 30000 })
+  if (!ready.ok) {
+    if (ready.reason === 'not_found') {
+      // Someone deleted the duplicate in the Shopify admin — start fresh next tap.
+      await persistPreviewState({ preview_theme_id: null, preview_staged: false })
+      return sendMessage(chatId, '⚠️ The preview copy disappeared — tap 🔍 Preview again to create a fresh one.')
+    }
+    return sendMessage(chatId, '⏳ Shopify is still preparing the preview copy of your theme — tap 🔍 Preview again in a minute.')
+  }
+
+  const up = await upsertThemeFiles(shop, tok.accessToken, previewId, pending.files.map(f => ({ filename: f.filename, content: f.newContent })))
   if (!up.ok || (up.userErrors || []).length > 0) {
-    // Never leave a half-written preview behind.
-    await deleteTheme(shop, tok.accessToken, dup.themeId).catch(() => {})
+    // Never leave a half-written preview behind; clear the persisted id so the
+    // next tap starts fresh.
+    await deleteTheme(shop, tok.accessToken, previewId)
+    await persistPreviewState({ preview_theme_id: null, preview_staged: false })
     return sendMessage(chatId, '❌ Couldn’t stage the change onto the preview copy — nothing to preview. Your live theme is untouched.')
   }
 
-  // Persist the preview id for reuse + decide-time cleanup — but ONLY while the run
-  // is still awaiting approval. The status condition means a racing YES (which CAS-
-  // claims status='running', then writes applied_write into analysis_result) can
-  // never have its rollback basis clobbered by this update; worst case the id isn't
-  // recorded and this one duplicate lingers until manually deleted.
-  const { data: freshRun } = await supabase.from('agent_runs')
-    .select('analysis_result').eq('id', run.id).eq('status', 'shopify_awaiting_approval').maybeSingle()
-  if (freshRun) {
-    await supabase.from('agent_runs')
-      .update({ analysis_result: { ...freshRun.analysis_result, preview_theme_id: dup.themeId } })
-      .eq('id', run.id).eq('status', 'shopify_awaiting_approval')
-  }
-  return sendMessage(chatId, previewMsg(dup.themeId))
+  await persistPreviewState({ preview_staged: true })
+  return sendMessage(chatId, previewMsg(previewId))
 }
 
 // ─── NOTE ─────────────────────────────────────────────────────────────────────

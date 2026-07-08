@@ -148,6 +148,28 @@ export async function duplicateTheme(shop, token, themeId, name, apiVersion) {
   return { ok: true, themeId: numericId, name: payload.newTheme?.name || name || '' }
 }
 
+// Polls the duplicate's `processing` flag until Shopify finishes copying its files.
+// Dev-store-verified necessity: themeDuplicate is ASYNC — themeDelete (and by
+// implication themeFilesUpsert) on a fresh duplicate fails with "You can't delete
+// this theme until it has finished uploading" until processing flips to false.
+export async function waitForThemeReady(shop, token, themeId, { timeoutMs = 30000, intervalMs = 2500 } = {}, apiVersion) {
+  const query = `query VelyrThemeProcessing($id: ID!) { theme(id: $id) { processing } }`
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    let res, json
+    try {
+      ({ res, json } = await post(shop, token, apiVersion || THEME_OPS_API_VERSION, { query, variables: { id: gid(themeId) } }))
+    } catch (err) {
+      return { ok: false, reason: 'request_failed', message: `theme processing poll threw: ${err?.message || String(err)}` }
+    }
+    if (res.status === 401 || res.status === 403) return { ok: false, reason: 'unauthorized', message: `Shopify returned ${res.status} polling theme processing` }
+    if (json?.data?.theme === null) return { ok: false, reason: 'not_found', message: 'theme vanished while processing' }
+    if (json?.data?.theme?.processing === false) return { ok: true }
+    if (Date.now() + intervalMs > deadline) return { ok: false, reason: 'timeout', message: `theme still processing after ${Math.round(timeoutMs / 1000)}s` }
+    await new Promise(r => setTimeout(r, intervalMs))
+  }
+}
+
 // Deletes an entire theme (used ONLY to remove Velyr-created preview duplicates —
 // callers must guard that the id is a Velyr preview theme, never the live theme).
 // Returns { ok: true, deletedThemeId } or { ok: false, reason, message }.
