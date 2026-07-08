@@ -5,11 +5,14 @@ Velyr is an AI growth agent that ships one weekly conversion fix: a GitHub Pull 
 > Velyr finds your site's #1 conversion problem each week, writes the code fix, and waits for your one-tap approval over Telegram. On GitHub the fix is a Pull Request; on Shopify it is written to your live theme after your YES. If a change hurts your numbers, Velyr proposes a rollback within 48 hours.
 
 ## What it does
-- Every Monday, reads your PostHog analytics (traffic, bounce rate, scroll depth, click behavior) and scans every page in your GitHub repo or Shopify theme.
+- Every Monday, reads your PostHog analytics (traffic, bounce rate, scroll depth, click behavior, rage clicks and dead clicks) and scans every page in your GitHub repo or Shopify theme.
 - Identifies the single highest-impact conversion problem across your full funnel — not just the homepage.
-- Writes the actual code change: a GitHub Pull Request with a preview link, or a staged Shopify theme change.
-- Sends a Telegram message summarizing the problem, the data, and the fix — reply YES to deploy, NO to skip.
+- Writes the actual code change: a GitHub Pull Request, or a staged Shopify theme change.
+- Sends a Telegram message summarizing the problem, the data, and the fix. A Preview button shows your site with the change applied — via your host's preview deploy on GitHub, or a safe throwaway copy of your theme on Shopify. Approve or skip with one tap, in Telegram or from the dashboard.
+- Optimizes for the goal you choose (start a trial, add to cart, book a call) and measures every shipped change against it, alongside bounce rate.
 - 48 hours after a fix ships, checks site-wide bounce rate; if it spikes by 15 percentage points or more, it proposes a rollback for your approval.
+- Keeps a "next up" roadmap of what it would fix next — one tap schedules an item for the next run.
+- Alerts you on Telegram the moment a tracked competitor changes their hero, pricing, or main call-to-action.
 
 ## How it's different
 - It ships real code, not a dashboard of suggestions you have to implement yourself.
@@ -27,7 +30,7 @@ Wix, Squarespace, and Webflow. The agent edits source code, and these site build
 €29/month. 14-day free trial with all features included; a credit card is required to start, and you can cancel anytime during the trial without being charged. Cancel anytime after that too.
 
 ## Common questions
-- **Do I approve every change?** Yes. Nothing ships without your explicit YES reply, and you see the exact change first.
+- **Do I approve every change?** Yes. Nothing ships without your explicit approval — you see the exact change first, and a Preview button shows your site with the change applied before you decide.
 - **What if a fix makes things worse?** Velyr checks bounce rate 48 hours after each shipped fix and proposes a rollback if it rose by 15 percentage points or more: a revert PR on GitHub, or restoring the previous theme files on Shopify.
 - **Does it touch my whole funnel?** Yes — it maps every page of your site and cross-references your analytics to find where users drop off, then fixes the highest-impact issue.
 - **Can I protect certain copy or design?** Yes. Brand Guardrails are written rules the agent must respect; violating suggestions are rejected before they reach you.

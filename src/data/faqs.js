@@ -5,7 +5,7 @@
 export const FAQS = [
   {
     q: 'What does Velyr do?',
-    a: 'Every Monday, Velyr analyzes your site (a GitHub repo or a Shopify theme) and your analytics, identifies the #1 conversion problem, and writes the code fix. On GitHub the fix arrives as a Pull Request; on Shopify it is staged for your live theme. You approve via Telegram (YES/NO).'
+    a: 'Every Monday, Velyr analyzes your site (a GitHub repo or a Shopify theme) and your analytics, identifies the #1 conversion problem, and writes the code fix. On GitHub the fix arrives as a Pull Request; on Shopify it is staged for your live theme. You can preview your site with the change applied, then approve or skip with one tap — in Telegram or from your dashboard.'
   },
   {
     q: 'How is Velyr different from a CRO agency or an A/B testing tool?',
@@ -13,7 +13,11 @@ export const FAQS = [
   },
   {
     q: 'Do I have to approve every change?',
-    a: 'Yes. Nothing ships without your explicit YES reply. You see the exact code change before deciding.'
+    a: 'Yes. Nothing ships without your explicit approval. You see the exact code change before deciding, and a Preview button shows your site with the change applied — on GitHub via your host\'s preview deploy, on Shopify on a safe throwaway copy of your theme that is deleted once you decide.'
+  },
+  {
+    q: 'What does it optimize for?',
+    a: 'The goal you choose. Tell the agent the one action that matters most — start a trial, add to cart, book a call — and it prioritizes fixes for that goal and measures every shipped change against it, alongside bounce rate. Without a goal it optimizes engagement and bounce.'
   },
   {
     q: 'How does Velyr connect to my code?',
@@ -33,7 +37,7 @@ export const FAQS = [
   },
   {
     q: 'Can it track my competitors?',
-    a: 'Yes. You can track up to two competitor URLs; Velyr snapshots them and factors changes on their sites into its weekly analysis.'
+    a: 'Yes. You can track up to two competitor URLs; Velyr snapshots them weekly, factors their changes into its analysis, and pings you on Telegram the moment one of them changes their hero, pricing, or main call-to-action.'
   },
   {
     q: 'What happens if a change makes things worse?',

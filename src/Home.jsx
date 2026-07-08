@@ -514,7 +514,7 @@ function Hero({ navigate }) {
         </h1>
 
         <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 18px)', color:C.textMuted, maxWidth:540, margin:'22px auto 0', lineHeight:1.6 }}>
-          Velyr finds your site's biggest conversion leak, writes the fix, and sends it to Telegram. Reply YES and it goes live. Works with your GitHub repo or your Shopify store.
+          Velyr finds your site's biggest conversion leak, writes the fix, and shows you a preview of your site with the change. One tap and it's live. Works with your GitHub repo or your Shopify store.
         </p>
 
         <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:34, flexWrap:'wrap', alignItems:'center', justifyContent:'center' }}>
@@ -550,16 +550,16 @@ function GrowthAgentSection({ navigate }) {
   const markers = [
     { label:'Detect',  sub:'reads analytics + code' },
     { label:'Fix',     sub:'writes the code change' },
-    { label:'Approve', sub:'one Telegram reply' },
+    { label:'Approve', sub:'preview it, one tap' },
     { label:'Ship',    sub:'live after your YES' },
     { label:'Measure', sub:'rollback if worse' },
   ]
   const steps = [
     { n:'01', label:'Detect',  time:'Mon · 9:00',  text:'The agent reads your analytics: traffic, bounce rate, how far visitors scroll, what they click. Then it scans every page in your GitHub repo or Shopify theme to find the #1 conversion problem in your funnel.' },
     { n:'02', label:'Fix',     time:'Mon · 9:15',  text:'It writes the code change. On a GitHub repo that becomes a Pull Request with a preview deploy from your host. On a Shopify store it becomes a staged theme change for you to review.' },
-    { n:'03', label:'Approve', time:'Mon · 9:20',  text:'A Telegram message shows you the problem, the data behind it, and the exact change. Reply YES to ship it or NO to skip it. Nothing goes live without you.' },
+    { n:'03', label:'Approve', time:'Mon · 9:20',  text:'A Telegram message shows you the problem, the data behind it, and the exact change. Tap Preview to see your site with the change applied — before anything ships. Then approve or skip with one tap, in Telegram or from your dashboard.' },
     { n:'04', label:'Ship',    time:'On your YES', text:'On GitHub the agent merges the PR and your host deploys it. On Shopify it writes the change straight to your live theme. No manual steps.' },
-    { n:'05', label:'Measure', time:'48h later',   text:'It checks your bounce rate 48 hours after deploy. If it rose 15 points or more, the agent proposes a rollback and reverts it on your YES. A Wednesday check watches traffic and bounce too.' },
+    { n:'05', label:'Measure', time:'48h later',   text:'It measures every shipped change: your bounce rate, and — if you set one — the goal that actually matters to you, like clicks on your main button or visits to checkout. If bounce rose 15 points or more, the agent proposes a rollback and reverts it on your YES.' },
   ]
 
   // One-time per-step reveal: an observer marks each step "seen" so it fades
@@ -803,8 +803,8 @@ function Pricing({ navigate }) {
   const [ref, visible] = useReveal()
   const [allFeaturesOpen, setAllFeaturesOpen] = useState(false)
 
-  const agentFeaturesTop = ['Reads your analytics and your repo or Shopify theme','Writes the code fix, weekly or on demand','You approve on Telegram with YES or NO','Rollback when a fix hurts your metrics','Weekly competitor scan']
-  const agentFeaturesExtra = ['Finds the #1 conversion problem each week','Ships as a GitHub PR or a Shopify theme change','Brand Guardrails: your rules, enforced','Full funnel analysis across all pages','Reads scroll depth and click behavior','Weekly summary on Telegram','Monthly roast report on what still lags','Business DNA: learns what works on your site','Public impact timeline you can share']
+  const agentFeaturesTop = ['Reads your analytics and your repo or Shopify theme','Writes the code fix, weekly or on demand','Preview every change on your site before you approve','One-tap approval in Telegram or the dashboard','Rollback when a fix hurts your metrics','Competitor watch with instant alerts']
+  const agentFeaturesExtra = ['Finds the #1 conversion problem each week','Ships as a GitHub PR or a Shopify theme change','Optimizes for the goal you choose — and measures it','A "next up" roadmap: schedule the next fix with one tap','Spots where visitors rage-click or click dead elements','Brand Guardrails: your rules, enforced','Full funnel analysis across all pages','Reads scroll depth and click behavior','Asks you one sharp question when it needs context — and remembers the answer','Weekly summary on Telegram','Monthly roast report on what still lags','Business DNA: learns what works on your site','Public impact timeline + a win badge for your site']
 
   return (
     <section id="pricing-section" className="section-pad" style={{ background:C.bgSecond, borderTop:`1px solid ${C.border}`, padding:'96px 24px' }}>
@@ -899,7 +899,8 @@ function FAQ() {
     { q:'What is the Growth Agent?', a:'An AI agent that runs every Monday and on demand. It reads your PostHog analytics and your code, on GitHub or Shopify, finds the biggest conversion problem, writes the fix, and sends it to you on Telegram. Reply YES to ship it or NO to skip it.' },
     { q:'Does it work with Shopify?', a:'Yes, two ways. Connect your store directly in onboarding: Velyr reads your live theme and writes approved fixes straight to it. No GitHub needed. Or, if your theme is already synced to a GitHub repo, connect the repo and fixes arrive as pull requests.' },
     { q:'When does it start, and can I run it myself?', a:'The agent gets to work the moment you finish setup, no waiting for Monday. After that it runs every Monday morning, and you can trigger an extra run any time from the dashboard with the Run now button, up to once a day.' },
-    { q:'Do I have to approve every change before it goes live?', a:'Yes, always. You get a Telegram message with the problem, the data behind it, and the exact change. Reply YES to ship it or NO to skip it. Nothing goes live without you.' },
+    { q:'Do I have to approve every change before it goes live?', a:'Yes, always. You get a Telegram message with the problem, the data behind it, and the exact change — and a Preview button that shows your site with the change applied before you decide. Approve or skip with one tap, in Telegram or from your dashboard. Nothing goes live without you.' },
+    { q:'What does it optimize for?', a:'Your goal. Tell the agent the one action that matters most — start a trial, add to cart, book a call — and it picks fixes for that goal and measures every shipped change against it, alongside bounce rate. No goal set? It optimizes engagement and bounce.' },
     { q:"What happens if a change makes things worse?", a:'The agent checks your bounce rate 48 hours after every deploy. If it rose 15 percentage points or more, it proposes a rollback on Telegram and reverts the change once you approve. On GitHub that is a revert PR, on Shopify the previous theme files are restored.' },
     { q:'What are Brand Guardrails?', a:'Rules you set in your dashboard that the agent must follow on every run: tone of voice, things it can never do, elements it must never touch. Suggestions that violate them are rejected before they reach you.' },
     { q:'What is Full Funnel analysis?', a:'The agent maps every page of your site, not just the homepage, and cross-references each one with your analytics, including scroll depth and clicks. It finds where visitors drop off and fixes the highest-leverage page first.' },
@@ -1147,10 +1148,10 @@ function DiffRow({ item, i }) {
 function DifferentiatorsSection() {
   const [ref, visible] = useReveal()
   const rows = [
-    { icon:'chat',   title:'Approval on Telegram', desc:'Every Monday you get the problem, the data, the fix and the link in Telegram. Reply YES to ship it or NO to skip it. Nothing goes live without you.' },
-    { icon:'scan',   title:'Competitor weekly scan', desc:"Track up to 2 competitors. The agent watches their hero, CTA and pricing each week and tells you what they shipped that you didn't." },
+    { icon:'chat',   title:'Preview, then one tap', desc:'Every Monday you get the problem, the data and the fix in Telegram. Tap Preview to see your site with the change applied, then approve or skip with one tap — in Telegram or from your dashboard. Nothing goes live without you.' },
+    { icon:'scan',   title:'Competitor watch', desc:"Track up to 2 competitors. The agent watches their hero, CTA and pricing — and pings you the moment something changes, not just in a weekly digest." },
     { icon:'report', title:'Monthly roast report', desc:'Once a month the agent tells you straight what improved, what still looks weak next to your competitors, and what you keep ignoring.' },
-    { icon:'share',  title:'Public impact timeline', desc:'An optional public page at velyr.io/agent/your-slug that shows every run and its result. Use it as social proof.' },
+    { icon:'share',  title:'Public impact timeline', desc:'An optional public page at velyr.io/agent/your-slug that shows every run and its result, plus an embeddable badge with your latest measured win. Use it as social proof.' },
   ]
   return (
     <section className="section-pad" style={{ background:C.bg, padding:'96px 24px' }}>
