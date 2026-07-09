@@ -75,6 +75,36 @@ export async function queryThemeChecksums(shop, token, themeId, filenames, apiVe
   return { ok: true, byFilename }
 }
 
+// ── Read a single theme file's text content + checksum ───────────────────────
+// Node twin of the edge fn's readShopifyThemeFile (keep the query shape in sync).
+// Returns { ok: true, content, checksumMd5 } or { ok: false, reason, message } —
+// a missing file / binary body maps to reason 'not_found'.
+export async function readThemeFile(shop, token, themeId, filename, apiVersion) {
+  const query = `query VelyrThemeFile($themeId: ID!, $filenames: [String!]) {
+    theme(id: $themeId) {
+      files(first: 1, filenames: $filenames) {
+        edges { node { filename checksumMd5 body { ... on OnlineStoreThemeFileBodyText { content } } } }
+      }
+    }
+  }`
+  let res, json
+  try {
+    ({ res, json } = await post(shop, token, apiVersion, { query, variables: { themeId: gid(themeId), filenames: [filename] } }))
+  } catch (err) {
+    return { ok: false, reason: 'request_failed', message: `theme file read threw: ${err?.message || String(err)}` }
+  }
+  if (res.status === 401 || res.status === 403) return { ok: false, reason: 'unauthorized', message: `Shopify returned ${res.status} reading theme file` }
+  if (!res.ok || json?.errors || json?.data?.theme?.files == null) {
+    return { ok: false, reason: 'graphql_error', message: `theme file read failed (HTTP ${res.status})` }
+  }
+  const node = (json.data.theme.files.edges || [])[0]?.node
+  const content = node?.body?.content
+  if (typeof content !== 'string') {
+    return { ok: false, reason: 'not_found', message: `${filename} not found or has no text body` }
+  }
+  return { ok: true, content, checksumMd5: node.checksumMd5 ?? null }
+}
+
 // ── Upsert (full-file TEXT replacement) ──────────────────────────────────────
 // files: [{ filename, content }]. Returns { ok: true, upsertedFilenames, userErrors, jobId }
 // — the caller passes upsertedFilenames + userErrors to confirmApplied/resolveAppliedFiles

@@ -10,6 +10,9 @@ import { reconcileDeployed, reconcileRejected, closeRejectedPr } from '../_lib/r
 import { startFollowupRun } from '../_lib/edge-dispatch.js'
 import { applyShopifyDirectWrite, executeShopifyDirectRollback, rejectShopifyDirect } from '../_lib/shopify-approval.js'
 import { buildWinBadgeSvg, buildWinCardSvg } from '../_lib/win-card.js'
+import { buildBadgeBlock, decideBadgeInjection, BADGE_TARGETS } from '../_lib/badge-install.js'
+import { readThemeFile, upsertThemeFiles } from '../_lib/shopify-theme-io.js'
+import { refreshShopifyToken } from '../_lib/shopify-token-refresh.js'
 import { captureScreenshot as captureScreenshotShared } from '../_lib/screenshot.js'
 
 // Local wrapper keeps the historical one-arg call shape in this file.
@@ -473,7 +476,7 @@ export default async function handler(req, res) {
   }
 
   // ── Authenticated user actions (Supabase JWT) ─────────────────────────────
-  if (action === 'update-settings' || action === 'reenable_snippet' || action === 'trigger_run' || action === 'dna_verdict' || action === 'approve_run' || action === 'reject_run') {
+  if (action === 'update-settings' || action === 'reenable_snippet' || action === 'trigger_run' || action === 'dna_verdict' || action === 'approve_run' || action === 'reject_run' || action === 'install_badge') {
     const authHeader = req.headers.authorization
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' })
     const token = authHeader.replace('Bearer ', '')
@@ -484,6 +487,7 @@ export default async function handler(req, res) {
     if (action === 'reenable_snippet') return handleReenableSnippet(req, res, user)
     if (action === 'trigger_run')      return handleTriggerRun(req, res, user)
     if (action === 'dna_verdict')      return handleDnaVerdict(req, res, user)
+    if (action === 'install_badge')    return handleInstallBadge(req, res, user)
     if (action === 'approve_run' || action === 'reject_run') return handleRunAction(req, res, user, action)
   }
 
@@ -2191,6 +2195,258 @@ async function handleTriggerRun(req, res, user) {
     .eq('id', sub.id)
 
   return res.status(200).json({ success: true, triggered: true, nextManualRunAt })
+}
+
+// ─── Badge install: the agent ships the C12 win badge into the site footer ────
+// POST /api/agent/run?action=install_badge (Bearer). The dashboard button IS the
+// user's explicit consent, so this ships directly — GitHub: PR created and merged
+// in one step (the PR stays as audit trail + revert path); Shopify-direct:
+// immediate themeFilesUpsert on the MAIN theme. Runs synchronously inside the
+// 60s budget (a handful of API calls, no LLM).
+//
+// Deliberately does NOT touch last_manual_run_at — installing the badge never
+// consumes the daily manual-run allowance. It DOES take the same in-flight guard
+// as trigger_run plus the cross-runtime run lock: writing a theme file while a
+// staged Shopify fix awaits YES would invalidate that fix's analysis-time
+// checksum and abort it.
+async function handleInstallBadge(req, res, user) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+
+  const { data: sub, error: subErr } = await supabase
+    .from('agent_subscriptions')
+    .select('id, status, subscription_status, is_public, public_slug, telegram_chat_id')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  if (subErr) {
+    console.error('[install_badge] subscription lookup failed:', subErr.message)
+    return res.status(500).json({ error: 'Could not load your subscription. Try again.' })
+  }
+  if (!sub) return res.status(404).json({ error: 'No subscription found' })
+  if (!['active', 'trialing'].includes(sub.subscription_status)) {
+    return res.status(402).json({ error: 'Your subscription is not active.' })
+  }
+  // The badge links to the public timeline and the SVG endpoint is gated on
+  // is_public server-side — installing without a public profile would ship a
+  // dead link + broken image.
+  if (!sub.is_public || !sub.public_slug) {
+    return res.status(409).json({ error: 'Make your timeline public and save a slug first — the badge links to it.' })
+  }
+
+  const { data: inflight } = await supabase
+    .from('agent_runs')
+    .select('id')
+    .eq('subscription_id', sub.id)
+    .in('status', ['running', 'waiting_approval', 'shopify_awaiting_approval', 'shopify_rollback_pending'])
+    .limit(1)
+    .maybeSingle()
+  if (inflight) {
+    return res.status(409).json({ error: 'A run is in progress or awaiting your approval. Decide it first, then install the badge.' })
+  }
+
+  // Cross-runtime run lock (same RPC the edge fn uses) so a badge install can't
+  // interleave with a starting weekly/manual run. Fail-open like the edge fn —
+  // the in-flight guard above already caught the common case.
+  let locked = true
+  try {
+    const { data, error } = await supabase.rpc('agent_run_lock_acquire', {
+      p_subscription_id: sub.id,
+      p_locked_until: new Date(Date.now() + 2 * 60 * 1000).toISOString(),
+    })
+    if (!error) locked = data === true
+  } catch { /* fail open */ }
+  if (!locked) {
+    return res.status(409).json({ error: 'A run is starting right now. Try again in a minute.' })
+  }
+
+  try {
+    const { data: conn } = await supabase
+      .from('agent_connections')
+      .select('*')
+      .eq('subscription_id', sub.id)
+      .maybeSingle()
+    if (!conn) return res.status(404).json({ error: 'Connect your repo or store first.' })
+
+    const isShopifyDirect = conn.connection_source === 'shopify_direct'
+      || (conn.shopify_shop_domain && !conn.github_repo_name)
+    if (isShopifyDirect) return await installBadgeShopifyDirect(res, sub, conn)
+
+    if (!conn.github_installation_id || !conn.github_repo_name) {
+      return res.status(409).json({ error: 'No GitHub repo connected.' })
+    }
+    return await installBadgeGithub(res, sub, conn)
+  } catch (err) {
+    console.error('[install_badge] failed:', err?.message || String(err))
+    return res.status(502).json({ error: 'The install failed before anything shipped. Nothing was changed — you can copy the embed code and paste it manually.' })
+  } finally {
+    try { await supabase.rpc('agent_run_lock_release', { p_subscription_id: sub.id }) } catch { /* TTL cleans up */ }
+  }
+}
+
+// Informational Telegram (no approval buttons — the change already shipped).
+async function sendBadgeTelegram(chatId, html) {
+  if (!chatId) return
+  await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: 'HTML' }),
+  }).catch(() => {})
+}
+
+async function installBadgeGithub(res, sub, conn) {
+  const octokit = await getOctokit(conn.github_installation_id)
+  const owner = conn.github_repo_owner
+  const repo  = conn.github_repo_name
+  const defaultBranch = await getDefaultBranch(octokit, owner, repo)
+
+  // First existing candidate wins. layout/theme.liquid (a GitHub-synced Shopify
+  // theme) honors the connected-branch override — same rule as createPR and the
+  // rollback revert PR; every other shell reads from the default branch.
+  let target = null, currentFile = null, baseBranch = null
+  for (const cand of BADGE_TARGETS) {
+    const ref = (cand.path === 'layout/theme.liquid' && conn.shopify_connected_branch)
+      ? conn.shopify_connected_branch : defaultBranch
+    try {
+      const { data } = await octokit.rest.repos.getContent({ owner, repo, path: cand.path, ref })
+      if (data && !Array.isArray(data) && data.type === 'file') {
+        target = cand; currentFile = data; baseBranch = ref
+        break
+      }
+    } catch (e) {
+      if (e?.status !== 404) throw e
+    }
+  }
+  if (!target) {
+    return res.status(422).json({ error: 'No suitable footer file found (index.html, app layout, _document or theme.liquid). Copy the embed code and paste it manually.' })
+  }
+
+  const content  = Buffer.from(currentFile.content, 'base64').toString('utf8')
+  const expected = buildBadgeBlock(sub.public_slug, target.variant)
+  const decision = decideBadgeInjection(content, expected, target.variant)
+  if (decision.action === 'skip') {
+    return res.status(200).json({ already_installed: true, path: target.path })
+  }
+  if (decision.action === 'no_anchor') {
+    return res.status(422).json({ error: `No </body> found in ${target.path} to anchor the badge on. Copy the embed code and paste it manually.` })
+  }
+
+  // Stable per-subscription branch (createSnippetPR pattern): delete a stale one,
+  // recut from base, single commit, PR, immediate squash-merge.
+  const branchName = `agent/badge-${sub.id.slice(0, 8)}`
+  try { await octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branchName}` }) } catch { /* absent is fine */ }
+  const { data: baseRef } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${baseBranch}` })
+  await octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: baseRef.object.sha })
+  await octokit.rest.repos.createOrUpdateFileContents({
+    owner, repo, path: target.path,
+    message: 'Add Velyr win badge to the site footer',
+    content: Buffer.from(decision.newContent, 'utf8').toString('base64'),
+    sha: currentFile.sha, branch: branchName,
+  })
+  const { data: pr } = await octokit.rest.pulls.create({
+    owner, repo,
+    title: '🏅 Add Velyr win badge',
+    body: `Adds the Velyr win badge to \`${target.path}\` (just above \`</body>\`). It links to your public timeline and updates automatically with your latest measured win.\n\n_Requested from the dashboard ("Let the agent install it") — merged immediately on your click._`,
+    head: branchName, base: baseBranch,
+  })
+
+  const nowIso = new Date().toISOString()
+  const analysis = {
+    problem_title: 'Win badge added to your site',
+    problem: `Added the Velyr win badge to ${target.path}`,
+    solution: 'Inserted the badge embed just above </body> so it renders at the bottom of every page.',
+    file_to_edit: target.path,
+  }
+
+  let mergeSha = null
+  try {
+    const { data: merged } = await octokit.rest.pulls.merge({ owner, repo, pull_number: pr.number, merge_method: 'squash' })
+    mergeSha = merged?.sha ?? null
+  } catch (mergeErr) {
+    // Branch protection or a race can block the instant merge. Honest fallback:
+    // leave the PR open as a normal waiting_approval run — the existing dashboard
+    // approve / Telegram YES machinery merges it.
+    console.warn('[install_badge] instant merge failed, leaving PR for approval:', mergeErr?.message)
+    await supabase.from('agent_runs').insert({
+      subscription_id: sub.id, run_type: 'badge_install', status: 'waiting_approval',
+      current_step: 'done', completed_at: nowIso,
+      pr_number: pr.number, pr_url: pr.html_url, pages_fixed: [target.path],
+      problem_description: 'Install the Velyr win badge',
+      analysis_result: analysis,
+    })
+    await sendBadgeTelegram(sub.telegram_chat_id,
+      `🏅 <b>Win badge ready</b>\n\nI prepared the badge for <code>${escapeHtml(target.path)}</code> but couldn't merge automatically (branch protection?). Approve it like a normal fix: ${escapeHtml(pr.html_url)}`)
+    return res.status(200).json({ success: true, installed: false, needs_approval: true, pr_url: pr.html_url, path: target.path })
+  }
+
+  await supabase.from('agent_runs').insert({
+    subscription_id: sub.id, run_type: 'badge_install', status: 'deployed',
+    current_step: 'done', completed_at: nowIso,
+    pr_number: pr.number, pr_url: pr.html_url, merge_commit_sha: mergeSha,
+    pages_fixed: [target.path],
+    problem_description: 'Install the Velyr win badge',
+    analysis_result: analysis,
+  })
+  await sendBadgeTelegram(sub.telegram_chat_id,
+    `🏅 <b>Win badge installed</b>\n\nAdded to <code>${escapeHtml(target.path)}</code> and merged (PR #${pr.number}). Your deploy pipeline is shipping it now — the badge updates automatically with your latest measured win.`)
+  return res.status(200).json({ success: true, installed: true, pr_url: pr.html_url, path: target.path })
+}
+
+async function installBadgeShopifyDirect(res, sub, conn) {
+  if (!conn.shopify_main_theme_id) {
+    return res.status(409).json({ error: 'No Shopify theme selected. Finish onboarding first.' })
+  }
+  const tok = await refreshShopifyToken(supabase, conn)
+  if (!tok.ok) {
+    return res.status(tok.reason === 'needs_reconsent' ? 409 : 502).json({
+      error: tok.reason === 'needs_reconsent'
+        ? 'Your Shopify connection has expired — reconnect your store first.'
+        : 'Could not reach Shopify just now. Nothing was changed — try again in a minute.',
+    })
+  }
+  const shop = conn.shopify_shop_domain
+  const themeId = conn.shopify_main_theme_id
+
+  const read = await readThemeFile(shop, tok.accessToken, themeId, 'layout/theme.liquid')
+  if (!read.ok) {
+    return res.status(502).json({ error: `Could not read your theme (${read.reason}). Nothing was changed.` })
+  }
+
+  const expected = buildBadgeBlock(sub.public_slug, 'html')
+  const decision = decideBadgeInjection(read.content, expected, 'html')
+  if (decision.action === 'skip') {
+    return res.status(200).json({ already_installed: true, path: 'layout/theme.liquid' })
+  }
+  if (decision.action === 'no_anchor') {
+    return res.status(422).json({ error: 'No </body> found in layout/theme.liquid to anchor the badge on. Copy the embed code and paste it into your theme manually.' })
+  }
+
+  const up = await upsertThemeFiles(shop, tok.accessToken, themeId, [
+    { filename: 'layout/theme.liquid', content: decision.newContent },
+  ])
+  if (!up.ok || (up.userErrors && up.userErrors.length > 0)) {
+    const detail = up.ok ? up.userErrors.map(e => e.message).join('; ') : up.message
+    console.error('[install_badge] theme upsert failed:', detail)
+    return res.status(502).json({ error: 'Shopify rejected the theme write. Nothing was changed — you can paste the embed code manually.' })
+  }
+
+  await supabase.from('agent_runs').insert({
+    subscription_id: sub.id, run_type: 'badge_install', status: 'shopify_deployed',
+    current_step: 'done', completed_at: new Date().toISOString(),
+    pages_fixed: ['layout/theme.liquid'],
+    problem_description: 'Install the Velyr win badge',
+    analysis_result: {
+      problem_title: 'Win badge added to your store',
+      problem: 'Added the Velyr win badge to layout/theme.liquid',
+      solution: 'Inserted the badge embed just above </body> so it renders at the bottom of every page.',
+      file_to_edit: 'layout/theme.liquid',
+      // Rollback basis, same shape executeShopifyDirectRollback consumes.
+      applied_write: {
+        themeId,
+        files: [{ filename: 'layout/theme.liquid', op: 'modified', priorContent: read.content, checksumMd5: read.checksumMd5 }],
+      },
+    },
+  })
+  await sendBadgeTelegram(sub.telegram_chat_id,
+    `🏅 <b>Win badge installed</b>\n\nWritten to <code>layout/theme.liquid</code> on your live theme. It renders at the bottom of every page and updates automatically with your latest measured win.`)
+  return res.status(200).json({ success: true, installed: true, path: 'layout/theme.liquid' })
 }
 
 // ─── C2: Approve / reject a run from the DASHBOARD (Supabase JWT) ─────────────

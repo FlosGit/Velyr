@@ -1998,7 +1998,7 @@ function StripeSubscriptionPanel({ navigate }) {
 }
 
 // ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
-function SettingsPage({subscription, user, onTogglePause, actionLoading, onDeleteRequest, onSaveSettings, navigate}) {
+function SettingsPage({subscription, user, onTogglePause, actionLoading, onDeleteRequest, onSaveSettings, navigate, onInstallBadge, badgeInstalled}) {
   const [isPublic, setIsPublic]   = useState(subscription?.is_public || false)
   const [slug, setSlug]           = useState(subscription?.public_slug || '')
   const [competitors, setCompetitors] = useState(() => {
@@ -2024,6 +2024,29 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
   // Danger-zone cancel (Kündigungsbutton, BGB §312k) — routes to the Stripe
   // Billing Portal where cancellation is confirmed and a receipt issued.
   const [cancelLoading, setCancelLoading] = useState(false)
+  // Agent badge install: idle → confirm → busy → done. `done` sticks for the
+  // session; on reload the runs-derived `badgeInstalled` prop takes over.
+  const [badgePhase, setBadgePhase] = useState('idle')
+  const [badgeMsg, setBadgeMsg]     = useState(null)
+
+  async function installBadge() {
+    setBadgePhase('busy'); setBadgeMsg(null)
+    try {
+      const data = await onInstallBadge()
+      if (data?.installed) {
+        setBadgePhase('done')
+        setBadgeMsg(data.pr_url ? `Merged as PR #${data.pr_url.split('/').pop()} — your deploy pipeline is shipping it now.` : 'Written to your live theme — it renders at the bottom of every page.')
+      } else if (data?.already_installed) {
+        setBadgePhase('done'); setBadgeMsg('The badge is already on your site.')
+      } else if (data?.needs_approval) {
+        setBadgePhase('done'); setBadgeMsg('Prepared, but automatic merge was blocked (branch protection?). Approve it like a normal fix from the Runs tab.')
+      } else {
+        setBadgePhase('idle'); setBadgeMsg(data?.error || 'Install failed — nothing was changed. You can paste the embed code manually.')
+      }
+    } catch {
+      setBadgePhase('idle'); setBadgeMsg('Install failed — nothing was changed. You can paste the embed code manually.')
+    }
+  }
 
   const isPaused    = subscription?.status==='paused'
   const slugValid   = !slug || /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/.test(slug)
@@ -2132,7 +2155,37 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
             <img src={`/api/agent/run?action=win_badge&slug=${subscription.public_slug}`} alt="Velyr win badge preview" width="320" height="64" style={{display:'block',marginBottom:8}}/>
             <input readOnly onFocus={e=>e.target.select()} value={`<a href="https://velyr.io/agent/${subscription.public_slug}"><img src="https://velyr.io/api/agent/run?action=win_badge&slug=${subscription.public_slug}" alt="Optimized weekly by Velyr" width="320" height="64"></a>`}
               style={{...monoInput,width:'100%',fontSize:11,color:C.textMuted}}/>
-            <p style={{fontSize:11,color:C.label,marginTop:6}}>Paste this into your site's footer — it updates automatically with your latest measured win. A larger share card lives at <span style={{fontFamily:FONT.mono}}>?action=win_card</span>.</p>
+            <p style={{fontSize:11,color:C.label,marginTop:6}}>Paste this into your site's footer — it updates automatically with your latest measured win.</p>
+            {/* Agent install: one click ships the badge into the footer (merged PR on
+                GitHub, direct theme write on Shopify). Costs no run — separate action,
+                never touches the daily manual-run allowance. */}
+            <div style={{display:'flex',alignItems:'center',gap:10,marginTop:10,flexWrap:'wrap'}}>
+              {(badgeInstalled || badgePhase==='done') ? (
+                <span style={{fontSize:12,color:C.greenText,fontWeight:500}}>✓ Installed by the agent</span>
+              ) : badgePhase==='busy' ? (
+                <span style={{fontSize:12,color:C.textMuted}}>Installing — the agent is shipping the badge to your site…</span>
+              ) : badgePhase==='confirm' ? (
+                <>
+                  <span style={{fontSize:12,color:C.text}}>This ships straight to your live site.</span>
+                  <button className="btn btn-primary v-press" onClick={installBadge} style={{fontSize:12,fontWeight:500,borderRadius:8,padding:'8px 14px'}}>Yes, install it</button>
+                  <button className="btn btn-ghost v-press" onClick={()=>setBadgePhase('idle')} style={{fontSize:12,borderRadius:8,padding:'8px 14px'}}>Cancel</button>
+                </>
+              ) : (
+                <button className="btn btn-ghost v-press" onClick={()=>{setBadgeMsg(null); setBadgePhase('confirm')}} style={{fontSize:12,fontWeight:500,borderRadius:8,padding:'8px 14px'}}>
+                  Let the agent install it →
+                </button>
+              )}
+            </div>
+            {badgeMsg && <p style={{fontSize:11,color:badgePhase==='done'?C.greenText:C.redText,marginTop:6}}>{badgeMsg}</p>}
+          </div>
+        )}
+        {publicUrl && isPublic && (
+          <div className="reveal-in" style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${C.borderSoft}`}}>
+            <p style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:6}}>Share card</p>
+            <img src={`/api/agent/run?action=win_card&slug=${subscription.public_slug}`} alt="Velyr share card preview" width="300" height="158" style={{display:'block',marginBottom:8,maxWidth:'100%'}}/>
+            <input readOnly onFocus={e=>e.target.select()} value={`https://velyr.io/api/agent/run?action=win_card&slug=${subscription.public_slug}`}
+              style={{...monoInput,width:'100%',fontSize:11,color:C.textMuted}}/>
+            <p style={{fontSize:11,color:C.label,marginTop:6}}>The bigger before/after card (600×315) — link it in posts or download the image to share your latest measured win.</p>
           </div>
         )}
         {!isPublic && subscription?.is_public && (
@@ -2879,6 +2932,19 @@ export default function AgentDashboard({ navigate }) {
     setSnippetDeclined(false)
   }
 
+  // Agent-installs the win badge (synchronous — the API ships it before responding).
+  // On success refetch so the new badge_install run row appears in the timeline.
+  async function handleInstallBadge() {
+    const token = await getToken()
+    const res = await fetch('/api/agent/run?action=install_badge', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    })
+    const data = await res.json().catch(() => ({}))
+    if (data?.installed || data?.already_installed || data?.needs_approval) fetchData()
+    return data
+  }
+
   async function handleDeleteAccount() {
     setActionLoading(true)
     setDeleteError(null)
@@ -2902,6 +2968,7 @@ export default function AgentDashboard({ navigate }) {
   const pending   = runs.filter(isAwaitingApproval).length
   const isRunning = hasLiveRun || runStarting
   const isPaused  = subscription?.status==='paused'
+  const badgeInstalled = runs.some(r => r.run_type==='badge_install' && ['deployed','shopify_deployed'].includes(r.status))
 
   if(authLoading) return (
     <>
@@ -3198,6 +3265,8 @@ export default function AgentDashboard({ navigate }) {
                       onTogglePause={handleTogglePause} actionLoading={actionLoading}
                       onDeleteRequest={()=>{ setDeleteError(null); setShowDeleteConfirm(true) }}
                       onSaveSettings={handleSaveSettings}
+                      onInstallBadge={handleInstallBadge}
+                      badgeInstalled={badgeInstalled}
                       navigate={navigate}
                     />
                   )}

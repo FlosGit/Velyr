@@ -1112,6 +1112,16 @@ function SettingsTab({ paused, onTogglePause, onToast }) {
   useEffect(()=>()=>clearTimeout(goalT.current),[])
   function saveGoal() { setGoalSaved(true); clearTimeout(goalT.current); goalT.current=setTimeout(()=>setGoalSaved(false),2500) }
 
+  // Simulated agent badge install: idle → confirm → busy → done (mirrors the real
+  // dashboard's one-click install; here it just plays the states).
+  const [badgePhase, setBadgePhase] = useState('idle')
+  const badgeT = useRef(null)
+  useEffect(()=>()=>clearTimeout(badgeT.current),[])
+  function simInstallBadge() {
+    setBadgePhase('busy')
+    badgeT.current = setTimeout(()=>setBadgePhase('done'), 1400)
+  }
+
   const monoInput = { fontFamily:F.mono, fontSize:10.5 }
 
   return (
@@ -1170,7 +1180,45 @@ function SettingsTab({ paused, onTogglePause, onToast }) {
               <input readOnly onFocus={e=>e.target.select()}
                 value={`<a href="https://velyr.io/agent/${slug}"><img src="https://velyr.io/api/agent/run?action=win_badge&slug=${slug}" alt="Optimized weekly by Velyr" width="320" height="64"></a>`}
                 className="dp-input" style={{...monoInput,width:'100%',fontSize:9.5,color:T.textMuted}}/>
-              <p style={{fontSize:9,color:T.textLight,marginTop:6,lineHeight:1.5}}>Paste this into your site's footer — it updates automatically with your latest measured win. A larger share card lives at <span style={{fontFamily:F.mono}}>?action=win_card</span>.</p>
+              <p style={{fontSize:9,color:T.textLight,marginTop:6,lineHeight:1.5}}>Paste this into your site's footer — it updates automatically with your latest measured win.</p>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginTop:8,flexWrap:'wrap'}}>
+                {badgePhase==='done' ? (
+                  <span style={{fontSize:10.5,color:T.greenText,fontWeight:500}}>✓ Installed by the agent</span>
+                ) : badgePhase==='busy' ? (
+                  <span style={{fontSize:10.5,color:T.textMuted,display:'inline-flex',alignItems:'center',gap:7}}>
+                    <span className="dp-spinner" style={{color:T.accent,width:10,height:10}}/> Installing — the agent is shipping the badge…
+                  </span>
+                ) : badgePhase==='confirm' ? (
+                  <>
+                    <span style={{fontSize:10,color:T.text}}>This ships straight to your live site.</span>
+                    <button className="dp-btn dp-btn-primary" onClick={simInstallBadge} style={{fontSize:10,fontWeight:500,borderRadius:7,padding:'6px 12px'}}>Yes, install it</button>
+                    <button className="dp-btn dp-btn-ghost" onClick={()=>setBadgePhase('idle')} style={{fontSize:10,borderRadius:7,padding:'6px 12px'}}>Cancel</button>
+                  </>
+                ) : (
+                  <button className="dp-btn dp-btn-ghost" onClick={()=>setBadgePhase('confirm')} style={{fontSize:10,fontWeight:500,borderRadius:7,padding:'6px 12px'}}>
+                    Let the agent install it →
+                  </button>
+                )}
+              </div>
+            </div>
+            <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${T.borderSoft}`}}>
+              <p style={{fontSize:10.5,fontWeight:500,color:T.text,marginBottom:6}}>Share card</p>
+              <svg width="300" height="158" viewBox="0 0 600 315" role="img" aria-label="taskloop.app: bounce rate 43% before, 41% after, −2pp" style={{display:'block',marginBottom:8,maxWidth:'100%'}}>
+                <rect x="0.5" y="0.5" width="599" height="314" rx="16" fill="#f7f4ef" stroke="#e5e0d5"/>
+                <text x="36" y="44" fontFamily={F.sans} fontSize="14" fontWeight="600" fill="#6b6460">taskloop.app</text>
+                <text x="564" y="44" textAnchor="end" fontFamily={F.sans} fontSize="14" fontWeight="700" fill="#2a5c45">Velyr</text>
+                <text x="36" y="78" fontFamily={F.sans} fontSize="14" fill="#1c1917" fillOpacity="0.85">Signup form asks for 8 fields including optional ones</text>
+                <text x="36" y="128" fontFamily={F.sans} fontSize="12" fontWeight="600" letterSpacing="1.2" fill="#6b6460">BOUNCE BEFORE</text>
+                <text x="36" y="182" fontFamily={F.sans} fontSize="46" fontWeight="800" fill="#1c1917">43%</text>
+                <path d="M232 164 h56 m0 0 l-9 -8 m9 8 l-9 8" stroke="#6b6460" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                <text x="330" y="128" fontFamily={F.sans} fontSize="12" fontWeight="600" letterSpacing="1.2" fill="#6b6460">BOUNCE AFTER</text>
+                <text x="330" y="182" fontFamily={F.sans} fontSize="46" fontWeight="800" fill="#1c1917">41%</text>
+                <rect x="36" y="212" width="150" height="36" rx="18" fill="#2a5c45"/>
+                <text x="111" y="236" textAnchor="middle" fontFamily={F.sans} fontSize="16" fontWeight="700" fill="#f7f4ef">−2pp bounce</text>
+                <text x="36" y="286" fontFamily={F.sans} fontSize="12" fill="#6b6460">Measured deploy±2d, site-wide · correlation, not attribution</text>
+                <text x="564" y="286" textAnchor="end" fontFamily={F.sans} fontSize="12" fill="#6b6460">velyr.io</text>
+              </svg>
+              <p style={{fontSize:9,color:T.textLight,lineHeight:1.5}}>The bigger before/after card (600×315) — link it in posts or share the image directly.</p>
             </div>
           </>
         )}

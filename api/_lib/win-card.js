@@ -82,8 +82,8 @@ export function buildWinCardSvg({ siteHost, problem, before, after, deltaPp, sco
   <path d="M232 164 h56 m0 0 l-9 -8 m9 8 l-9 8" stroke="${MUTED}" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
   <text x="330" y="128" font-family="${FONT}" font-size="12" font-weight="600" letter-spacing="1.2" fill="${MUTED}">BOUNCE AFTER</text>
   <text x="330" y="182" font-family="${FONT}" font-size="46" font-weight="800" fill="${INK}">${escapeXml(fmtPct(after))}</text>
-  ${delta ? `<rect x="36" y="212" width="${44 + delta.length * 11}" height="36" rx="18" fill="${GREEN}"/>
-  <text x="${36 + (44 + delta.length * 11) / 2}" y="236" text-anchor="middle" font-family="${FONT}" font-size="16" font-weight="700" fill="${CREAM}">${escapeXml(delta)} bounce</text>` : ''}
+  ${delta ? `<rect x="36" y="212" width="${44 + (delta.length + 7) * 11}" height="36" rx="18" fill="${GREEN}"/>
+  <text x="${36 + (44 + (delta.length + 7) * 11) / 2}" y="236" text-anchor="middle" font-family="${FONT}" font-size="16" font-weight="700" fill="${CREAM}">${escapeXml(delta)} bounce</text>` : ''}
   <text x="36" y="286" font-family="${FONT}" font-size="12" fill="${MUTED}">Measured deploy±2d, ${escapeXml(scopeLabel)}${dateLabel ? ` · ${escapeXml(dateLabel)}` : ''} · correlation, not attribution</text>
   <text x="564" y="286" text-anchor="end" font-family="${FONT}" font-size="12" fill="${MUTED}">velyr.io</text>
 </svg>`
