@@ -112,22 +112,28 @@ const PENDING_RUN = {
   pr_url: 'https://github.com/taskloop/web/pull/251',
   created_at: new Date(Date.now() - 2 * HOUR).toISOString(),
   analysis_result: {
+    problem_title: 'Hero CTA is buried under secondary links',
     problem: 'Hero buries the primary CTA under two secondary links',
     data_insight: 'Scroll-depth data shows 62% of mobile visitors never reach the current CTA position; heatmaps show the top link cluster splits attention three ways.',
     solution: 'Move the "Start free trial" button directly under the headline and demote the two secondary links to one text link below it.',
     expected_improvement: '+0.4pp CVR',
     file_to_edit: 'src/components/Hero/Hero.tsx',
     confidence_score: 84,
+    backlog: [
+      { page_path: '/pricing', problem: 'No plan comparison table — visitors skim the page in under 25s.', expected_impact: '+0.2pp CVR' },
+      { page_path: '/onboarding', problem: 'Step 3 has no confirmation state, so unsure users re-submit.', expected_impact: '+0.15pp activation' },
+      { page_path: '/docs', problem: "Search results have no result count or empty state.", expected_impact: 'Fewer support tickets' },
+    ],
   },
 }
 
 const DNA_ENTRIES = [
-  { id:'dna-1', outcome:'success',  fix_type:'form_length',       notes:'Short signup forms win on this site — cutting to two fields lifted signup completion measurably.', created_at: daysAgo(4) },
-  { id:'dna-2', outcome:'success',  fix_type:'image_performance', notes:'Compressing hero media pays off — mobile bounce fell 4pp after the AVIF swap.', created_at: daysAgo(25) },
-  { id:'dna-3', outcome:'success',  fix_type:'social_proof',      notes:'Trust signals near the feature grid reduce first-visit bounce for cold traffic.', created_at: daysAgo(32) },
-  { id:'dna-4', outcome:'success',  fix_type:'cta_placement',     notes:'Above-the-fold pricing CTA works for mobile visitors — keep primary actions high.', created_at: daysAgo(67) },
-  { id:'dna-5', outcome:'rollback', fix_type:'cta_copy',          notes:'Over-specific hero CTA copy ("Start automating in 2 minutes") raised bounce 4pp — avoid time promises in CTAs.', created_at: daysAgo(39) },
-  { id:'dna-6', outcome:'pending',  fix_type:'onboarding_progress', notes:'Progress indicator on onboarding step 2 — deployed, awaiting the 7-day verdict.', created_at: daysAgo(3) },
+  { id:'dna-1', outcome:'measured_win', fix_type:'form_length',       notes:'Short signup forms win on this site — cutting to two fields lifted signup completion measurably.', created_at: daysAgo(4) },
+  { id:'dna-2', outcome:'measured_win', fix_type:'image_performance', notes:'Compressing hero media pays off — mobile bounce fell 4pp after the AVIF swap.', created_at: daysAgo(25) },
+  { id:'dna-3', outcome:'survived',     fix_type:'social_proof',      notes:'Trust signals near the feature grid reduce first-visit bounce for cold traffic.', created_at: daysAgo(32) },
+  { id:'dna-4', outcome:'survived',     fix_type:'cta_placement',     notes:'Above-the-fold pricing CTA works for mobile visitors — keep primary actions high.', created_at: daysAgo(67) },
+  { id:'dna-5', outcome:'rollback',     fix_type:'cta_copy',          notes:'Over-specific hero CTA copy ("Start automating in 2 minutes") raised bounce 4pp — avoid time promises in CTAs.', created_at: daysAgo(39) },
+  { id:'dna-6', outcome:'pending',      fix_type:'onboarding_progress', notes:'Progress indicator on onboarding step 2 — deployed, awaiting the 7-day verdict.', created_at: daysAgo(3) },
 ]
 
 // ─── Helpers (copied from AgentDashboard.jsx) ─────────────────────────────────
@@ -146,6 +152,18 @@ function nextMonday9am() {
 }
 const isLive = r => r.status==='deployed'
 
+// Mirrors runTitle() in AgentDashboard.jsx: a short AI headline first, else a
+// word-capped fallback — never mid-sentence (file names/analytics text have dots).
+function runTitle(a) {
+  if (!a) return 'Analysis pending…'
+  if (a.problem_title) return a.problem_title
+  const text = a.problem || 'Analysis pending…'
+  if (text.length <= 72) return text
+  const cut = text.slice(0, 72)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut) + '…'
+}
+
 // ─── Scoped CSS ───────────────────────────────────────────────────────────────
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap');
@@ -155,9 +173,11 @@ const CSS = `
   @keyframes dpToastIn { from { opacity:0; transform:translate(-50%,8px); } to { opacity:1; transform:translate(-50%,0); } }
   @keyframes dpPopIn   { from { opacity:0; transform:scale(.97); } to { opacity:1; transform:scale(1); } }
   @keyframes dpPanelIn { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:none; } }
+  @keyframes dpSpin    { to { transform:rotate(360deg); } }
   .dp-tabpane { animation: dpTabIn .3s cubic-bezier(.4,0,.2,1); }
   .dp-pulse   { animation: dpPulse 2.4s ease-in-out infinite; }
   .dp-pop-in  { animation: dpPopIn .28s cubic-bezier(.22,.61,.36,1) both; }
+  .dp-spinner { display:inline-block; width:12px; height:12px; border-radius:50%; border:1.5px solid currentColor; border-top-color:transparent; animation: dpSpin .7s linear infinite; flex-shrink:0; }
 
   .dp-navitem { cursor:pointer; transition:background .18s ease, color .18s ease; border:none; background:none; width:100%; text-align:left; font-family:${F.sans}; }
   .dp-navitem:hover { background:rgba(255,255,255,.07); }
@@ -363,8 +383,8 @@ function PendingCard({ run, onOpen, onToast }) {
 }
 
 // ─── Overview: status hero ────────────────────────────────────────────────────
-function StatusHero({ paused, simStep, simMsg, onRunNow, onTogglePause, lastRun, onSelectRun }) {
-  const running = simStep >= 0
+function StatusHero({ paused, simStep, simStarting, simMsg, onRunNow, onTogglePause, lastRun, onSelectRun }) {
+  const running = simStep >= 0 || simStarting
 
   // Live countdown to Monday 09:00 (30s tick keeps it honest without churn).
   const [, setTick] = useState(0)
@@ -380,6 +400,9 @@ function StatusHero({ paused, simStep, simMsg, onRunNow, onTogglePause, lastRun,
   if (paused) {
     heroLabel='AGENT PAUSED'; heroDot=T.gray
     heroBig='On hold'; heroNote='No runs scheduled — resume any time.'; heroProgress=0
+  } else if (simStarting) {
+    heroLabel='AGENT RUNNING'; heroDot=T.yellow
+    heroBig='Starting run…'; heroNote='Dispatching your agent — the first step begins in a moment.'; heroProgress=0
   } else if (running) {
     heroLabel='AGENT RUNNING'; heroDot=T.yellow
     heroBig=`Step ${simStep+1} of ${AGENT_STEPS.length}`
@@ -397,7 +420,10 @@ function StatusHero({ paused, simStep, simMsg, onRunNow, onTogglePause, lastRun,
           <span className="dp-pulse" style={{width:7,height:7,borderRadius:'50%',background:heroDot,display:'inline-block',flexShrink:0}}/>
           <Label style={{marginBottom:0}}>{heroLabel}</Label>
         </div>
-        <p style={{fontFamily:F.serif,fontSize:'clamp(24px,3vw,32px)',lineHeight:1,fontWeight:500,color:T.ink,minHeight:32}}>{heroBig}</p>
+        <p style={{fontFamily:F.serif,fontSize:'clamp(24px,3vw,32px)',lineHeight:1,fontWeight:500,color:T.ink,minHeight:32,display:'flex',alignItems:'center',gap:10}}>
+          {heroBig}
+          {running && <span className="dp-spinner" style={{color:T.accent}}/>}
+        </p>
         <p style={{fontSize:10.5,color:T.textMuted,marginTop:8,minHeight:16}}>{heroNote}</p>
         <div style={{height:4,background:'#EDEBE0',borderRadius:2,marginTop:12,overflow:'hidden'}}>
           <div style={{height:'100%',width:`${heroProgress}%`,background:T.accent,borderRadius:2,transition:'width .9s ease'}}/>
@@ -445,7 +471,7 @@ function KpiRow({ allRuns, booted, onGoRuns }) {
   const thisWeek = runs.filter(r=>new Date(r.created_at)>oneWeekAgo&&isLive(r)).length
   const firstRun = runs[runs.length-1]
   const sinceStr = new Date(firstRun.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'})
-  const pendingHint = pending[0]?.analysis_result?.problem
+  const pendingHint = pending[0] ? runTitle(pending[0].analysis_result) : null
 
   const kpis = [
     { label:'Fixes live',      num:deployed, format:n=>Math.round(n).toLocaleString(),
@@ -455,7 +481,7 @@ function KpiRow({ allRuns, booted, onGoRuns }) {
     { label:'Runs completed',  num:total, format:n=>Math.round(n).toLocaleString(),
       sub:`since ${sinceStr}`, subColor:T.label },
     { label:'Awaiting review', num:pending.length, format:n=>Math.round(n).toLocaleString(),
-      sub: pendingHint ? pendingHint.slice(0,40)+'…' : 'Nothing waiting on you', subColor:T.yellowText },
+      sub: pendingHint || 'Nothing waiting on you', subColor:T.yellowText },
   ]
 
   return (
@@ -492,7 +518,7 @@ function ActivityCard({ runs, onSelectRun, onGoRuns }) {
             <DotIcon status={run.status}/>
             <div style={{minWidth:0}}>
               <p style={{fontSize:11,fontWeight:500,lineHeight:1.35,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                {a.problem}
+                {runTitle(a)}
               </p>
               <div style={{display:'flex',alignItems:'center',gap:7,marginTop:3}}>
                 {a.file_to_edit && <FileChip>{a.file_to_edit.split('/').pop()}</FileChip>}
@@ -602,8 +628,38 @@ function DnaStrip({ learnings, onGoDna }) {
   )
 }
 
+// ─── Runs tab: "Next up" backlog ─────────────────────────────────────────────
+function NextUpCard({ backlog, pinnedPath, onTogglePin }) {
+  if (!backlog || !backlog.length) return null
+  return (
+    <Card style={{padding:'14px 18px',marginBottom:14}}>
+      <p style={{fontSize:12,fontWeight:600,color:T.text}}>Next up</p>
+      <p style={{fontSize:9.5,color:T.label,margin:'2px 0 4px'}}>What the agent would tackle next — one tap schedules it for the next run.</p>
+      {backlog.map((item,i)=>{
+        const isPinned = pinnedPath === item.page_path
+        return (
+          <div key={item.page_path} style={{
+            display:'grid',gridTemplateColumns:'1fr auto',gap:12,alignItems:'center',
+            padding:'10px 0',borderTop:i>0?`1px solid ${T.borderSoft}`:'none',
+          }}>
+            <div style={{minWidth:0}}>
+              <FileChip style={{marginBottom:5,display:'inline-block'}}>{item.page_path}</FileChip>
+              <p style={{fontSize:10.5,color:T.text,lineHeight:1.5}}>{item.problem}</p>
+              {item.expected_impact && <p style={{fontSize:9.5,color:T.accent,fontWeight:500,marginTop:2}}>{item.expected_impact}</p>}
+            </div>
+            <button className="dp-btn" onClick={()=>onTogglePin(item.page_path)} style={{
+              fontSize:10,fontWeight:500,borderRadius:7,padding:'6px 12px',whiteSpace:'nowrap',
+              background:isPinned?'#C9E3D2':T.bgChip,color:T.ink,transition:'background .25s ease',
+            }}>{isPinned?'Scheduled ✓':'Fix this next'}</button>
+          </div>
+        )
+      })}
+    </Card>
+  )
+}
+
 // ─── Runs tab ─────────────────────────────────────────────────────────────────
-function RunsTab({ allRuns, onSelectRun, onToast }) {
+function RunsTab({ allRuns, onSelectRun, onToast, backlog, pinnedPath, onTogglePin }) {
   const [filter, setFilter] = useState('all')
   const GROUPS = {
     deployed: ['deployed'], waiting_approval: ['waiting_approval'],
@@ -631,6 +687,7 @@ function RunsTab({ allRuns, onSelectRun, onToast }) {
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:6}}>
+      <NextUpCard backlog={backlog} pinnedPath={pinnedPath} onTogglePin={onTogglePin}/>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:12,flexWrap:'wrap'}}>
         <p style={{fontSize:10.5,color:T.textMuted}}>Every change the agent made or proposed — click a run for full details.</p>
         <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
@@ -666,7 +723,7 @@ function RunsTab({ allRuns, onSelectRun, onToast }) {
                   <DotIcon status={run.status}/>
                   <div style={{minWidth:0}}>
                     <p style={{fontSize:11,fontWeight:500,lineHeight:1.4,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                      {a.problem}
+                      {runTitle(a)}
                     </p>
                     <div style={{display:'flex',alignItems:'center',gap:7,marginTop:3,flexWrap:'wrap'}}>
                       {a.file_to_edit && <FileChip>{a.file_to_edit.split('/').pop()}</FileChip>}
@@ -749,10 +806,12 @@ function NetworkTab() {
 }
 
 // ─── Funnel tab ───────────────────────────────────────────────────────────────
-function FunnelTab({ pinned, onTogglePin }) {
+function FunnelTab({ pinnedPath, onTogglePin }) {
   const funnelPages = demoData.funnelPages
   const withTraffic = funnelPages.filter(p=>p.views_7d>0)
   const biggestOpp  = [...withTraffic].sort((a,b)=>b.drop_off_score-a.drop_off_score)[0]
+  const pinned = pinnedPath === biggestOpp.page_path
+  const pinnedElsewhere = pinnedPath && pinnedPath !== biggestOpp.page_path
   const maxViews    = Math.max(...funnelPages.map(p=>p.views_7d||0),1)
   const totalViews  = withTraffic.reduce((s,p)=>s+(p.views_7d||0),0)
   const barPages    = [...withTraffic].sort((a,b)=>b.views_7d-a.views_7d).slice(0,6)
@@ -809,9 +868,11 @@ function FunnelTab({ pinned, onTogglePin }) {
           <p style={{fontSize:9.5,color:T.sideFaint,marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,.12)'}}>
             {pinned
               ? 'Pinned — the agent focuses here on its next run, then the pin clears.'
-              : 'The agent prioritizes high-leverage pages first.'}
+              : pinnedElsewhere
+                ? `Currently pinned: ${pinnedPath} — scheduling this page replaces it.`
+                : 'The agent prioritizes high-leverage pages first.'}
           </p>
-          <button className="dp-btn" onClick={onTogglePin} style={{
+          <button className="dp-btn" onClick={()=>onTogglePin(biggestOpp.page_path)} style={{
             fontSize:10.5,fontWeight:500,borderRadius:8,padding:'8px 15px',marginTop:12,width:'100%',
             background:pinned?'#C9E3D2':T.bgChip,color:T.ink,transition:'background .25s ease',
           }}>
@@ -857,13 +918,14 @@ function FunnelTab({ pinned, onTogglePin }) {
 
 // ─── DNA tab ──────────────────────────────────────────────────────────────────
 function DnaTab({ verdicts, onVerdict }) {
-  const grouped = { success:[], rollback:[], pending:[] }
+  const grouped = { measured_win:[], survived:[], rollback:[], pending:[] }
   for (const d of DNA_ENTRIES) grouped[d.outcome].push(d)
 
   const GROUPS = [
-    { key:'success',  title:'What works for this site', sub:'Doubled down on in future runs',       mark:{sym:'✓', color:T.green,  label:'Success'} },
-    { key:'rollback', title:'Never do again',           sub:'Rolled back — the agent avoids these', mark:{sym:'✕', color:T.red,    label:'Rolled back'} },
-    { key:'pending',  title:'Pending',                  sub:'Deployed, awaiting the 7-day verdict', mark:{sym:'·', color:T.yellow, label:'Pending'} },
+    { key:'measured_win', title:'Measured wins',   sub:'Bounce measurably improved after deploy — doubled down on', mark:{sym:'✓', color:T.green,     label:'Measured win'} },
+    { key:'survived',     title:'Survived 7 days',  sub:'Still live, but no measured improvement — weak signal',     mark:{sym:'✓', color:T.textMuted, label:'Survived'} },
+    { key:'rollback',     title:'Never do again',   sub:'Rolled back — the agent avoids these',                     mark:{sym:'✕', color:T.red,       label:'Rolled back'} },
+    { key:'pending',      title:'Pending',          sub:'Deployed, awaiting the 7-day verdict',                     mark:{sym:'·', color:T.yellow,    label:'Pending'} },
   ]
 
   return (
@@ -925,21 +987,22 @@ function DnaTab({ verdicts, onVerdict }) {
       <Card style={{padding:'14px 18px'}}>
         <p style={{fontSize:12,fontWeight:600,color:T.text,marginBottom:6}}>Timeline</p>
         {[...DNA_ENTRIES].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map((d,i,arr)=>{
-          const s = d.outcome==='success' ? {color:T.greenText,bg:T.greenBg}
-                  : d.outcome==='rollback' ? {color:T.redText,bg:T.redBg}
-                  : {color:T.yellowText,bg:T.yellowBg}
+          const s = d.outcome==='measured_win' ? {color:T.greenText, bg:T.greenBg,  label:'measured win'}
+                  : d.outcome==='survived'     ? {color:T.grayText,  bg:T.grayBg,   label:'survived'}
+                  : d.outcome==='rollback'     ? {color:T.redText,   bg:T.redBg,    label:'rollback'}
+                  :                              {color:T.yellowText,bg:T.yellowBg, label:'pending'}
           return (
             <div key={d.id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 0',borderBottom:i<arr.length-1?`1px solid ${T.borderSoft}`:'none'}}>
               <span style={{fontSize:9,color:T.textLight,fontFamily:F.mono,minWidth:56}}>
                 {new Date(d.created_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}
               </span>
               <span style={{fontSize:10.5,color:T.text,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.fix_type.replace(/_/g,' ')}</span>
-              <span style={{fontSize:9,color:s.color,background:s.bg,borderRadius:20,padding:'2px 9px',fontWeight:500,textTransform:'capitalize'}}>{d.outcome}</span>
+              <span style={{fontSize:9,color:s.color,background:s.bg,borderRadius:20,padding:'2px 9px',fontWeight:500}}>{s.label}</span>
             </div>
           )
         })}
       </Card>
-      <p style={{fontSize:9.5,color:T.label,padding:'10px 4px 0'}}>The agent reads this log on every run — successes are doubled down on, rollbacks avoided.</p>
+      <p style={{fontSize:9.5,color:T.label,padding:'10px 4px 0'}}>The agent reads this log on every run — measured wins are doubled down on, rollbacks avoided; "survived" alone is treated as weak evidence.</p>
     </div>
   )
 }
@@ -1041,6 +1104,14 @@ function SettingsTab({ paused, onTogglePause, onToast }) {
   useEffect(()=>()=>clearTimeout(savedT.current),[])
   function saveComp() { setCompSaved(true); clearTimeout(savedT.current); savedT.current=setTimeout(()=>setCompSaved(false),2500) }
 
+  const [goal, setGoal] = useState('Clicks on the "Start free trial" button')
+  const [goalType, setGoalType] = useState('click_text')
+  const [goalValue, setGoalValue] = useState('Start free trial')
+  const [goalSaved, setGoalSaved] = useState(false)
+  const goalT = useRef(null)
+  useEffect(()=>()=>clearTimeout(goalT.current),[])
+  function saveGoal() { setGoalSaved(true); clearTimeout(goalT.current); goalT.current=setTimeout(()=>setGoalSaved(false),2500) }
+
   const monoInput = { fontFamily:F.mono, fontSize:10.5 }
 
   return (
@@ -1081,12 +1152,47 @@ function SettingsTab({ paused, onTogglePause, onToast }) {
           <Toggle on={isPublic} onClick={()=>setIsPublic(v=>!v)} label="Make my agent timeline public"/>
         </div>
         {isPublic && (
-          <div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,paddingTop:12,borderTop:`1px solid ${T.borderSoft}`,flexWrap:'wrap'}}>
-            <span style={{fontSize:10,color:T.label,fontFamily:F.mono}}>velyr.io/agent/</span>
-            <input className="dp-input" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,''))} style={{...monoInput,width:130}}/>
-            <button className="dp-link dp-btn" onClick={()=>onToast('Just a preview — your real timeline gets its own public page.')} style={{fontSize:10.5}}>View public timeline →</button>
-          </div>
+          <>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,paddingTop:12,borderTop:`1px solid ${T.borderSoft}`,flexWrap:'wrap'}}>
+              <span style={{fontSize:10,color:T.label,fontFamily:F.mono}}>velyr.io/agent/</span>
+              <input className="dp-input" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,''))} style={{...monoInput,width:130}}/>
+              <button className="dp-link dp-btn" onClick={()=>onToast('Just a preview — your real timeline gets its own public page.')} style={{fontSize:10.5}}>View public timeline →</button>
+            </div>
+            <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${T.borderSoft}`}}>
+              <p style={{fontSize:10.5,fontWeight:500,color:T.text,marginBottom:6}}>Win badge for your site</p>
+              <svg width="320" height="64" viewBox="0 0 320 64" role="img" aria-label="Optimized weekly by Velyr. Last measured win: −2pp bounce" style={{display:'block',marginBottom:8}}>
+                <rect x="0.5" y="0.5" width="319" height="63" rx="14" fill="#2a5c45" stroke="#234d3a"/>
+                <circle cx="30" cy="32" r="12" fill="#f7f4ef" fillOpacity="0.14"/>
+                <path d="M24 32 l4.5 4.5 L38 27" stroke="#f7f4ef" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                <text x="54" y="27" fontFamily={F.sans} fontSize="12" fill="#f7f4ef" fillOpacity="0.78">Optimized weekly by <tspan fontWeight="700" fillOpacity="1">Velyr</tspan></text>
+                <text x="54" y="46" fontFamily={F.sans} fontSize="13.5" fontWeight="600" fill="#f7f4ef">Last measured win: −2pp bounce</text>
+              </svg>
+              <input readOnly onFocus={e=>e.target.select()}
+                value={`<a href="https://velyr.io/agent/${slug}"><img src="https://velyr.io/api/agent/run?action=win_badge&slug=${slug}" alt="Optimized weekly by Velyr" width="320" height="64"></a>`}
+                className="dp-input" style={{...monoInput,width:'100%',fontSize:9.5,color:T.textMuted}}/>
+              <p style={{fontSize:9,color:T.textLight,marginTop:6,lineHeight:1.5}}>Paste this into your site's footer — it updates automatically with your latest measured win. A larger share card lives at <span style={{fontFamily:F.mono}}>?action=win_card</span>.</p>
+            </div>
+          </>
         )}
+      </Card>
+
+      <Card style={{padding:'14px 18px',marginBottom:10}}>
+        <p style={{fontSize:12,fontWeight:600,color:T.text}}>Conversion goal</p>
+        <p style={{fontSize:9.5,color:T.label,margin:'3px 0 10px'}}>What "success" means for your site — the agent optimizes toward this.</p>
+        <textarea className="dp-input" value={goal} onChange={e=>setGoal(e.target.value)}
+          placeholder='e.g. clicks on the "Start free trial" button'
+          style={{width:'100%',minHeight:50,resize:'vertical',fontSize:10.5,lineHeight:1.5}}/>
+        <div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
+          <select className="dp-input" value={goalType} onChange={e=>setGoalType(e.target.value)} style={{fontSize:10.5}}>
+            <option value="click_text">Click on a button/link with text…</option>
+            <option value="pageview_path">Visit to the page…</option>
+          </select>
+          <input className="dp-input" value={goalValue} onChange={e=>setGoalValue(e.target.value)} style={{...monoInput,flex:1,minWidth:140}}/>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginTop:10}}>
+          <button className="dp-btn dp-btn-primary" onClick={saveGoal} style={{fontSize:10.5,fontWeight:500,borderRadius:7,padding:'7px 14px'}}>Save goal</button>
+          {goalSaved && <span style={{fontSize:9.5,color:T.green}}>✓ Saved</span>}
+        </div>
       </Card>
 
       <Card style={{padding:'14px 18px',marginBottom:10}}>
@@ -1153,9 +1259,17 @@ function RunDetail({ run, onClose, onToast }) {
           <Badge status={run.status}/>
           <span style={{fontSize:9.5,color:T.textLight}}>{new Date(run.created_at).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>
         </div>
-        {a.problem && (
-          <h3 style={{fontFamily:F.serif,fontWeight:500,fontSize:19,letterSpacing:'-.01em',marginBottom:14,color:T.ink,lineHeight:1.25}}>{a.problem}</h3>
-        )}
+        {(a.problem || a.problem_title) && (() => {
+          const hasSplitTitle = a.problem_title && a.problem && a.problem_title !== a.problem
+          return (
+            <>
+              <h3 style={{fontFamily:F.serif,fontWeight:500,fontSize:19,letterSpacing:'-.01em',marginBottom:hasSplitTitle?4:14,color:T.ink,lineHeight:1.25}}>{runTitle(a)}</h3>
+              {hasSplitTitle && (
+                <p style={{fontSize:10.5,color:T.textMuted,lineHeight:1.6,marginBottom:14}}>{a.problem}</p>
+              )}
+            </>
+          )
+        })()}
         <div style={{background:T.bgSoft,border:`1px solid ${T.border}`,borderRadius:9,padding:'11px 13px',marginBottom:11}}>
           <Label style={{marginBottom:9}}>What the agent did</Label>
           <div style={{display:'flex',flexWrap:'wrap',gap:'9px 9px'}}>
@@ -1180,6 +1294,17 @@ function RunDetail({ run, onClose, onToast }) {
           <div style={{background:T.chipBg,border:'1px solid #DDE7DA',borderRadius:8,padding:'9px 12px',marginBottom:6}}>
             <Label style={{color:T.chipText,marginBottom:4}}>File edited</Label>
             <p style={{fontSize:10,color:T.text,fontFamily:F.mono,wordBreak:'break-all'}}>{a.file_to_edit}</p>
+          </div>
+        )}
+        {a.backlog && a.backlog.length > 0 && (
+          <div style={{background:T.bgSoft,border:`1px solid ${T.border}`,borderRadius:8,padding:'9px 12px',marginBottom:6}}>
+            <Label style={{marginBottom:6}}>Next up — what the agent would tackle next</Label>
+            {a.backlog.map((item,i)=>(
+              <div key={item.page_path} style={{padding:'6px 0',borderTop:i>0?`1px solid ${T.borderSoft}`:'none'}}>
+                <span style={{fontFamily:F.mono,fontSize:9.5,color:T.chipText}}>{item.page_path}</span>
+                <p style={{fontSize:10,color:T.text,lineHeight:1.5,marginTop:2}}>{item.problem}</p>
+              </div>
+            ))}
           </div>
         )}
         {run.pr_url && (
@@ -1213,27 +1338,38 @@ export default function DashboardPreview({ booted = true }) {
   }
   useEffect(()=>()=>clearTimeout(noteT.current),[])
 
-  // Simulated "Run now": walks the real 11-step pipeline once, then settles.
+  // Simulated "Run now": a brief "Starting…" beat, then walks the real 11-step
+  // pipeline once, then settles — mirrors the real dashboard's runStarting +
+  // spinner loading state (useAnimatedRunStep) rather than jumping straight in.
   const [simStep, setSimStep] = useState(-1)
+  const [simStarting, setSimStarting] = useState(false)
   const [simMsg, setSimMsg] = useState(null)
   const simT = useRef(null)
+  const simStartT = useRef(null)
   function startSim() {
-    if (simStep >= 0 || paused) return
-    setSimMsg(null); setSimStep(0)
-    let i = 0
-    simT.current = setInterval(() => {
-      i += 1
-      if (i >= AGENT_STEPS.length) {
-        clearInterval(simT.current)
-        setSimStep(-1)
-        setSimMsg('Preview run complete — in the real dashboard a fix would now be waiting for your YES on Telegram.')
-      } else setSimStep(i)
-    }, 950)
+    if (simStep >= 0 || simStarting || paused) return
+    setSimMsg(null); setSimStarting(true)
+    simStartT.current = setTimeout(() => {
+      setSimStarting(false); setSimStep(0)
+      let i = 0
+      simT.current = setInterval(() => {
+        i += 1
+        if (i >= AGENT_STEPS.length) {
+          clearInterval(simT.current)
+          setSimStep(-1)
+          setSimMsg('Preview run complete — in the real dashboard a fix would now be waiting for your YES on Telegram.')
+        } else setSimStep(i)
+      }, 950)
+    }, 1100)
   }
-  useEffect(()=>()=>clearInterval(simT.current),[])
+  useEffect(()=>()=>{ clearInterval(simT.current); clearTimeout(simStartT.current) },[])
 
   // Interactive state shared across tabs (persists while switching).
-  const [pinnedFocus, setPinnedFocus] = useState(false)
+  // A single pinned page path — shared between the Funnel tab's "Fix in next
+  // run" and the Runs tab's "Next up" backlog, mirroring the real dashboard's
+  // one-shot focus_page_path (pinning one replaces whatever was pinned before).
+  const [pinnedPath, setPinnedPath] = useState(null)
+  const togglePin = (path) => setPinnedPath(p => p===path ? null : path)
   const [dnaVerdicts, setDnaVerdicts] = useState({})
   const [guard, setGuard] = useState({
     tone: 'Friendly and direct — no hype, no pressure tactics',
@@ -1244,7 +1380,7 @@ export default function DashboardPreview({ booted = true }) {
   const ruleCount = (guard.tone.trim()?1:0)+guard.forbidden.length+guard.protected.length+(guard.custom.trim()?1:0)
 
   const pendingCount = allRuns.filter(r=>r.status==='waiting_approval').length
-  const running = simStep >= 0
+  const running = simStep >= 0 || simStarting
 
   const goTab = (id) => { setTab(id); setSelectedRun(null) }
 
@@ -1382,7 +1518,7 @@ export default function DashboardPreview({ booted = true }) {
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
                 <PendingCard run={PENDING_RUN} onOpen={()=>setSelectedRun(PENDING_RUN)} onToast={showNote}/>
                 <StatusHero
-                  paused={paused} simStep={simStep} simMsg={simMsg}
+                  paused={paused} simStep={simStep} simStarting={simStarting} simMsg={simMsg}
                   onRunNow={startSim} onTogglePause={()=>setPaused(p=>!p)}
                   lastRun={lastCompleted} onSelectRun={setSelectedRun}
                 />
@@ -1398,9 +1534,9 @@ export default function DashboardPreview({ booted = true }) {
               </div>
             )}
 
-            {tab==='runs'&&<RunsTab allRuns={allRuns} onSelectRun={setSelectedRun} onToast={showNote}/>}
+            {tab==='runs'&&<RunsTab allRuns={allRuns} onSelectRun={setSelectedRun} onToast={showNote} backlog={PENDING_RUN.analysis_result.backlog} pinnedPath={pinnedPath} onTogglePin={togglePin}/>}
             {tab==='network'&&<NetworkTab/>}
-            {tab==='funnel'&&<FunnelTab pinned={pinnedFocus} onTogglePin={()=>setPinnedFocus(p=>!p)}/>}
+            {tab==='funnel'&&<FunnelTab pinnedPath={pinnedPath} onTogglePin={togglePin}/>}
             {tab==='dna'&&<DnaTab verdicts={dnaVerdicts} onVerdict={(id,v)=>setDnaVerdicts(d=>({...d,[id]:v}))}/>}
             {tab==='guardrails'&&<GuardrailsTab guard={guard} setGuard={setGuard}/>}
             {tab==='settings'&&<SettingsTab paused={paused} onTogglePause={()=>setPaused(p=>!p)} onToast={showNote}/>}
