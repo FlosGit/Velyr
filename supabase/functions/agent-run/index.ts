@@ -5424,6 +5424,9 @@ async function processConnection(conn: any) {
 // killed mid-flight (Supabase Edge timeout, deploy, OOM), the agent_runs row
 // stays in status='running' forever. Sweep anything older than the threshold
 // and mark it 'failed' before this run starts.
+// Cross-runtime twin: api/agent/run.js declares the same sweep (daily
+// enforce_subscriptions cron + trigger_run pre-check) — keep the criteria,
+// error message, and 60-min default threshold in sync with that declaration.
 async function cleanupStaleRuns() {
   const threshold = new Date(Date.now() - Number(Deno.env.get('STALE_RUN_THRESHOLD_MS') || String(60 * 60 * 1000))).toISOString()
   // Fail-open + bounded: this runs at the very top of handleFullRun, so a hung

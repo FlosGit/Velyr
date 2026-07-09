@@ -317,6 +317,35 @@ async function gcKeepNewestPerGroup(supabase, { table, timeCol, groupCols, label
   }
 }
 
+// Cross-runtime twin of cleanupStaleRuns in supabase/functions/agent-run/index.ts —
+// keep the criteria, error message, and 60-min default threshold in sync with that
+// declaration. A run whose Edge isolate was hard-killed (wall clock / CPU / OOM)
+// stays status='running' forever; the edge-side sweep only runs when the NEXT edge
+// run starts, so without a Vercel-side sweep the zombie row keeps the dashboard
+// spinning and 409s handleTriggerRun's in-flight guard until the Monday cron.
+// Swept here daily (enforce_subscriptions) and on demand (trigger_run). Only
+// 'running' is swept — waiting_approval and the shopify_* pending states are
+// legitimately long-lived. Best-effort: never throws, returns the swept count.
+async function cleanupStaleRuns() {
+  const threshold = new Date(Date.now() - Number(process.env.STALE_RUN_THRESHOLD_MS || String(60 * 60 * 1000))).toISOString()
+  const { data, error } = await supabase
+    .from('agent_runs')
+    .update({
+      status:        'failed',
+      error_message: 'Stuck in status=running past stale threshold — likely killed mid-flight',
+      completed_at:  new Date().toISOString(),
+    })
+    .eq('status', 'running')
+    .lt('created_at', threshold)
+    .select('id')
+  if (error) {
+    console.warn('[stale-cleanup] failed:', error.message)
+    return 0
+  }
+  if (data?.length) console.warn(`[stale-cleanup] marked ${data.length} stale runs as failed`)
+  return data?.length || 0
+}
+
 async function handleEnforceSubscriptions(res) {
   // One shared clock for every time-boxed pass below (backfill + visual check):
   // their deadlines are only honest against the WHOLE invocation's budget.
@@ -333,6 +362,12 @@ async function handleEnforceSubscriptions(res) {
     console.error('enforce-subscriptions error:', error)
     return res.status(500).json({ error: error.message })
   }
+
+  // Stale-run sweep — Vercel-side twin of the edge fn's cleanupStaleRuns, which
+  // only fires at the start of the next edge run. Daily here means a hard-killed
+  // isolate's zombie 'running' row heals within a day instead of next Monday.
+  // Best-effort (never throws) like every GC below.
+  await cleanupStaleRuns()
 
   // Stage 5.D: GC the Telegram webhook dedupe table. Telegram never replays an
   // update older than ~24h, so 7 days is a safe retention floor. Piggybacked
@@ -2128,6 +2163,12 @@ async function handleTriggerRun(req, res, user) {
   if (!['active', 'trialing'].includes(sub.subscription_status)) {
     return res.status(402).json({ error: 'Your subscription is not active.' })
   }
+
+  // Sweep zombie rows BEFORE the in-flight check: a hard-killed edge isolate
+  // leaves its run status='running' forever, which would 409 this guard until
+  // the next cron run sweeps it (incident 2026-07-09). A genuinely live run is
+  // younger than the stale threshold and still blocks below.
+  await cleanupStaleRuns()
 
   // In-flight guard: never start a second run while one is running or awaiting
   // approval. This is also what makes the post-onboarding auto-run safe — the
