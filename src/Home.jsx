@@ -514,7 +514,7 @@ function Hero({ navigate }) {
         </h1>
 
         <p style={{ fontFamily:'Jost, sans-serif', fontWeight:300, fontSize:'clamp(16px, 1.6vw, 18px)', color:C.textMuted, maxWidth:540, margin:'22px auto 0', lineHeight:1.6 }}>
-          Velyr finds your site's biggest conversion leak, writes the fix, and shows you a preview of your site with the change. One tap and it's live. Works with your GitHub repo or your Shopify store.
+          Every week Velyr finds your site's #1 conversion problem, writes the code fix, and sends it to you for one-tap approval. Nothing ships without your OK — and if a fix hurts your numbers, it gets rolled back.
         </p>
 
         <div className="hero-cta-row" style={{ display:'flex', gap:12, marginTop:34, flexWrap:'wrap', alignItems:'center', justifyContent:'center' }}>
