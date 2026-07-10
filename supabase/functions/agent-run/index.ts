@@ -3983,7 +3983,7 @@ async function readShopifyThemeFile(
   } catch (e: any) {
     return { ok: false, reason: 'request_failed', message: `theme file read threw: ${e?.message || String(e)}` }
   }
-  if (res.status === 401) return { ok: false, reason: 'unauthorized', message: 'Shopify returned 401 reading theme file' }
+  if (res.status === 401 || res.status === 403) return { ok: false, reason: 'unauthorized', message: `Shopify returned ${res.status} reading theme file` }
   const json: any = await res.json().catch(() => ({}))
   if (!res.ok || json?.errors || json?.data?.theme?.files == null) {
     return { ok: false, reason: 'graphql_error', message: `theme file read failed (HTTP ${res.status})` }

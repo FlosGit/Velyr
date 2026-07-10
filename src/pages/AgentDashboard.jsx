@@ -274,9 +274,17 @@ function runTitle(analysis) {
 }
 
 function nextMonday9am() {
-  const now=new Date(), day=now.getDay()
-  const daysUntil = day===1?(now.getHours()<9?0:7):(8-day)%7||7
-  const next=new Date(now); next.setDate(now.getDate()+daysUntil); next.setHours(9,0,0,0); return next
+  // The weekly run is `0 9 * * 1` on Vercel — 09:00 UTC, not local time. Compute
+  // the next occurrence in UTC so the countdown hits zero when the cron fires.
+  const now=new Date(), day=now.getUTCDay()
+  const daysUntil = day===1?(now.getUTCHours()<9?0:7):(8-day)%7||7
+  const next=new Date(now); next.setUTCDate(now.getUTCDate()+daysUntil); next.setUTCHours(9,0,0,0); return next
+}
+
+// Label twin of nextMonday9am: 09:00 UTC rendered in the viewer's local time,
+// so the displayed schedule matches the countdown target.
+function mondayRunTimeLabel() {
+  return nextMonday9am().toLocaleTimeString([], { hour:'numeric', minute:'2-digit' })
 }
 
 function useCountdown(target) {
@@ -668,7 +676,7 @@ function StatusHero({subscription, runs, onTogglePause, actionLoading, onTrigger
     heroProgress=4
   } else {
     heroLabel='AGENT IDLE · NEXT RUN IN'; heroDot=C.green
-    heroBig=countdown.str||'—'; heroNote='Every Monday · 9:00 am'; heroProgress=Math.round(weekProgress)
+    heroBig=countdown.str||'—'; heroNote=`Every Monday · ${mondayRunTimeLabel()}`; heroProgress=Math.round(weekProgress)
   }
 
   // Last-run summary column
@@ -711,7 +719,7 @@ function StatusHero({subscription, runs, onTogglePause, actionLoading, onTrigger
             }}>View run details →</button>
           </>
         ) : (
-          <p style={{fontSize:13,color:C.textMuted,lineHeight:1.55}}>No runs yet.<br/>Your first run kicks off Monday at 9:00 — or start one now.</p>
+          <p style={{fontSize:13,color:C.textMuted,lineHeight:1.55}}>No runs yet.<br/>Your first run starts automatically right after onboarding — or start one now.</p>
         )}
       </div>
 
@@ -1798,7 +1806,7 @@ function GuardrailsPage({subscriptionId}) {
   return (
     <div style={{maxWidth:760}}>
       <InfoBanner iconPath="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z">
-        Enforced on every run — the agent will never make a change that violates these rules.
+        Handed to the agent as hard rules on every run — every fix it proposes must follow them.
       </InfoBanner>
 
       <Card className="fade-up" style={{padding:'22px 26px',marginBottom:14}}>
@@ -2117,7 +2125,7 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
           <div>
             <p style={{fontSize:13.5,fontWeight:600,color:C.text}}>{isPaused?'Agent is paused':'Agent is active'}</p>
             <p style={{fontSize:11.5,color:C.label,marginTop:4}}>
-              {isPaused?'Resume to run again every Monday at 9:00 am.':'Runs every Monday at 9:00 am.'}
+              {isPaused?`Resume to run again every Monday at ${mondayRunTimeLabel()}.`:`Runs every Monday at ${mondayRunTimeLabel()}.`}
             </p>
           </div>
           <Toggle on={!isPaused} onClick={onTogglePause} disabled={actionLoading} label={isPaused?'Resume agent':'Pause agent'}/>
