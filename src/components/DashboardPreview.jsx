@@ -410,7 +410,7 @@ function StatusHero({ paused, simStep, simStarting, simMsg, onRunNow, onTogglePa
     heroProgress=Math.round(((simStep+1)/AGENT_STEPS.length)*100)
   } else {
     heroLabel='AGENT IDLE · NEXT RUN IN'; heroDot=T.green
-    heroBig=countdown; heroNote='Every Monday · 9:00 am'; heroProgress=Math.round(weekProgress)
+    heroBig=countdown; heroNote='Every Monday morning'; heroProgress=Math.round(weekProgress)
   }
 
   return (
@@ -1146,7 +1146,7 @@ function SettingsTab({ paused, onTogglePause, onToast }) {
           <div>
             <p style={{fontSize:12,fontWeight:600,color:T.text}}>{paused?'Agent is paused':'Agent is active'}</p>
             <p style={{fontSize:9.5,color:T.label,marginTop:3}}>
-              {paused?'Resume to run again every Monday at 9:00 am.':'Runs every Monday at 9:00 am.'}
+              {paused?'Resume to run again every Monday morning.':'Runs every Monday morning.'}
             </p>
           </div>
           <Toggle on={!paused} onClick={onTogglePause} label={paused?'Resume agent':'Pause agent'}/>

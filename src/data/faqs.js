@@ -13,7 +13,7 @@ export const FAQS = [
   },
   {
     q: 'Do I have to approve every change?',
-    a: 'Yes. Nothing ships without your explicit approval. You see the exact code change before deciding, and a Preview button shows your site with the change applied — on GitHub via your host\'s preview deploy, on Shopify on a safe throwaway copy of your theme that is deleted once you decide.'
+    a: 'Yes. Nothing ships without your explicit approval. You see the exact code change before deciding, and a Preview button shows your site with the change applied — on GitHub via your host\'s PR preview deploy (when your host builds one), on Shopify on a safe throwaway copy of your theme that is deleted once you decide.'
   },
   {
     q: 'What does it optimize for?',
@@ -33,19 +33,19 @@ export const FAQS = [
   },
   {
     q: 'What analytics does it need?',
-    a: 'Velyr reads your traffic, bounce rate, scroll depth, and click behavior from PostHog. During onboarding you add a one-line analytics snippet to your site — on Shopify the agent offers to add it to your theme for you, gated on your approval — so its fixes are grounded in how visitors actually behave, not just how the code is laid out.'
+    a: 'Velyr reads your traffic, bounce rate, scroll depth, and click behavior from PostHog. During onboarding you add a small analytics snippet to your site — on Shopify the agent offers to add it to your theme for you, gated on your approval — so its fixes are grounded in how visitors actually behave, not just how the code is laid out.'
   },
   {
     q: 'Can it track my competitors?',
-    a: 'Yes. You can track up to two competitor URLs; Velyr snapshots them weekly, factors their changes into its analysis, and pings you on Telegram the moment one of them changes their hero, pricing, or main call-to-action.'
+    a: 'Yes. You can track up to two competitor URLs; Velyr snapshots them weekly, factors their changes into its analysis, and pings you on Telegram when a weekly snapshot shows one of them changed their hero, pricing, or main call-to-action.'
   },
   {
     q: 'What happens if a change makes things worse?',
-    a: 'Velyr checks your bounce rate 48 hours after each shipped fix. If site-wide bounce jumps 15 percentage points or more, it proposes a rollback: a revert PR on GitHub, or restoring the previous theme files on Shopify. You approve it like any other change.'
+    a: 'Velyr compares your bounce rate in the 48 hours after each shipped fix with the 48 hours before — scoped to the pages the fix touched where possible, site-wide otherwise. If it rose 15 percentage points or more, it proposes a rollback: a revert PR on GitHub, or restoring the previous theme files on Shopify. You approve it like any other change.'
   },
   {
     q: 'What are Brand Guardrails?',
-    a: 'Your written rules about what the agent shouldn\'t change — specific copy, design elements, claims. Suggestions that violate them are rejected before reaching you.'
+    a: 'Your written rules about what the agent shouldn\'t change — specific copy, design elements, claims. They are handed to the agent as hard constraints on every run.'
   },
   {
     q: 'Does it analyze my whole funnel or just the homepage?',

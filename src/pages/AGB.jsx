@@ -246,7 +246,7 @@ export default function AGB({ navigate }) {
             <h2>§ 7 — Availability & Service Levels</h2>
             <ul>
               <li>Velyr aims for high availability but does not guarantee uninterrupted service. Scheduled maintenance will be communicated in advance where possible.</li>
-              <li>The Growth Agent is designed to run every Monday at 9:00 AM. Velyr does not guarantee that every run will complete successfully. If a run fails due to a technical error on our side, no charge is made for that week and the agent will retry the following Monday.</li>
+              <li>The Growth Agent is designed to run every Monday at 9:00 AM (UTC). Velyr does not guarantee that every run will complete successfully. If a run fails due to a technical error on our side, no charge is made for that week and the agent will retry the following Monday.</li>
               <li>Velyr reserves the right to modify, update, or discontinue features with reasonable notice. For material changes to paid services, at least 30 days' notice will be given.</li>
             </ul>
           </div>

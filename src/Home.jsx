@@ -901,8 +901,8 @@ function FAQ() {
     { q:'When does it start, and can I run it myself?', a:'The agent gets to work the moment you finish setup, no waiting for Monday. After that it runs every Monday morning, and you can trigger an extra run any time from the dashboard with the Run now button, up to once a day.' },
     { q:'Do I have to approve every change before it goes live?', a:'Yes, always. You get a Telegram message with the problem, the data behind it, and the exact change — and a Preview button that shows your site with the change applied before you decide. Approve or skip with one tap, in Telegram or from your dashboard. Nothing goes live without you.' },
     { q:'What does it optimize for?', a:'Your goal. Tell the agent the one action that matters most — start a trial, add to cart, book a call — and it picks fixes for that goal and measures every shipped change against it, alongside bounce rate. No goal set? It optimizes engagement and bounce.' },
-    { q:"What happens if a change makes things worse?", a:'The agent checks your bounce rate 48 hours after every deploy. If it rose 15 percentage points or more, it proposes a rollback on Telegram and reverts the change once you approve. On GitHub that is a revert PR, on Shopify the previous theme files are restored.' },
-    { q:'What are Brand Guardrails?', a:'Rules you set in your dashboard that the agent must follow on every run: tone of voice, things it can never do, elements it must never touch. Suggestions that violate them are rejected before they reach you.' },
+    { q:"What happens if a change makes things worse?", a:'The agent compares your bounce rate in the 48 hours after every deploy with the 48 hours before. If it rose 15 percentage points or more, it proposes a rollback on Telegram and reverts the change once you approve. On GitHub that is a revert PR, on Shopify the previous theme files are restored.' },
+    { q:'What are Brand Guardrails?', a:'Rules you set in your dashboard that the agent must follow on every run: tone of voice, things it can never do, elements it must never touch. They are handed to the agent as hard constraints in every single analysis.' },
     { q:'What is Full Funnel analysis?', a:'The agent maps every page of your site, not just the homepage, and cross-references each one with your analytics, including scroll depth and clicks. It finds where visitors drop off and fixes the highest-leverage page first.' },
   ]
 
@@ -1009,7 +1009,7 @@ function WhySection() {
   const rows = [
     { old:'Hire a CRO agency at €2–5k/mo, or never get around to it.', neu:'€29/mo. One high-impact fix every week.' },
     { old:'Receive a slide deck of recommendations to build yourself.', neu:'Get the fix already written. You approve it, it ships.' },
-    { old:'Ship the change and hope it helped.', neu:'Measured after 48 hours. If it made things worse, it gets rolled back.' },
+    { old:'Ship the change and hope it helped.', neu:'Measured over the first 48 hours. If it made things worse, the agent proposes the rollback.' },
   ]
   const cellOld = { display:'flex', justifyContent:'flex-end', alignItems:'center', gap:12, paddingRight:16, textAlign:'right' }
   const cellNeu = { display:'flex', justifyContent:'flex-start', alignItems:'center', gap:12, paddingLeft:16 }
@@ -1149,7 +1149,7 @@ function DifferentiatorsSection() {
   const [ref, visible] = useReveal()
   const rows = [
     { icon:'chat',   title:'Preview, then one tap', desc:'Every Monday you get the problem, the data and the fix in Telegram. Tap Preview to see your site with the change applied, then approve or skip with one tap — in Telegram or from your dashboard. Nothing goes live without you.' },
-    { icon:'scan',   title:'Competitor watch', desc:"Track up to 2 competitors. The agent watches their hero, CTA and pricing — and pings you the moment something changes, not just in a weekly digest." },
+    { icon:'scan',   title:'Competitor watch', desc:"Track up to 2 competitors. The agent snapshots their hero, CTA and pricing every week — and pings you on Telegram when something changed." },
     { icon:'report', title:'Monthly roast report', desc:'Once a month the agent tells you straight what improved, what still looks weak next to your competitors, and what you keep ignoring.' },
     { icon:'share',  title:'Public impact timeline', desc:'An optional public page at velyr.io/agent/your-slug that shows every run and its result, plus an embeddable badge with your latest measured win. Use it as social proof.' },
   ]

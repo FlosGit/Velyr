@@ -230,22 +230,22 @@
         <p style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#2a5c45">AI Growth Agent · for React, Next.js &amp; Vite</p>
         <h1 style="font-family:Cormorant Garant,Georgia,serif;font-weight:300;font-size:48px;line-height:1.1;letter-spacing:-.025em;margin:16px 0">Ship a conversion fix every week.</h1>
         <p style="font-size:18px;line-height:1.6;color:#6b6460;max-width:640px">
-          Velyr is an AI growth agent that finds your site's #1 conversion problem each week and writes the fix. On a GitHub repo it arrives as a Pull Request; on a Shopify store it goes straight to your live theme. You approve every change with one Telegram reply, and if the numbers drop, Velyr proposes a rollback within 48 hours.
+          Velyr is an AI growth agent that finds your site's #1 conversion problem each week and writes the fix. On a GitHub repo it arrives as a Pull Request; on a Shopify store it goes straight to your live theme. You approve every change with one Telegram reply, and if the numbers drop in the 48 hours after deploy, Velyr proposes a rollback.
         </p>
         <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">How it works</h2>
         <ol style="line-height:1.8;color:#6b6460;font-size:15px;padding-left:20px">
           <li>Every Monday the agent reads your PostHog analytics (traffic, bounce rate, scroll depth, and click behavior) and scans every page in your GitHub repo or Shopify theme.</li>
           <li>It identifies the single highest-impact conversion problem across your full funnel — not just the homepage — and writes the fix: a Pull Request with a preview link on GitHub, a staged theme change on Shopify.</li>
           <li>You get a Telegram message summarizing the problem, the data behind it, and the proposed fix — reply <strong>YES</strong> to ship or <strong>NO</strong> to skip. Nothing goes live without your approval.</li>
-          <li>48 hours after a change ships, Velyr re-checks site-wide bounce rate; if it spikes by 15 percentage points or more, it proposes a rollback for your approval.</li>
+          <li>Velyr compares bounce rate in the 48 hours after a change ships with the 48 hours before — scoped to the affected pages where possible; if it rose by 15 percentage points or more, it proposes a rollback for your approval.</li>
         </ol>
         <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">What you get</h2>
         <ul style="line-height:1.8;color:#6b6460;font-size:15px;padding-left:20px">
           <li>One weekly conversion fix as real, reviewable code — a GitHub Pull Request or a Shopify theme change, not a dashboard of suggestions you have to implement yourself.</li>
           <li>Full-funnel analysis that maps every page of your site and cross-references your analytics to find where visitors actually drop off.</li>
           <li>A one-tap Telegram approval flow: every change is gated behind your explicit YES, and you see the exact diff first.</li>
-          <li>An automatic 48-hour rollback safety net if a change hurts your numbers — a measured revert, not just a promise.</li>
-          <li>Competitor tracking and Brand Guardrails — written rules the agent must respect, so off-brand suggestions are rejected before they reach you.</li>
+          <li>A rollback safety net if a change hurts your numbers in its first 48 hours — a measured revert, not just a promise.</li>
+          <li>Competitor tracking and Brand Guardrails — written rules handed to the agent as hard constraints on every run.</li>
         </ul>
         <h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:24px;margin:40px 0 12px">How it's different</h2>
         <p style="font-size:15px;line-height:1.78;color:#6b6460;max-width:640px">
@@ -260,7 +260,7 @@
           <dt style="font-weight:500;color:#1c1917;margin-top:16px">Do I approve every change?</dt>
           <dd style="margin:4px 0 0">Yes. Nothing ships without your explicit YES reply over Telegram, and you review the exact change first.</dd>
           <dt style="font-weight:500;color:#1c1917;margin-top:16px">What if a fix makes things worse?</dt>
-          <dd style="margin:4px 0 0">Velyr checks site-wide bounce rate 48 hours after each shipped fix and proposes a rollback if it rose by 15 percentage points or more: a revert Pull Request on GitHub, or restoring the previous theme files on Shopify.</dd>
+          <dd style="margin:4px 0 0">Velyr compares bounce rate in the 48 hours after each shipped fix with the 48 hours before, and proposes a rollback if it rose by 15 percentage points or more: a revert Pull Request on GitHub, or restoring the previous theme files on Shopify.</dd>
           <dt style="font-weight:500;color:#1c1917;margin-top:16px">Is my code safe?</dt>
           <dd style="margin:4px 0 0">On GitHub, Velyr only proposes changes as Pull Requests on your own repo and never pushes to your default branch on its own. On Shopify, nothing is written to your theme before your YES, and every change can be rolled back.</dd>
         </dl>

@@ -1060,11 +1060,12 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate, connectionType,
         }}>
           <p style={{ fontSize: 14, color: C.text, fontWeight: 400, lineHeight: 1.6, marginBottom: 6 }}>
             {isShopifyDirect
-              ? 'Your store is connected. Each week Velyr finds the single highest-impact conversion fix and sends it to Telegram — approve it and we apply it straight to your theme. Your first fix lands on Monday’s run.'
+              ? `Your store is connected. Each week Velyr finds the single highest-impact conversion fix and sends it to Telegram — approve it and we apply it straight to your theme.${trialDenied ? '' : ' Your first run is already starting — you’ll hear from the agent in Telegram shortly.'}`
               : isTheme
-              ? 'This is your Shopify theme’s structure. Each conversion fix arrives as a pull request against your connected theme repo — approve it and Shopify syncs it to your connected theme: live right away if that’s your published theme, or you publish it when you’re ready if it’s a staging theme. Your first fix lands on Monday’s run.'
-              : <>This is your site’s structure. On your first run Monday, the agent maps how your
-            pages actually connect — and ships its first conversion fix.</>}
+              ? `This is your Shopify theme’s structure. Each conversion fix arrives as a pull request against your connected theme repo — approve it and Shopify syncs it to your connected theme: live right away if that’s your published theme, or you publish it when you’re ready if it’s a staging theme.${trialDenied ? '' : ' Your first run is already starting — you’ll hear from the agent in Telegram shortly.'}`
+              : <>This is your site’s structure. {trialDenied
+                ? 'On each run the agent maps how your pages actually connect — and ships one conversion fix a week.'
+                : 'Your first run is already starting: the agent maps how your pages actually connect — you’ll hear from it in Telegram shortly.'}</>}
           </p>
           {trialDenied && (
             <p style={{ fontSize: 12.5, color: '#8A6D1A', lineHeight: 1.6, marginBottom: 6 }}>
