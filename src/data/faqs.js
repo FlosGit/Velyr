@@ -53,11 +53,11 @@ export const FAQS = [
   },
   {
     q: 'Is there a free trial?',
-    a: 'Yes — 14 days, all features included, credit card required to start. Cancel anytime during the trial and you\'re not charged.'
+    a: 'Yes — 14 days, all features included, no credit card required. If you do nothing, the trial simply expires and you\'re never charged.'
   },
   {
     q: 'What happens when the trial ends?',
-    a: 'You\'re automatically charged €29 and your subscription continues monthly. If payment fails (expired card, etc.), the agent pauses and you have 7 days to update payment before the subscription cancels.'
+    a: 'The agent pauses — nothing is charged automatically, because no card is on file. To keep it running, you subscribe from your dashboard for €29/month, and you can cancel that anytime.'
   },
   {
     q: 'Which sites are supported?',

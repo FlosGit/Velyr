@@ -27,7 +27,7 @@ React, Next.js, or Vite sites in a GitHub repo that auto-deploys (Vercel, Netlif
 Wix, Squarespace, and Webflow. The agent edits source code, and these site builders don't expose that.
 
 ## Pricing
-€29/month. 14-day free trial with all features included; a credit card is required to start, and you can cancel anytime during the trial without being charged. Cancel anytime after that too.
+€29/month. 14-day free trial with all features included; no credit card is required to start, and nothing is charged unless you subscribe after the trial. Cancel anytime.
 
 ## Common questions
 - **Do I approve every change?** Yes. Nothing ships without your explicit approval — you see the exact change first, and a Preview button shows your site with the change applied before you decide.
