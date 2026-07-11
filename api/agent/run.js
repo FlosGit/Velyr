@@ -826,7 +826,10 @@ async function backfillAfterScreenshots(handlerStart) {
 // and the verdict lands ≤24h after the after-shot exists.
 
 // Same model the edge fn uses (OpenRouter slug — dot, not the native dash).
-const VISUAL_CHECK_MODEL = 'anthropic/claude-sonnet-4.6'
+// AGENT_LLM_MODEL is the env-var twin of LLM_MODEL in
+// supabase/functions/agent-run/index.ts — set it on BOTH surfaces (Vercel env +
+// Supabase secret) when switching models, and keep the fallback slugs in sync.
+const VISUAL_CHECK_MODEL = process.env.AGENT_LLM_MODEL || 'anthropic/claude-sonnet-4.6'
 // Cost-accounting twin of LLM_PRICING_EUR_PER_M in supabase/functions/agent-run/
 // index.ts (same env overrides, same defaults) — keep in sync.
 const VISUAL_LLM_EUR_PER_M = {

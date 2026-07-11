@@ -72,12 +72,20 @@ const LLM_CAPS = {
   MAX_PROMPT_BYTES: Number(Deno.env.get('LLM_MAX_PROMPT_BYTES') || String(500 * 1024)),
 } as const
 
-// Pricing for anthropic/claude-sonnet-4.6 via OpenRouter (the model string in
-// callLLMCapped + generateMonthlyRoast — keep in sync), in EUR per million
-// tokens. Verified against live GET /models 2026-07-05: $3/$15 per M, same as
-// 4.5. EUR numbers deliberately mirror the USD price 1:1, i.e. conservative-
-// high by the FX gap, so the spend counter trips a hair early. Re-tune via
-// env vars if OpenRouter pricing moves.
+// OpenRouter model slug for every LLM call in this function (Pass 1 ranker +
+// Pass 2 fix via callLLMCapped, find-repair, monthly roast). Overridable via
+// the AGENT_LLM_MODEL secret so a model upgrade is a config flip, not a
+// redeploy. OpenRouter slugs use a DOT (anthropic/claude-sonnet-4.6), never
+// the native dash ID — verify a new slug via live GET /models before setting.
+// Twin: VISUAL_CHECK_MODEL in api/agent/run.js reads the same env var.
+const LLM_MODEL = Deno.env.get('AGENT_LLM_MODEL') || 'anthropic/claude-sonnet-4.6'
+
+// Pricing for LLM_MODEL via OpenRouter, in EUR per million tokens. Verified
+// against live GET /models 2026-07-05 for claude-sonnet-4.6: $3/$15 per M,
+// same as 4.5. EUR numbers deliberately mirror the USD price 1:1, i.e.
+// conservative-high by the FX gap, so the spend counter trips a hair early.
+// Re-tune via env vars if OpenRouter pricing moves — or when AGENT_LLM_MODEL
+// points at a differently-priced model.
 const LLM_PRICING_EUR_PER_M = {
   INPUT:  Number(Deno.env.get('LLM_INPUT_EUR_PER_M')  || '3.0'),
   OUTPUT: Number(Deno.env.get('LLM_OUTPUT_EUR_PER_M') || '15.0'),
@@ -3084,6 +3092,55 @@ async function loadBusinessDNA(subscriptionId: string) {
 // every DNA outcome writer lives on the Vercel side: api/agent/run.js,
 // api/_lib/run-reconcile.js, api/webhooks/telegram.js.)
 
+// ─── GLOBAL WIN LIBRARY (cross-customer learning) ─────────────────────────────
+// Aggregates fix-type outcomes across ALL subscriptions into an anonymized
+// prior for Pass 1 + Pass 2. Counts per fix_type ONLY — never notes, paths,
+// URLs, or any other per-site text, so nothing tenant-identifiable ever
+// crosses customers. This is the compounding signal a fresh model (or a DIY
+// agent) starts without: every customer's measured outcome sharpens everyone
+// else's next run. Per-isolate memoized (at most one query per invocation —
+// the fan-out gives each subscription its own isolate anyway). Empty or
+// failed → null; the prompts simply omit the block. fix_type='other' rows are
+// excluded (the pre-taxonomy bucket carries no pattern information).
+let globalWinLibraryPromise: Promise<string | null> | null = null
+function getGlobalWinLibrary(): Promise<string | null> {
+  if (!globalWinLibraryPromise) globalWinLibraryPromise = (async () => {
+    try {
+      const sinceIso = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString()
+      const { data, error } = await supabase
+        .from('agent_business_dna')
+        .select('fix_type, outcome, user_verdict')
+        .neq('fix_type', 'other')
+        .gte('created_at', sinceIso)
+        .limit(3000)
+      if (error || !data?.length) return null
+      const agg: Record<string, { win: number; survived: number; negative: number }> = {}
+      for (const d of data as any[]) {
+        if (!d.fix_type || d.user_verdict === 'rejected') continue
+        const a = (agg[d.fix_type] ||= { win: 0, survived: 0, negative: 0 })
+        if (d.outcome === 'measured_win') a.win++
+        else if (d.outcome === 'survived' || d.outcome === 'success') a.survived++  // legacy 'success' reads as survived
+        else if (d.outcome === 'rollback') a.negative++
+        // 'pending' rows are unresolved — never counted into the prior.
+      }
+      const lines = Object.entries(agg)
+        .map(([type, a]) => ({ type, ...a, n: a.win + a.survived + a.negative }))
+        .filter(r => r.n >= 2)   // a single resolved outcome is an anecdote, not a prior
+        .sort((x, y) => y.win - x.win || y.n - x.n)
+        .slice(0, 10)
+        .map(r => `- ${r.type}: ${r.win} measured win${r.win === 1 ? '' : 's'} · ${r.survived} survived · ${r.negative} rejected/rolled back (n=${r.n})`)
+      if (lines.length === 0) return null
+      return `GLOBAL WIN LIBRARY — anonymized fix-type outcomes aggregated across ALL Velyr customer sites (a weak cross-site prior: prefer fix types with measured wins when candidates are otherwise comparable, but THIS site's own BUSINESS DNA and evidence always outrank it):
+${lines.join('\n')}
+Semantics: measured win = matched-window bounce improved ≥5pp after deploy · survived = still live after 7 days, no measured improvement (weak signal) · rejected/rolled back = the owner rejected it or metrics dropped.`
+    } catch (err: any) {
+      console.warn('[win-library] load failed:', err?.message)
+      return null
+    }
+  })()
+  return globalWinLibraryPromise
+}
+
 // ─── OWNER FOCUS PAGE ("Fix in next run", Funnel tab) ─────────────────────────
 // The owner pins one page via the dashboard (agent_subscriptions.focus_page_path,
 // written by api/agent/run.js handleUpdateSettings). The next run biases the
@@ -3148,7 +3205,7 @@ Write 4-5 paragraphs:
 Make it sound like a smart friend being honest. Direct second person. No headers, no bullet points, just paragraphs.`
 
     const requestBody = JSON.stringify({
-      model: 'anthropic/claude-sonnet-4.6',
+      model: LLM_MODEL,
       max_tokens: LLM_CAPS.MAX_TOKENS_ROAST,
       messages: [{ role: 'user', content: prompt }],
     })
@@ -3262,7 +3319,7 @@ async function postOpenRouterWithRetry(requestBody: string, callerLabel: string,
 
 async function callLLMCapped(subscriptionId: string, system: string, user: string, maxTokens: number, callerLabel: string, imageUrls: string[] = []): Promise<string> {
   const requestBody = JSON.stringify({
-    model: 'anthropic/claude-sonnet-4.6',
+    model: LLM_MODEL,
     max_tokens: maxTokens,
     messages: [
       { role: 'system', content: system },
@@ -3305,7 +3362,7 @@ async function callLLMCapped(subscriptionId: string, system: string, user: strin
 // funnel traffic, learned outcomes — not just a traffic one-liner. Kept
 // compact (~1-2 KB; the ranker prompt also carries the 30 KB graph summary).
 // funnelAnalysis is honestly null on the two Shopify theme paths.
-function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any): string {
+function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any, globalWinLibrary: string | null = null): string {
   const a = analytics?.last7Days
   const lines: string[] = []
   if (a) {
@@ -3339,6 +3396,10 @@ function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any)
   if (dnaWins)   lines.push(`Learned — what worked on this site before: ${dnaWins}`)
   if (dnaLosses) lines.push(`Learned — never do again on this site: ${dnaLosses}`)
   if (dnaOwner)  lines.push(`Owner context (answers the owner gave the agent): ${dnaOwner}`)
+  // Cross-site prior (bounded ≤10 lines by the loader) — the ranker sees the
+  // same outcome library Pass 2 gets, so both passes weight fix types that
+  // measurably won elsewhere. Site-specific lines above always outrank it.
+  if (globalWinLibrary) lines.push(globalWinLibrary)
   return lines.join('\n')
 }
 
@@ -3349,6 +3410,21 @@ function buildRankerSignalContext(analytics: any, funnelAnalysis: any, dna: any)
 // confidence + blind_spots + rollback_signal — or { skip, reason }. Fabricated
 // metrics / risk scores / A-B variants from the old prompt are intentionally
 // gone (see RA5 flags). Exported so RA7's receipt-builder can type against it.
+
+// Fixed fix-type taxonomy: Pass 2's change_type rides analysis_result into
+// agent_business_dna.fix_type (run-reconcile.js / shopify-approval.js copy it
+// verbatim at approval time). It keys BOTH the per-site DNA grouping and the
+// cross-customer GLOBAL WIN LIBRARY aggregation, so it must stay a closed
+// vocabulary — extend this list, never accept free-form values. RA5 dropped
+// the old schema's change_type entirely, which silently degraded every DNA
+// row since to fix_type='other'; this restores the dimension with a bounded
+// enum. 'other' is the sanitizer fallback.
+const CHANGE_TYPES = [
+  'cta_visibility', 'cta_copy', 'headline_value_prop', 'trust_signals',
+  'pricing_clarity', 'mobile_layout', 'form_friction', 'navigation',
+  'performance', 'content_clarity', 'visual_hierarchy', 'other',
+] as const
+
 export interface FixResult {
   skip?: boolean
   reason?: string
@@ -3358,6 +3434,9 @@ export interface FixResult {
   // model that omits it fall back to `problem` client-side.
   problem_title?: string
   problem?: string
+  // One of CHANGE_TYPES (sanitized post-parse; unknown → 'other'). Becomes the
+  // DNA row's fix_type — the learning key for this-site and cross-site outcomes.
+  change_type?: string
   hypothesis?: string
   ranked_higher_than?: string
   file_to_edit?: string
@@ -3408,6 +3487,10 @@ async function callAIForFix(
   recentFindFailures: string[] = [],
 ): Promise<FixResult> {
   const a = analytics?.last7Days
+
+  // Cross-customer prior (memoized per isolate — the ranker call already
+  // resolved it, so this await is effectively free).
+  const globalWinLibrary = await getGlobalWinLibrary()
 
   // ── Context blocks (order = RA5 spec) ──────────────────────────────────────
   const frameworkSummary = `Framework: ${mapResult.framework}${mapResult.isMonorepo ? ` (monorepo, workspace: ${mapResult.selectedWorkspacePath})` : ' (single project)'}. CSS approach: ${mapResult.cssApproach}. Entry points: ${mapResult.entryPoints.join(', ') || '—'}.`
@@ -3548,11 +3631,14 @@ ${sealed(`[12] ${rejectedContext || 'RECENTLY REJECTED: none'}`)}
 
 ${sealed(`[13] ${findFailuresContext || 'PREVIOUS LOCATE-FAILURES: none'}`)}
 
+${sealed(`[14] ${globalWinLibrary || 'GLOBAL WIN LIBRARY: no cross-site outcome data yet'}`)}
+
 ${guardrailsContext ? `${guardrailsContext}\n` : ''}${ownerGoalContext ? `${ownerGoalContext}\n` : ''}${ownerFocusContext ? `${ownerFocusContext}\n` : ''}${screenshotContext ? `${screenshotContext}\n` : ''}
 Identify the single highest-impact conversion problem visible in this material. Return JSON only (no markdown) with this EXACT schema:
 {
   "problem_title": "plain-language headline of the problem, MAX 60 characters (shown as the run's title in the owner's dashboard, e.g. 'Mobile hero CTA lacks price anchoring') — no trailing period",
   "problem": "1-2 sentence description of what's broken",
+  "change_type": "the closest category for THIS fix, exactly one of: cta_visibility | cta_copy | headline_value_prop | trust_signals | pricing_clarity | mobile_layout | form_friction | navigation | performance | content_clarity | visual_hierarchy | other (used to learn which fix types actually win — pick the most specific match, use 'other' only when nothing fits)",
   "hypothesis": "why this is the problem, referencing specific evidence from the inputs",
   "ranked_higher_than": "what other candidate problems you considered and why you ranked them lower",
   "file_to_edit": "exact path from the ranked components list",
@@ -3621,6 +3707,15 @@ ${editTypeConstraint}
   parsed.problem_title = typeof parsed.problem_title === 'string' && parsed.problem_title.trim()
     ? parsed.problem_title.trim().slice(0, 80)
     : undefined
+  // change_type: closed vocabulary only — it keys the DNA/win-library grouping,
+  // so a free-form value would fragment the aggregation. Unknown/missing →
+  // 'other' on a fix; dropped entirely on a skip (no DNA row is ever written).
+  {
+    const ct = typeof parsed.change_type === 'string' ? parsed.change_type.trim() : ''
+    parsed.change_type = parsed.skip
+      ? undefined
+      : ((CHANGE_TYPES as readonly string[]).includes(ct) ? ct : 'other')
+  }
   // C7: sanitize backlog on BOTH shapes (a skip's backlog is exactly the point —
   // it turns a silent week into a visible roadmap). Malformed entries dropped.
   {
@@ -4307,7 +4402,7 @@ async function processShopifyConnection(conn: any, run: any, subRow: any): Promi
   // Item 3a: start both viewport captures NOW so they overlap the ranker +
   // Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
   const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
-  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna)
+  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna, await getGlobalWinLibrary())
   // Trusted owner directives (focus pin + conversion goal) ride OUTSIDE the ranker's
   // untrusted-data sentinel — appended to the context string they sat inside the
   // ignore-instructions zone and the model was told to disregard them.
@@ -4654,7 +4749,7 @@ async function processGithubThemeConnection(
   // Item 3a: start both viewport captures NOW so they overlap the ranker +
   // Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
   const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
-  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna)
+  const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna, await getGlobalWinLibrary())
   // Trusted owner directives (focus pin + conversion goal) ride OUTSIDE the ranker's
   // untrusted-data sentinel — appended to the context string they sat inside the
   // ignore-instructions zone and the model was told to disregard them.
@@ -5149,7 +5244,7 @@ async function processConnection(conn: any) {
     // Item 3a: start both viewport captures NOW so they overlap the ranker +
     // deep-read + Pass-2 LLM latency; awaited (budgeted) just before Pass 2.
     const fixShots = startFixScreenshots(conn.website_url, focusPagePath)
-    const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna)
+    const rankerAnalyticsContext = buildRankerSignalContext(analytics, funnelAnalysis, dna, await getGlobalWinLibrary())
     // Trusted owner directives (focus pin + conversion goal) ride OUTSIDE the ranker's
     // untrusted-data sentinel — appended to the context string they sat inside the
     // ignore-instructions zone and the model was told to disregard them.
