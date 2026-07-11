@@ -93,7 +93,7 @@ export default function PrivacyPolicy({ navigate }) {
         <div className="legal-page-pad" style={{ maxWidth: 680, margin: '0 auto', padding: '72px 24px 96px' }}>
           <p style={{ fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: '#2a5c45', marginBottom: 16, fontWeight: 400 }}>Legal</p>
           <h1 style={{ marginBottom: 12 }}>Privacy Policy</h1>
-          <p style={{ marginBottom: 48, color: '#a09890', fontSize: 13 }}>Last updated: June 2026</p>
+          <p style={{ marginBottom: 48, color: '#a09890', fontSize: 13 }}>Last updated: July 2026</p>
 
           <div style={block}>
             <h2>Who we are</h2>
@@ -106,7 +106,7 @@ export default function PrivacyPolicy({ navigate }) {
             <h2>What data we collect</h2>
             <p style={{ marginBottom: 12 }}>When you use Velyr, we may collect the following information:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Your email address</strong>, used for account authentication (login, password reset) and essential service/billing notices.</li>
+              <li><strong style={{ fontWeight: 500 }}>Your email address</strong>, used for account authentication (login, password reset), essential service/billing notices, and product emails about your account (onboarding help and your weekly agent summary). You can object to the product emails at any time, free of charge, via the one-click unsubscribe link in every email.</li>
               <li><strong style={{ fontWeight: 500 }}>Google account data, if you choose to sign in with Google.</strong> When you register or log in using "Sign in with Google", Google provides us with your name and email address via Supabase Auth, which we use solely to create and authenticate your account. We never receive your Google password and do not access any other Google data such as contacts, Calendar, Drive, or Gmail.</li>
               <li><strong style={{ fontWeight: 500 }}>Payment information</strong>, when you subscribe to the Growth Agent (€29/month). Payment data is processed exclusively by Stripe — we never see or store your card details.</li>
               <li><strong style={{ fontWeight: 500 }}>GitHub repository access</strong>, if you connect the Growth Agent. We access only the repositories you explicitly authorise, solely to read page code and open Pull Requests on your behalf.</li>
@@ -136,7 +136,8 @@ export default function PrivacyPolicy({ navigate }) {
           <div style={block}>
             <h2>How we use your data</h2>
             <ul>
-              <li>To operate your account and send essential service and billing notices. Weekly summaries, PR approvals, and rollback alerts are delivered via Telegram.</li>
+              <li>To operate your account and send essential service and billing notices. PR approvals and rollback alerts are delivered via Telegram; weekly summaries via Telegram and email.</li>
+              <li>To send you product emails about your account: a welcome and onboarding-help sequence after signup, and a weekly summary of what your Growth Agent did. These emails contain no advertising for third parties, are sent without open- or click-tracking, and every one of them carries a one-click unsubscribe link — objecting is free of charge and takes effect immediately. Legal basis: performance of a contract (Art. 6(1)(b) GDPR) and § 7 (3) UWG (communications to existing customers about our own, similar services).</li>
               <li>To process your payment for the Growth Agent subscription via Stripe.</li>
               <li>To operate the Growth Agent: reading your GitHub repo and PostHog analytics weekly, writing code fixes, opening Pull Requests, and sending you Telegram notifications.</li>
             </ul>
@@ -158,6 +159,7 @@ export default function PrivacyPolicy({ navigate }) {
               <li><strong style={{ fontWeight: 500 }}>PostHog (velyr.io frontend analytics)</strong> — when you accept analytics via our cookie consent banner, PostHog records pageviews, clicks, and session activity on velyr.io to help us understand how the site is used. PostHog Inc. is based in the USA and processes and stores this data on US servers (PostHog US Cloud, us.i.posthog.com); for EU users, data is transferred to the USA under appropriate safeguards — Standard Contractual Clauses (SCCs) and, where applicable, the EU-US Data Privacy Framework (DPF). Data processor: PostHog Inc., 2261 Market Street #4008, San Francisco, CA 94114, USA. Legal basis: your consent (Art. 6 (1)(a) GDPR, § 25 TTDSG). You can decline this at any time. <a href="https://posthog.com/privacy" target="_blank" rel="noopener noreferrer">Privacy policy</a></li>
               <li><strong style={{ fontWeight: 500 }}>PostHog (US, San Francisco)</strong> — analytics sub-processor. Pageview events from your website's visitors are processed in Velyr's PostHog workspace, partitioned by your domain. Velyr accesses this data to generate weekly conversion fixes. As the website operator, you are the data controller for your visitors' data and must disclose Velyr/PostHog as your analytics processor in your own privacy notice. <a href="https://posthog.com/privacy" target="_blank" rel="noopener noreferrer">Privacy policy</a></li>
               <li><strong style={{ fontWeight: 500 }}>Telegram</strong> — used by the Growth Agent to send you weekly notifications, Pull Request approval requests, and rollback alerts. Your Telegram chat ID is stored solely for this purpose and can be removed at any time. <a href="https://telegram.org/privacy" target="_blank" rel="noopener noreferrer">Privacy policy</a></li>
+              <li><strong style={{ fontWeight: 500 }}>Mailjet</strong> — email delivery for the account-related product emails described above (welcome, onboarding help, weekly agent summary). Your email address is transmitted to Mailjet solely to deliver these messages; open- and click-tracking are disabled. Mailjet is operated by Mailjet SAS (part of Sinch), 4 rue Jules Lefebvre, 75009 Paris, France, and processes this data on servers in the EU under a data processing agreement. <a href="https://www.mailjet.com/legal/privacy-policy/" target="_blank" rel="noopener noreferrer">Privacy policy</a></li>
             </ul>
           </div>
 

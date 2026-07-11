@@ -150,3 +150,6 @@ vite.config.ts.timestamp-*
 # Claude Code local settings + Playwright MCP scratch
 .claude/settings.local.json
 .playwright-mcp/
+
+# Rendered lifecycle-email previews (scripts/email-preview.mjs)
+.email-preview/

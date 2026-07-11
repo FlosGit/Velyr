@@ -313,6 +313,11 @@ export default function AgentAuth({ navigate, mode = 'login' }) {
                     onClick={() => navigate('/privacy')}
                     style={{ background: 'none', border: 'none', padding: 0, color: C.accent, fontSize: 12, fontFamily: 'Jost, sans-serif', fontWeight: 400, cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'rgba(42,92,69,0.35)' }}
                   >Privacy Policy</button>.
+                  {/* §7 Abs. 3 Nr. 4 UWG: objection-right notice AT COLLECTION of the
+                      email address — required for the lifecycle emails (welcome/drip/
+                      weekly digest) to ride the existing-customer exception. Every
+                      email repeats this notice + a one-click unsubscribe link. */}
+                  {' '}We'll send you product emails about your account (onboarding help and your weekly agent summary) — you can object anytime with one click, free of charge.
                 </p>
               )}
 

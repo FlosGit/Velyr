@@ -26,6 +26,7 @@ import { Octokit } from '@octokit/rest'
 import { encryptSecret } from './_lib/secret-crypto.js'
 import { verifySessionCookie } from './github/_oauth-state.js'
 import { refreshShopifyToken } from './_lib/shopify-token-refresh.js'
+import { logAndSend, welcomeEmail } from './_lib/email.js'
 
 export const config = { maxDuration: 60 }
 
@@ -253,6 +254,23 @@ async function handleInitSubscription(req, res) {
     }
     console.error('onboarding/init_subscription: insert failed:', insErr.message)
     return res.status(500).json({ error: 'Could not start onboarding. Try again.' })
+  }
+
+  // Lifecycle email #1: welcome. Fresh-insert path only — a returning user's
+  // existing row returns above and must not re-trigger it (the email_log
+  // unique claim would block a duplicate anyway). Awaited, not fire-and-forget:
+  // the serverless runtime may freeze un-awaited work after the response is
+  // sent. Failures are logged and never block onboarding. Skips silently when
+  // Mailjet env vars are absent (emailConfigured inside logAndSend).
+  try {
+    await logAndSend(serviceClient, {
+      subscriptionId: inserted.id,
+      to: auth.user.email ?? null,
+      emailType: 'welcome',
+      buildMail: welcomeEmail,
+    })
+  } catch (err) {
+    console.error('onboarding/init_subscription: welcome email failed:', err?.message || String(err))
   }
 
   return res.status(200).json({ subscriptionId: inserted.id })

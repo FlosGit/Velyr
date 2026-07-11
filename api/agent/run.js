@@ -14,6 +14,7 @@ import { buildBadgeBlock, decideBadgeInjection, BADGE_TARGETS } from '../_lib/ba
 import { readThemeFile, upsertThemeFiles } from '../_lib/shopify-theme-io.js'
 import { refreshShopifyToken } from '../_lib/shopify-token-refresh.js'
 import { captureScreenshot as captureScreenshotShared } from '../_lib/screenshot.js'
+import { logAndSend, setupReminderEmail, tipsEmail, digestEmail, emailConfigured, verifyUnsubscribeToken, isoWeekKey } from '../_lib/email.js'
 
 // Local wrapper keeps the historical one-arg call shape in this file.
 const captureScreenshot = (url) => captureScreenshotShared(supabase, url)
@@ -346,6 +347,48 @@ async function cleanupStaleRuns() {
   return data?.length || 0
 }
 
+// ─── LIFECYCLE DRIP EMAILS (daily) ───────────────────────────────────────────
+// Day-2 setup reminder (only while onboarding is unfinished) and day-7 feature
+// tips. Fixed templates from api/_lib/email.js — never LLM output. The age
+// window is bounded on BOTH ends: the lower bound is the drip day, the upper
+// bound (14d) guards the rollout — accounts already older than the window when
+// this shipped are never suddenly mailed — and caps how stale a retried send
+// can get. email_log's unique claim makes each mail once-ever per subscription;
+// email_opt_out is the §7(3) UWG objection flag and excludes the sub entirely.
+async function sendDripEmails() {
+  if (!emailConfigured()) return 0
+  const DAY = 24 * 60 * 60 * 1000
+  const now = Date.now()
+  const { data: subs, error } = await supabase
+    .from('agent_subscriptions')
+    .select('id, email, created_at, onboarding_completed_at, email_opt_out, subscription_status')
+    .eq('email_opt_out', false)
+    .not('email', 'is', null)
+    .gte('created_at', new Date(now - 14 * DAY).toISOString())
+    .lte('created_at', new Date(now - 2 * DAY).toISOString())
+    .limit(200)
+  if (error) {
+    console.warn('[enforce-subscriptions] drip email query failed:', error.message)
+    return 0
+  }
+  let sent = 0
+  for (const sub of subs || []) {
+    if (sub.subscription_status === 'cancelled') continue
+    const age = now - new Date(sub.created_at).getTime()
+    // Day 2 (window 2–7d): nudge an unfinished onboarding.
+    if (age >= 2 * DAY && age < 7 * DAY && !sub.onboarding_completed_at) {
+      const r = await logAndSend(supabase, { subscriptionId: sub.id, to: sub.email, emailType: 'setup_reminder', buildMail: setupReminderEmail })
+      if (r.sent) sent++
+    }
+    // Day 7 (window 7–14d): feature tips for the product they subscribed to.
+    if (age >= 7 * DAY && age < 14 * DAY) {
+      const r = await logAndSend(supabase, { subscriptionId: sub.id, to: sub.email, emailType: 'tips', buildMail: tipsEmail })
+      if (r.sent) sent++
+    }
+  }
+  return sent
+}
+
 async function handleEnforceSubscriptions(res) {
   // One shared clock for every time-boxed pass below (backfill + visual check):
   // their deadlines are only honest against the WHOLE invocation's budget.
@@ -493,7 +536,43 @@ async function handleEnforceSubscriptions(res) {
   const visualChecks = await runVisualChecks(handlerStart)
     .catch(e => { console.error('[enforce-subscriptions] visual check failed:', e); return 0 })
 
-  return res.json({ ok: true, ran_at: now, afterShotsCaptured, visualChecks })
+  // Lifecycle drip emails (day-2 / day-7) — template-only, idempotent via
+  // email_log; best-effort like every pass above.
+  const dripEmailsSent = await sendDripEmails()
+    .catch(e => { console.error('[enforce-subscriptions] drip emails failed:', e); return 0 })
+
+  return res.json({ ok: true, ran_at: now, afterShotsCaptured, visualChecks, dripEmailsSent })
+}
+
+// ─── EMAIL OPT-OUT (public, HMAC-verified) ───────────────────────────────────
+// One-click unsubscribe target of every lifecycle email (footer link + RFC 8058
+// List-Unsubscribe headers — mail clients POST, humans GET; both honored). The
+// token is the HMAC minted by api/_lib/email.js buildUnsubscribeUrl. No login,
+// no Bearer token — a formless objection (§7 Abs. 3 Nr. 3 UWG) must not require
+// an account session. Responds with a minimal standalone HTML page (this
+// endpoint is outside the SPA). Idempotent: opting out twice is fine, and a
+// 0-row update (account since deleted) still reads as success.
+async function handleEmailOptOut(req, res) {
+  const sub   = typeof req.query?.sub === 'string' ? req.query.sub : ''
+  const token = typeof req.query?.token === 'string' ? req.query.token : ''
+  const page = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${title} — Velyr</title></head><body style="background:#f7f4ef;color:#1c1917;font-family:Georgia,serif;display:flex;align-items:center;justify-content:center;min-height:90vh;margin:0;padding:24px;"><div style="max-width:440px;text-align:center;"><h1 style="font-weight:normal;font-size:26px;">${title}</h1><p style="color:#6b6460;font-size:15px;line-height:1.7;">${body}</p></div></body></html>`
+  res.setHeader('Content-Type', 'text/html; charset=utf-8')
+
+  if (!sub || !verifyUnsubscribeToken(sub, token)) {
+    return res.status(403).send(page('Link invalid',
+      'This unsubscribe link is invalid. To opt out of product emails, just write to <a href="mailto:info@velyr.io" style="color:#2a5c45;">info@velyr.io</a> — we\'ll take care of it.'))
+  }
+  const { error } = await supabase
+    .from('agent_subscriptions')
+    .update({ email_opt_out: true })
+    .eq('id', sub)
+  if (error) {
+    console.error('[email-opt-out] update failed:', error.message)
+    return res.status(500).send(page('Something went wrong',
+      'We could not process your request. Please email <a href="mailto:info@velyr.io" style="color:#2a5c45;">info@velyr.io</a> and we\'ll unsubscribe you manually.'))
+  }
+  return res.status(200).send(page('You\'re unsubscribed',
+    'You will no longer receive product emails from Velyr. Messages required to operate your account (like password resets) are unaffected.'))
 }
 
 export default async function handler(req, res) {
@@ -508,6 +587,11 @@ export default async function handler(req, res) {
   // GET /api/agent/run?action=win_badge&slug=florian · ?action=win_card&slug=…
   if (action === 'win_badge' || action === 'win_card') {
     return handleWinBadge(req, res, action)
+  }
+  // ── EMAIL OPT-OUT (no auth — HMAC-signed one-click unsubscribe) ───────────
+  // GET/POST /api/agent/run?action=email_opt_out&sub=<id>&token=<hmac>
+  if (action === 'email_opt_out') {
+    return handleEmailOptOut(req, res)
   }
 
   // ── Authenticated user actions (Supabase JWT) ─────────────────────────────
@@ -586,7 +670,7 @@ export default async function handler(req, res) {
           'agent_competitor_urls', 'agent_competitor_snapshots', 'agent_funnel_pages',
           'agent_brand_guardrails', 'agent_llm_usage', 'impact_metrics',
           'agent_ab_tests', 'agent_site_network', 'site_structure_preview',
-          'agent_run_locks',
+          'agent_run_locks', 'email_log',
         ]
         for (const table of childTables) {
           const { error } = await supabase.from(table).delete().in('subscription_id', subIds)
@@ -1544,7 +1628,7 @@ async function handleWeeklySummary(res) {
         ),
         supabase.from('agent_runs').select('*').eq('subscription_id', subscriptionId).gte('created_at', oneWeekAgo).order('created_at', { ascending: false }),
         supabase.from('agent_learnings').select('outcome, delta, metric_type').eq('subscription_id', subscriptionId),
-        supabase.from('agent_subscriptions').select('telegram_chat_id').eq('id', subscriptionId).single(),
+        supabase.from('agent_subscriptions').select('telegram_chat_id, email, email_opt_out').eq('id', subscriptionId).single(),
       ])
 
       const weekRuns       = weekRunsRes.data   || []
@@ -1553,8 +1637,11 @@ async function handleWeeklySummary(res) {
       // tenant's summary (traffic, deployed changes, DNA) into the global
       // operator chat — and the owner never saw it. No chat bound → no send.
       const chatId         = subRes.data?.telegram_chat_id || null
-      if (!chatId) {
-        console.warn(`[weekly_summary] sub=${subscriptionId}: no telegram_chat_id bound — skipping send`)
+      // Email digest twin of the Telegram summary (same structured stats, fixed
+      // template, no LLM). email_opt_out is the §7(3) UWG objection flag.
+      const emailTo        = (subRes.data && !subRes.data.email_opt_out && subRes.data.email) || null
+      if (!chatId && !emailTo) {
+        console.warn(`[weekly_summary] sub=${subscriptionId}: no telegram_chat_id bound and no email — skipping send`)
         return
       }
 
@@ -1649,10 +1736,39 @@ ${deployedChanges ? `\n<b>Deployed changes:</b>\n${deployedChanges}` : ''}${roll
 
 <i>Next run: Monday · Reply <b>status</b> for details</i>`
 
-      await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
-      })
+      if (chatId) {
+        await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
+        })
+      }
+
+      // Weekly digest email — same structured stats, plain-text field variants
+      // (digestEmail does its own HTML escaping; the Telegram-HTML strings above
+      // must not leak into it). period_key = ISO week ⇒ exactly one digest per
+      // subscription per week, however often the cron fires.
+      if (emailTo) {
+        const deployedTitles = weekRuns
+          .filter(r => DEPLOYED_STATUSES.includes(r.status))
+          .map(r => r.analysis_result?.problem_title || r.analysis_result?.problem?.slice(0, 60) || 'Change deployed')
+        await logAndSend(supabase, {
+          subscriptionId,
+          to: emailTo,
+          emailType: 'weekly_digest',
+          periodKey: isoWeekKey(),
+          buildMail: (opts) => digestEmail({
+            weekLabel: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+            visitors: a?.uniqueVisitors ?? null,
+            pageviews: a?.totalPageviews ?? null,
+            trendText,
+            bounceText,
+            deployed, rolledBack, rejected, pending,
+            deployedTitles,
+            bestMetricLine: bestMetricLine.trim() || null,
+            mehLine: mehLine.trim() || null,
+          }, opts),
+        })
+      }
     } catch (err) {
       console.error('Weekly summary error for subscription', conn.subscription_id, err)
     }
