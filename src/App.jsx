@@ -10,6 +10,7 @@ import ResetPassword from './pages/ResetPassword.jsx'
 import AGB from './pages/AGB.jsx'
 import AgentPublic from './pages/AgentPublic.jsx'
 import Faq from './pages/Faq.jsx'
+import CodeVsOverlay from './pages/CodeVsOverlay.jsx'
 // Dev-only: lazy-loaded so Rollup excludes SiteNetworkDemo + mockSiteNetwork
 // from the prod bundle (import.meta.env.DEV inlines to false at build time).
 const SiteNetworkDemo = import.meta.env.DEV
@@ -186,6 +187,7 @@ export default function App() {
   )
   if (path === '/agb')                     return <AGB navigate={navigate} />
   if (path === '/faq')                    return <Faq navigate={navigate} />
+  if (path === '/code-vs-overlay')        return <CodeVsOverlay navigate={navigate} />
   if (path === '/impressum')              return <Impressum navigate={navigate} />
   if (path === '/privacy')                return <PrivacyPolicy navigate={navigate} />
   if (path === '/agent/login')            return <AgentAuth navigate={navigate} mode="login" />

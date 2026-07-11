@@ -39,6 +39,7 @@ Wix, Squarespace, and Webflow. The agent edits source code, and these site build
 ## Key pages
 - https://velyr.io/ — homepage and pricing
 - https://velyr.io/faq — frequently asked questions
+- https://velyr.io/code-vs-overlay — how AI CRO tools apply changes: overlay scripts vs real code, and why Velyr ships code you keep
 - https://velyr.io/privacy — privacy policy
 
 ## Blog

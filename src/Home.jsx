@@ -946,6 +946,7 @@ function Footer({ navigate }) {
           {[
             { label:'Blog', path:'/blog' },
             { label:'FAQ', path:'/faq' },
+            { label:'Code vs. Overlays', path:'/code-vs-overlay' },
             { label:'Privacy Policy', path:'/privacy' },
             { label:'Imprint', path:'/impressum' },
             { label:'AGB', path:'/agb' },

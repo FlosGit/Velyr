@@ -52,6 +52,26 @@ function legalFallback(title, intro) {
   return `<div id="root">${MAIN_OPEN}${H1(title)}<p style="font-size:16px;line-height:1.78;color:#6b6460;max-width:640px">${esc(intro)}</p>${HOME_LINK}</main></div>`
 }
 
+// Crawler fallback for /code-vs-overlay — mirrors the page's core argument in
+// plain HTML. Keep the claims in sync with src/pages/CodeVsOverlay.jsx.
+function compareFallback() {
+  const h2 = (t) =>
+    `<h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(t)}</h2>`
+  const p = (t) => `<p style="font-size:15px;line-height:1.78;color:#6b6460">${esc(t)}</p>`
+  const body = [
+    p('AI conversion tools apply changes to your site in one of two fundamentally different ways. The difference decides what you actually own — and what happens the day you cancel.'),
+    h2('How overlay tools work'),
+    p('Most AI conversion-optimization platforms install a JavaScript snippet that rewrites parts of the page in the visitor’s browser on every load. Installation is one script tag and experiments ship instantly — but the changes live in the vendor’s script, not in your site: cancel the subscription and every improvement disappears. Runtime rewriting happens after your page renders (flicker, layout shift, another third-party script), search engines mostly read your original served HTML, and redesigns break overlays silently.'),
+    h2('How code-level changes work'),
+    p('The alternative is to change the source itself: a Pull Request on your GitHub repository, or an edit to your Shopify theme files. You own every line permanently — version-controlled, reviewable, revertible, still yours if you cancel. There is no runtime dependency, crawlers see the improved page, and every change is a readable diff you approve before it ships. The honest trade-offs: it requires repo or store access, ships at deploy pace rather than instantly, and cannot run dozens of parallel A/B variants.'),
+    h2('When an overlay tool is the better fit'),
+    p('Enterprise sites with heavy traffic and a dedicated CRO team running many parallel experiments are what overlay experimentation platforms are built for. Velyr is built for the opposite case: indie founders, small SaaS teams, and store owners who want one well-evidenced improvement a week that they own forever.'),
+    h2('How Velyr ships code'),
+    p('Every week, Velyr reads your PostHog analytics, scans your pages, and writes the single highest-impact conversion fix as a GitHub Pull Request or a staged Shopify theme change. You approve or skip with one tap in Telegram or from the dashboard — nothing ships without your YES. After a fix ships, Velyr compares bounce rate in the 48 hours after against the 48 hours before and proposes a rollback if the numbers got worse. €29/month after a 14-day free trial; every fix is code you keep.'),
+  ].join('')
+  return `<div id="root">${MAIN_OPEN}${H1('Overlay scripts vs. real code')}${body}${HOME_LINK}</main></div>`
+}
+
 const faqJsonLd = JSON.stringify({
   '@context': 'https://schema.org',
   '@type': 'FAQPage',
@@ -71,6 +91,14 @@ const ROUTES = [
       'Frequently asked questions about Velyr — how the AI growth agent ships weekly conversion fixes to your GitHub repo or Shopify store, the approval and 48h rollback model, supported platforms, and the 14-day free trial.',
     fallback: faqFallback(),
     jsonLd: faqJsonLd,
+  },
+  {
+    dir: 'code-vs-overlay',
+    path: '/code-vs-overlay',
+    title: 'Overlay Scripts vs. Real Code — How AI CRO Tools Apply Changes | Velyr',
+    description:
+      'How AI conversion tools apply changes: JavaScript overlay scripts vs real code changes (GitHub Pull Requests, Shopify theme edits). Latency, SEO visibility, code ownership — and what happens to the improvements when you cancel.',
+    fallback: compareFallback(),
   },
   {
     dir: 'privacy',
@@ -363,6 +391,7 @@ for (const c of clustersWithPosts) {
 const STATIC_URLS = [
   { loc: ORIGIN + '/', lastmod: '2026-06-02', changefreq: 'weekly', priority: '1.0' },
   { loc: ORIGIN + '/faq', lastmod: '2026-06-02', changefreq: 'weekly', priority: '0.8' },
+  { loc: ORIGIN + '/code-vs-overlay', lastmod: '2026-07-11', changefreq: 'monthly', priority: '0.7' },
 ]
 const blogUrls = [
   { loc: ORIGIN + '/blog', lastmod: today(), changefreq: 'daily', priority: '0.7' },
