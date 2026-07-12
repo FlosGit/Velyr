@@ -524,6 +524,9 @@ function Hero({ navigate }) {
         <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:14, letterSpacing:'.01em' }}>
           14-day free trial · You approve every change · Cancel anytime
         </p>
+        <p style={{ fontSize:11.5, color:C.textLight, fontWeight:300, marginTop:6, letterSpacing:'.01em' }}>
+          €29/month after the trial · No credit card required to start
+        </p>
       </div>
     </section>
   )
