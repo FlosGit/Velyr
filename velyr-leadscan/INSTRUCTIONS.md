@@ -53,8 +53,19 @@ Zielgruppe:
 NICHT relevant: reine Marketing-/Copy-Fragen ohne technischen Bezug, reine
 Traffic-/Ads-/Produkt-Sourcing-/Dropshipping-Posts ohne On-Site- bzw.
 Theme-Conversion-Bezug (kein Frontend-/Theme-Hebel für Velyr), allgemeine
-"wie benutze ich PostHog"-Setup-Fragen ohne Schmerzpunkt, Posts älter als
-~12 Monate (außer sehr hohe Relevanz).
+"wie benutze ich PostHog"-Setup-Fragen ohne Schmerzpunkt.
+
+## Pflicht-Filter (IMMER anwenden, vor dem Output)
+1. **Frische:** Nur Posts, die **maximal 1 Monat alt** sind (älteres komplett
+   verwerfen, auch bei hoher Relevanz). **Neuer ist besser** — bei sonst
+   gleichwertigen Treffern den jüngeren bevorzugen, und die finale Liste pro
+   Segment nach Datum absteigend sortieren.
+2. **Eigene Posts ausschließen:** Wenn der Reddit-User **`Difficult_Celery3458`**
+   bereits unter einem Post kommentiert hat, diesen Post **NICHT** aufnehmen —
+   das ist der Account des Betreibers, ein vorhandener Kommentar bedeutet, der
+   Post wurde schon kontaktiert/genutzt. Für jeden Kandidaten vor dem Output die
+   Kommentare prüfen (Permalink + `.json`, alle Kommentar-Autoren rekursiv
+   scannen) und Treffer rausfiltern.
 
 ## Workflow
 
@@ -81,6 +92,16 @@ Relevante Subreddits (Shopify): shopify, ecommerce, shopifyDev, Entrepreneur.
 Setze einen User-Agent-Header (z.B.
 "velyr-leadscan/1.0"), sonst blockt Reddit ggf. Rate-Limit beachten (max ca. 1
 Request/2 Sekunden), bei 429 kurz pausieren und retry.
+
+**WICHTIG (Stand 2026-06):** Die öffentlichen JSON-Endpoints blocken inzwischen
+**server-seitige** Clients hart (HTTP 403, kein transientes 429) — `curl`,
+WebFetch und die Web-Suche (reddit.com steht auf der Crawler-Sperrliste)
+liefern nichts. Funktionierender Weg: **Playwright → echtes Chrome** auf
+`https://www.reddit.com/` navigieren (JS-Challenge wird automatisch gelöst),
+dann die Such-API **same-origin aus dem Seitenkontext** via `fetch(...)`
+abfragen (trägt die Browser-Cookies/Headers). Frische über `t=month` +
+`sort=new` einschränken (siehe Pflicht-Filter 1). Alternative für die Zukunft:
+offizielle Reddit-OAuth-API mit Token.
 
 ### Schritt 3: IndieHackers (kein offizielles API → Browser-MCP-Skill nutzen)
 Keine öffentliche Search-API verfügbar. Nutze den Browser-MCP-Skill:
