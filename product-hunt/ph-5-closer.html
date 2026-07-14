@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Velyr PH — 5 Closer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+html { zoom:2; }
+body {
+  width:1270px; height:760px; overflow:hidden; position:relative;
+  background:#f7f4ef; color:#1c1917;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(900px 500px at 50% -20%, rgba(42,92,69,0.08), transparent 70%),
+    radial-gradient(600px 400px at 6% 112%, rgba(140,115,85,0.06), transparent 70%),
+    radial-gradient(600px 400px at 94% 112%, rgba(140,115,85,0.06), transparent 70%);
+}
+.wordmark { position:absolute; top:34px; left:56px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:24px; letter-spacing:.01em; }
+.wordmark::after { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; background:#2a5c45; margin-left:7px; margin-bottom:1px; }
+.url { position:absolute; bottom:26px; right:56px; font-size:12.5px; color:#a09890; letter-spacing:.06em; }
+.tagline-chip { position:absolute; top:36px; right:56px; font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:#8c7355; font-weight:400; }
+
+.headline { position:absolute; top:80px; left:0; right:0; text-align:center; font-family:'Cormorant Garamond',serif; font-weight:300; font-size:54px; letter-spacing:-0.02em; line-height:1.08; }
+.headline em { font-style:italic; color:#2a5c45; font-weight:400; }
+.subline { position:absolute; top:152px; left:0; right:0; text-align:center; font-size:16.5px; color:#6b6460; }
+
+.stage { position:absolute; top:216px; left:80px; right:80px; display:flex; gap:36px; align-items:center; }
+
+.panel { flex:1; padding:6px 4px; }
+.panel h3 { font-size:12px; font-weight:500; letter-spacing:.13em; text-transform:uppercase; color:#8c7355; margin-bottom:16px; }
+.chip { display:flex; align-items:center; gap:11px; background:#fff; border:1px solid rgba(28,25,23,0.09); border-radius:12px; padding:12px 16px; margin-bottom:11px; box-shadow:0 8px 22px rgba(28,25,23,0.06); font-size:14.5px; font-weight:400; }
+.chip .glyph { width:26px; height:26px; flex:none; display:flex; align-items:center; justify-content:center; }
+.chip small { display:block; font-size:11.5px; color:#a09890; font-weight:300; margin-top:1px; }
+.panel .more { font-size:12.5px; color:#a09890; font-style:italic; font-family:'Cormorant Garamond',serif; font-size:15px; margin-top:2px; padding-left:4px; }
+
+/* pricing card */
+.price { width:400px; flex:none; background:#1c1917; color:#f7f4ef; border-radius:20px; box-shadow:0 30px 70px rgba(28,25,23,0.30); padding:30px 36px 30px; text-align:center; position:relative; }
+.price .eyebrow { font-size:11.5px; letter-spacing:.16em; text-transform:uppercase; color:rgba(247,244,239,0.55); }
+.price .amount { margin-top:10px; font-family:'Cormorant Garamond',serif; font-weight:300; font-size:78px; letter-spacing:-.03em; line-height:1; }
+.price .per { font-size:14px; color:rgba(247,244,239,0.55); margin-top:2px; }
+.price hr { border:none; height:1px; background:rgba(247,244,239,0.14); margin:20px 0 16px; }
+.price ul { list-style:none; text-align:left; }
+.price li { display:flex; gap:10px; align-items:baseline; font-size:14px; font-weight:300; color:rgba(247,244,239,0.92); padding:5px 0; }
+.price li span { flex:1; }
+.price li b { font-weight:500; }
+.price li::before { content:'✓'; color:#7fbf9f; font-size:13px; flex:none; }
+.price .cta { margin-top:20px; background:#2a5c45; color:#f7f4ef; border-radius:11px; padding:14px 0; font-size:15px; font-weight:500; letter-spacing:.03em; box-shadow:0 12px 36px rgba(42,92,69,0.45); }
+.price .cta-sub { margin-top:11px; font-size:11.5px; color:rgba(247,244,239,0.5); }
+</style>
+</head>
+<body>
+  <div class="wordmark">Velyr</div>
+  <div class="tagline-chip">Get started</div>
+
+  <div class="headline">Works with your <em>GitHub repo</em> or your <em>Shopify store.</em></div>
+  <div class="subline">Connect in minutes. The first fix arrives with the next weekly run.</div>
+
+  <div class="stage">
+    <div class="panel">
+      <h3>GitHub-built sites</h3>
+      <div class="chip">
+        <span class="glyph">
+          <svg width="24" height="24" viewBox="-11.5 -10.23 23 20.46"><circle r="2" fill="#1c1917"/><g stroke="#1c1917" stroke-width="1" fill="none"><ellipse rx="11" ry="4.2"/><ellipse rx="11" ry="4.2" transform="rotate(60)"/><ellipse rx="11" ry="4.2" transform="rotate(120)"/></g></svg>
+        </span>
+        <div>React <small>SPAs &amp; component repos</small></div>
+      </div>
+      <div class="chip">
+        <span class="glyph">
+          <svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#1c1917" stroke-width="1.4"/><path d="M9 16.2V8l7.4 9.4" stroke="#1c1917" stroke-width="1.6" fill="none" stroke-linecap="round"/><path d="M15.6 8v5.4" stroke="#1c1917" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </span>
+        <div>Next.js <small>Pages Router &amp; App Router</small></div>
+      </div>
+      <div class="chip">
+        <span class="glyph">
+          <svg width="24" height="24" viewBox="0 0 24 24"><path d="M13.5 2L6.5 13h4.2L9 22l8.5-12h-4.6z" fill="none" stroke="#1c1917" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        </span>
+        <div>Vite <small>and plain index.html sites</small></div>
+      </div>
+      <div class="more">…the agent maps your repo structure itself.</div>
+    </div>
+
+    <div class="price">
+      <div class="eyebrow">Growth Agent — one plan</div>
+      <div class="amount">€29</div>
+      <div class="per">per month</div>
+      <hr>
+      <ul>
+        <li><span><b>One shipped fix every week</b> — real code, not advice</span></li>
+        <li><span>14-day free trial — <b>no card required</b></span></li>
+        <li><span>You approve every change in Telegram</span></li>
+        <li><span>48h auto-rollback safety net</span></li>
+        <li><span>Cancel anytime</span></li>
+      </ul>
+      <div class="cta">Start free trial →</div>
+      <div class="cta-sub">velyr.io · set up in a few minutes</div>
+    </div>
+
+    <div class="panel">
+      <h3>Shopify stores</h3>
+      <div class="chip">
+        <span class="glyph">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1c1917" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M5.5 7.5h13l1 13.5h-15z"/><path d="M8.5 10V6.2a3.5 3.5 0 0 1 7 0V10"/></svg>
+        </span>
+        <div>Direct connect <small>OAuth → live theme, no GitHub needed</small></div>
+      </div>
+      <div class="chip">
+        <span class="glyph">
+          <svg width="24" height="24" viewBox="0 0 16 16" fill="#1c1917"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        </span>
+        <div>GitHub-synced themes <small>fixes arrive as PRs, Shopify syncs</small></div>
+      </div>
+      <div class="chip">
+        <span class="glyph">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1c1917" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 4v10l-7 4-7-4V7z"/><path d="M12 3v18M5 7l14 10M19 7L5 17" stroke-width="0.9" opacity="0.55"/></svg>
+        </span>
+        <div>Liquid-safe <small>staged writes, checksum-guarded</small></div>
+      </div>
+      <div class="more">…nothing is written before your YES.</div>
+    </div>
+  </div>
+
+  <div class="url">velyr.io</div>
+</body>
+</html>

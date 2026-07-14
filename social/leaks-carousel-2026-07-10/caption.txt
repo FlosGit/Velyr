@@ -1,0 +1,13 @@
+Your homepage is leaking signups. These are the 5 leaks we keep finding on founder sites — and the one-line fix for each 🔧
+
+01 — The buried CTA. Most mobile visitors never scroll far enough to meet your button. One primary action, inside the first screen.
+02 — The clever headline. 5 seconds to say what you sell, or they're gone.
+03 — Too many doors. Every extra nav link taxes the one that pays you.
+04 — Proof nobody can check. Specific beats superlative — if it's true.
+05 — The button that isn't. If it looks tappable, make it tappable.
+
+Save this for your next landing-page review 🔖
+
+We build Velyr — an agent that finds one conversion leak on your site every week and ships the fix as a real pull request. You approve it with one tap. → velyr.io
+
+#buildinpublic #cro #conversionrateoptimization #landingpage #saasfounder #webdesign #founders

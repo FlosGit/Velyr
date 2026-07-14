@@ -1,0 +1,35 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>hook</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1080px; height:1920px; overflow:hidden; position:relative;
+  background:#191512; color:#f7f4ef;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(900px 700px at 88% -6%, rgba(125,201,160,0.08), transparent 70%),
+    radial-gradient(820px 640px at 4% 106%, rgba(140,115,85,0.10), transparent 70%);
+}
+.wordmark { position:absolute; top:70px; left:84px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:44px; letter-spacing:.01em; z-index:5; }
+.wordmark::after { content:''; display:inline-block; width:12px; height:12px; border-radius:50%; background:#7dc9a0; margin-left:11px; margin-bottom:3px; }
+.step { position:absolute; top:82px; right:84px; font-family:'DM Mono',monospace; font-size:24px; color:#8a8078; letter-spacing:.14em; z-index:5; }
+.url { position:absolute; bottom:70px; right:84px; font-size:24px; color:#8a8078; letter-spacing:.08em; z-index:5; }
+em { font-style:italic; color:#7dc9a0; font-weight:400; }
+
+.hw { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; padding:0 92px; z-index:3; }
+.kick { font-family:'DM Mono',monospace; font-size:27px; letter-spacing:.28em; text-transform:uppercase; color:#7dc9a0; margin-bottom:54px; }
+.h1 { font-family:'Cormorant Garamond',serif; font-weight:300; font-size:150px; line-height:1.02; letter-spacing:-0.02em; }
+.sub { margin-top:64px; font-size:42px; color:#b5aca3; line-height:1.46; max-width:860px; }
+</style></head><body>
+<div class="wordmark">Velyr</div><div class="step"></div>
+<div class="hw">
+  <div class="kick">Every week</div>
+  <div class="h1">Your site is <em>leaking signups</em> — and you can't see where.</div>
+  <div class="sub">So I gave an AI agent access to my code. Here's what happens.</div>
+</div>
+<div class="url">velyr.io</div>
+</body></html>

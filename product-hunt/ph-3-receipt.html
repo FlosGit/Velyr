@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Velyr PH — 3 Receipt</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+html { zoom:2; }
+body {
+  width:1270px; height:760px; overflow:hidden; position:relative;
+  background:#f7f4ef; color:#1c1917;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(720px 420px at 90% -10%, rgba(42,92,69,0.07), transparent 70%),
+    radial-gradient(600px 400px at 4% 112%, rgba(140,115,85,0.06), transparent 70%);
+}
+.wordmark { position:absolute; top:34px; left:56px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:24px; letter-spacing:.01em; }
+.wordmark::after { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; background:#2a5c45; margin-left:7px; margin-bottom:1px; }
+.url { position:absolute; bottom:26px; right:56px; font-size:12.5px; color:#a09890; letter-spacing:.06em; }
+.tagline-chip { position:absolute; top:36px; right:56px; font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:#8c7355; font-weight:400; }
+
+.headline { position:absolute; top:74px; left:0; right:0; text-align:center; font-family:'Cormorant Garamond',serif; font-weight:300; font-size:54px; letter-spacing:-0.02em; }
+.headline em { font-style:italic; color:#2a5c45; font-weight:400; }
+.subline { position:absolute; top:146px; left:0; right:0; text-align:center; font-size:16.5px; color:#6b6460; }
+
+.stage { position:absolute; top:190px; left:76px; right:76px; display:flex; gap:44px; align-items:flex-start; }
+
+/* receipt document */
+.doc { width:660px; background:#fff; border:1px solid rgba(28,25,23,0.09); border-radius:16px; box-shadow:0 24px 60px rgba(28,25,23,0.11); padding:20px 30px 18px; flex:none; }
+.doc-tab { display:flex; align-items:center; gap:8px; font-family:'DM Mono',monospace; font-size:11px; color:#a09890; margin-bottom:10px; }
+.doc-tab .pill { background:rgba(42,92,69,0.08); color:#2a5c45; padding:2px 9px; border-radius:99px; font-size:10.5px; }
+.doc h1 { font-family:'Jost',sans-serif; font-size:18px; font-weight:500; letter-spacing:.005em; padding-bottom:9px; border-bottom:1px solid rgba(28,25,23,0.08); }
+.doc h2 { font-size:11.5px; font-weight:500; letter-spacing:.1em; text-transform:uppercase; color:#8c7355; margin:11px 0 4px; }
+.doc p, .doc li { font-size:12.3px; line-height:1.5; color:#1c1917; }
+.doc p b { font-weight:500; }
+.doc .mut { color:#6b6460; }
+.doc ul { list-style:none; }
+.doc li { padding-left:14px; position:relative; }
+.doc li::before { content:'–'; position:absolute; left:0; color:#a09890; }
+.doc code { font-family:'DM Mono',monospace; font-size:11.5px; background:#f7f4ef; padding:1px 5px; border-radius:4px; }
+.doc .ok { color:#2a5c45; }
+.hl { position:relative; border-radius:8px; }
+.hl::before { content:''; position:absolute; inset:-5px -10px; background:rgba(42,92,69,0.055); border:1px solid rgba(42,92,69,0.22); border-radius:9px; pointer-events:none; }
+
+/* annotations */
+.notes { flex:1; display:flex; flex-direction:column; gap:22px; padding-top:30px; }
+.note { background:#f0ece4; border-left:3px solid #2a5c45; border-radius:0 12px 12px 0; padding:15px 18px 14px; position:relative; }
+.note .n-title { font-family:'Cormorant Garamond',serif; font-style:italic; font-size:21px; color:#2a5c45; line-height:1.2; }
+.note .n-body { margin-top:6px; font-size:13px; line-height:1.55; color:#6b6460; }
+.note::before { content:''; position:absolute; left:-36px; top:26px; width:30px; height:1px; background:rgba(42,92,69,0.45); }
+.note::after { content:''; position:absolute; left:-40px; top:23px; width:7px; height:7px; border-radius:50%; background:#2a5c45; }
+
+.trust { position:absolute; bottom:26px; left:56px; font-size:12.5px; color:#6b6460; letter-spacing:.02em; }
+.trust b { font-weight:500; color:#1c1917; }
+</style>
+</head>
+<body>
+  <div class="wordmark">Velyr</div>
+  <div class="tagline-chip">Radical transparency</div>
+
+  <div class="headline">Real code in your repo. <em>Not a to-do list.</em></div>
+  <div class="subline">Every fix ships with a receipt — what was inspected, what wasn't, and how it rolls back.</div>
+
+  <div class="stage">
+    <div class="doc">
+      <div class="doc-tab">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="#a09890"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Pull request #23 · description &nbsp;<span class="pill">written by the agent</span>
+      </div>
+      <h1>Velyr — Conversion Fix Proposal</h1>
+
+      <h2>Hypothesis</h2>
+      <p>68% of mobile visitors never scroll past the hero — the CTA first appears at 1,340px. <b>Confirmed in the attached mobile screenshot.</b></p>
+
+      <h2>Confidence</h2>
+      <p>medium — scroll-depth data covers 2,340 sessions; the visual claim is screenshot-confirmed.</p>
+
+      <h2>What I did and didn't inspect</h2>
+      <p><b>Files I read deeply (6 + supporting):</b> <span class="mut"><code>Hero.jsx</code> · <code>Landing.jsx</code> · <code>PricingTable.jsx</code> · <code>Nav.jsx</code> · <code>cta.js</code> · <code>hero.css</code></span></p>
+      <div class="hl">
+      <p style="margin-top:6px"><b>Considered but NOT inspected deeply (14 files):</b> <span class="mut"><code>Footer.jsx</code> · <code>Testimonials.jsx</code> · <code>BlogTeaser.jsx</code> · …</span></p>
+      </div>
+      <p style="margin-top:9px"><b>Behavioral signals inspected:</b> <span class="mut">scroll depth <span class="ok">✓</span> · rage clicks <span class="ok">✓</span> · dead clicks <span class="ok">✓</span></span></p>
+      <p><b>Live screenshots inspected:</b> <span class="mut">desktop 1280×800 <span class="ok">✓</span> · mobile 390×844 <span class="ok">✓</span> · small mobile 360×640 <span class="ok">✓</span></span></p>
+
+      <h2>Known blind spots</h2>
+      <ul>
+        <li>paid-landing variants (<code>/lp/*</code>) are outside the import graph; A/B overrides not visible in code</li>
+      </ul>
+
+      <h2>Rollback</h2>
+      <ul>
+        <li>bounce +15pp within 48h on the affected route → <b>automatic revert PR</b>, sent for your approval</li>
+      </ul>
+    </div>
+
+    <div class="notes">
+      <div class="note">
+        <div class="n-title">It tells you what it didn't read.</div>
+        <div class="n-body">Honesty is enforced in the pipeline, not implied by marketing. Low confidence? The agent skips the week instead of guessing.</div>
+      </div>
+      <div class="note">
+        <div class="n-title">Visual claims need visual proof.</div>
+        <div class="n-body">A "below the fold" fix is only allowed if it's confirmed in real screenshots of your live site — desktop and mobile.</div>
+      </div>
+      <div class="note">
+        <div class="n-title">The exit is planned before you enter.</div>
+        <div class="n-body">Every proposal states its rollback trigger up front. You approve with the full picture.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="trust"><b>Least-privilege GitHub App</b> · <b>Shopify Admin API</b> (write_themes-approved) · nothing ships without your YES</div>
+  <div class="url">velyr.io</div>
+</body>
+</html>

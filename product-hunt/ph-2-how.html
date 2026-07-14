@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Velyr PH — 2 How it works</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+html { zoom:2; }
+body {
+  width:1270px; height:760px; overflow:hidden; position:relative;
+  background:#f7f4ef; color:#1c1917;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(720px 420px at 12% -10%, rgba(42,92,69,0.07), transparent 70%),
+    radial-gradient(600px 400px at 94% 112%, rgba(140,115,85,0.06), transparent 70%);
+}
+.wordmark { position:absolute; top:34px; left:56px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:24px; letter-spacing:.01em; }
+.wordmark::after { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; background:#2a5c45; margin-left:7px; margin-bottom:1px; }
+.url { position:absolute; bottom:26px; right:56px; font-size:12.5px; color:#a09890; letter-spacing:.06em; }
+.tagline-chip { position:absolute; top:36px; right:56px; font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:#8c7355; font-weight:400; }
+
+.headline { position:absolute; top:104px; left:0; right:0; text-align:center; font-family:'Cormorant Garamond',serif; font-weight:300; font-size:60px; letter-spacing:-0.02em; line-height:1.05; }
+.headline em { font-style:italic; color:#2a5c45; font-weight:400; }
+.subline { position:absolute; top:184px; left:0; right:0; text-align:center; font-size:17.5px; color:#6b6460; font-weight:300; }
+
+.flow { position:absolute; top:292px; left:70px; right:70px; }
+.track { position:absolute; top:44px; left:110px; right:110px; height:1px; background:rgba(28,25,23,0.14); }
+.track::after { content:''; position:absolute; right:-2px; top:-3.5px; width:8px; height:8px; border-top:1.5px solid rgba(28,25,23,0.35); border-right:1.5px solid rgba(28,25,23,0.35); transform:rotate(45deg); }
+.steps { position:relative; display:flex; }
+.step { flex:1; display:flex; flex-direction:column; align-items:center; text-align:center; padding:0 14px; }
+.orb { width:88px; height:88px; border-radius:50%; background:#ffffff; border:1px solid rgba(28,25,23,0.10); box-shadow:0 14px 34px rgba(28,25,23,0.10); display:flex; align-items:center; justify-content:center; position:relative; }
+.step.hero-step .orb { background:#2a5c45; border-color:#2a5c45; box-shadow:0 16px 40px rgba(42,92,69,0.35); }
+.num { position:absolute; top:-9px; right:-3px; background:#f7f4ef; border:1px solid rgba(28,25,23,0.12); border-radius:99px; font-family:'DM Mono',monospace; font-size:10px; color:#8c7355; padding:2px 8px; letter-spacing:.08em; }
+.step-title { margin-top:20px; font-size:18px; font-weight:500; letter-spacing:.02em; }
+.step-desc { margin-top:8px; font-size:13.5px; line-height:1.55; color:#6b6460; max-width:206px; }
+.step-desc b { font-weight:500; color:#1c1917; }
+
+.footline { position:absolute; bottom:74px; left:0; right:0; text-align:center; font-family:'Cormorant Garamond',serif; font-style:italic; font-size:24px; color:#2a5c45; }
+</style>
+</head>
+<body>
+  <div class="wordmark">Velyr</div>
+  <div class="tagline-chip">How it works</div>
+
+  <div class="headline">One high-impact fix. <em>Every week.</em></div>
+  <div class="subline">The agent does the work — you keep the veto.</div>
+
+  <div class="flow">
+    <div class="track"></div>
+    <div class="steps">
+      <div class="step">
+        <div class="orb"><span class="num">01</span>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#2a5c45" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6M11 8v6"/></svg>
+        </div>
+        <div class="step-title">Detect</div>
+        <div class="step-desc">Reads your <b>repo</b>, live analytics — scroll depth, rage clicks — and <b>real screenshots</b> of your site.</div>
+      </div>
+      <div class="step">
+        <div class="orb"><span class="num">02</span>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#2a5c45" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6"/></svg>
+        </div>
+        <div class="step-title">Fix</div>
+        <div class="step-desc">Writes the single highest-impact change itself — a <b>real PR</b>, or a staged <b>Shopify theme write</b>.</div>
+      </div>
+      <div class="step hero-step">
+        <div class="orb"><span class="num">03</span>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#f7f4ef" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        </div>
+        <div class="step-title">Approve</div>
+        <div class="step-desc"><b>One tap in Telegram</b>, preview included. Nothing ships without your YES.</div>
+      </div>
+      <div class="step">
+        <div class="orb"><span class="num">04</span>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#2a5c45" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="12" r="2.6"/><path d="M6 8.6v6.8M8.4 6.7c4 .9 7 2.5 7 5.3"/></svg>
+        </div>
+        <div class="step-title">Ship</div>
+        <div class="step-desc">Merged to your repo or synced to your live theme. <b>No copy-paste, no to-do list.</b></div>
+      </div>
+      <div class="step">
+        <div class="orb"><span class="num">05</span>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#2a5c45" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M5 16l4-5 4 3 6-8"/><circle cx="19" cy="6" r="1.4" fill="#2a5c45" stroke="none"/></svg>
+        </div>
+        <div class="step-title">Measure</div>
+        <div class="step-desc"><b>48h rollback watch</b> + 7-day win verification against your conversion goal.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footline">No dashboards to babysit — the agent comes to you.</div>
+
+  <div class="url">velyr.io</div>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>graph</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1080px; height:1920px; overflow:hidden; position:relative;
+  background:#191512; color:#f7f4ef;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(900px 700px at 88% -6%, rgba(125,201,160,0.08), transparent 70%),
+    radial-gradient(820px 640px at 4% 106%, rgba(140,115,85,0.10), transparent 70%);
+}
+.wordmark { position:absolute; top:70px; left:84px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:44px; letter-spacing:.01em; z-index:5; }
+.wordmark::after { content:''; display:inline-block; width:12px; height:12px; border-radius:50%; background:#7dc9a0; margin-left:11px; margin-bottom:3px; }
+.step { position:absolute; top:82px; right:84px; font-family:'DM Mono',monospace; font-size:24px; color:#8a8078; letter-spacing:.14em; z-index:5; }
+.url { position:absolute; bottom:70px; right:84px; font-size:24px; color:#8a8078; letter-spacing:.08em; z-index:5; }
+em { font-style:italic; color:#7dc9a0; font-weight:400; }
+
+.gwrap { position:absolute; left:84px; right:84px; top:250px; z-index:3;
+  background:#141210; border:1px solid rgba(247,244,239,0.10); border-radius:34px; padding:52px 56px;
+  box-shadow:0 40px 120px rgba(0,0,0,0.5); }
+.glabel { font-family:'DM Mono',monospace; font-size:26px; letter-spacing:.16em; text-transform:uppercase; color:#8a8078; }
+.gbig { margin-top:16px; font-family:'Cormorant Garamond',serif; font-weight:300; font-size:88px; color:#7dc9a0; line-height:1; }
+.gbig span { font-size:40px; color:#b5aca3; }
+svg { display:block; margin-top:40px; width:100%; height:auto; }
+.gnote { margin-top:34px; font-size:34px; color:#cfc8c0; line-height:1.5; }
+.gnote b { color:#f7f4ef; font-weight:400; }
+.cap2 { position:absolute; left:84px; right:84px; bottom:230px; z-index:3; text-align:center;
+  font-family:'Jost'; font-weight:300; font-size:40px; color:#b5aca3; line-height:1.5; }
+</style></head><body>
+<div class="wordmark">Velyr</div><div class="step">48h check</div>
+<div class="gwrap">
+  <div class="glabel">Bounce rate · after deploy</div>
+  <div class="gbig">−14%<span> in 48h</span></div>
+  <svg viewBox="0 0 900 360" preserveAspectRatio="none">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7dc9a0" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#7dc9a0" stop-opacity="0"/></linearGradient></defs>
+    <line x1="470" y1="20" x2="470" y2="360" stroke="rgba(247,244,239,0.18)" stroke-width="2" stroke-dasharray="8 10"/>
+    <text x="482" y="46" fill="#8a8078" font-family="DM Mono" font-size="22">deploy</text>
+    <path d="M0,150 L150,140 L300,158 L470,150 L620,232 L760,286 L900,300 L900,360 L0,360 Z" fill="url(#g)"/>
+    <path d="M0,150 L150,140 L300,158 L470,150 L620,232 L760,286 L900,300" fill="none" stroke="#7dc9a0" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="900" cy="300" r="12" fill="#7dc9a0"/>
+  </svg>
+  <div class="gnote">Velyr measures every fix for <b>48 hours</b>. If one ever hurts your numbers, it <b>proposes a rollback</b>.</div>
+</div>
+<div class="cap2">You stay in control the whole time.</div>
+<div class="url">velyr.io</div>
+</body></html>

@@ -1,0 +1,56 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>pr</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1080px; height:1920px; overflow:hidden; position:relative;
+  background:#191512; color:#f7f4ef;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(900px 700px at 88% -6%, rgba(125,201,160,0.08), transparent 70%),
+    radial-gradient(820px 640px at 4% 106%, rgba(140,115,85,0.10), transparent 70%);
+}
+.wordmark { position:absolute; top:70px; left:84px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:44px; letter-spacing:.01em; z-index:5; }
+.wordmark::after { content:''; display:inline-block; width:12px; height:12px; border-radius:50%; background:#7dc9a0; margin-left:11px; margin-bottom:3px; }
+.step { position:absolute; top:82px; right:84px; font-family:'DM Mono',monospace; font-size:24px; color:#8a8078; letter-spacing:.14em; z-index:5; }
+.url { position:absolute; bottom:70px; right:84px; font-size:24px; color:#8a8078; letter-spacing:.08em; z-index:5; }
+em { font-style:italic; color:#7dc9a0; font-weight:400; }
+
+.pr { position:absolute; left:84px; right:84px; top:250px; z-index:3;
+  background:#141210; border:1px solid rgba(247,244,239,0.10); border-radius:34px; overflow:hidden;
+  box-shadow:0 40px 120px rgba(0,0,0,0.5); }
+.pr-head { padding:44px 48px 36px; border-bottom:1px solid rgba(247,244,239,0.08); }
+.merged { display:inline-flex; align-items:center; gap:14px; background:#8250df; color:#fff; font-family:'Jost'; font-weight:500; font-size:30px; padding:16px 30px; border-radius:99px; }
+.merged::before { content:''; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 0 0 6px rgba(255,255,255,0.25); }
+.pr-title { margin-top:34px; font-family:'Cormorant Garamond',serif; font-weight:400; font-size:60px; line-height:1.12; }
+.pr-meta { margin-top:22px; font-family:'DM Mono',monospace; font-size:26px; color:#8a8078; letter-spacing:.04em; }
+.pr-meta b { color:#7dc9a0; font-weight:500; }
+.diff { font-family:'DM Mono',monospace; font-size:29px; line-height:2.0; padding:30px 0; }
+.dl { display:flex; white-space:pre; padding:0 48px; }
+.dl.ctx { color:#8a8078; } .dl.del { background:rgba(224,120,86,0.12); color:#e09a80; }
+.dl.add { background:rgba(125,201,160,0.12); color:#9fd8ba; }
+.dl .s { width:46px; flex:none; }
+.cap { position:absolute; left:84px; right:84px; bottom:230px; z-index:3; text-align:center;
+  font-family:'Cormorant Garamond',serif; font-weight:300; font-size:56px; color:#f7f4ef; }
+</style></head><body>
+<div class="wordmark">Velyr</div><div class="step">real code</div>
+<div class="pr">
+  <div class="pr-head">
+    <span class="merged">Merged</span>
+    <div class="pr-title">Move primary CTA above the fold on mobile</div>
+    <div class="pr-meta"><b>velyr-agent</b> merged 1 commit into <b>main</b> · #128</div>
+  </div>
+  <div class="diff">
+    <div class="dl ctx"><span class="s"> </span>&lt;section className="hero"&gt;</div>
+    <div class="dl del"><span class="s">−</span>  &lt;p className="blurb"&gt;...&lt;/p&gt;</div>
+    <div class="dl add"><span class="s">+</span>  &lt;a href="/signup"&gt;Start free →&lt;/a&gt;</div>
+    <div class="dl ctx"><span class="s"> </span>&lt;/section&gt;</div>
+  </div>
+</div>
+<div class="cap">A real pull request. Not a to-do list.</div>
+<div class="url">velyr.io</div>
+</body></html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Velyr PH — 1 Hook</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+html { zoom:2; }
+body {
+  width:1270px; height:760px; overflow:hidden; position:relative;
+  background:#f7f4ef; color:#1c1917;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(720px 420px at 88% -10%, rgba(42,92,69,0.07), transparent 70%),
+    radial-gradient(600px 400px at 4% 110%, rgba(140,115,85,0.06), transparent 70%);
+}
+.wordmark { position:absolute; top:34px; left:56px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:24px; letter-spacing:.01em; }
+.wordmark::after { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; background:#2a5c45; margin-left:7px; margin-bottom:1px; }
+.url { position:absolute; bottom:26px; right:56px; font-size:12.5px; color:#a09890; letter-spacing:.06em; }
+.tagline-chip { position:absolute; top:36px; right:56px; font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:#8c7355; font-weight:400; }
+
+.headline { position:absolute; top:76px; left:0; right:0; text-align:center; font-family:'Cormorant Garamond',serif; font-weight:300; font-size:58px; letter-spacing:-0.02em; line-height:1.05; }
+.headline em { font-style:italic; color:#2a5c45; font-weight:400; }
+.subline { position:absolute; top:152px; left:0; right:0; text-align:center; font-size:17px; color:#6b6460; font-weight:300; letter-spacing:.01em; }
+
+.stage { position:absolute; top:216px; left:56px; right:56px; height:486px; display:flex; align-items:stretch; justify-content:center; gap:0; }
+
+/* ---------- Telegram card ---------- */
+.tg { width:446px; background:#0e1621; border-radius:18px; box-shadow:0 24px 60px rgba(28,25,23,0.18); overflow:hidden; display:flex; flex-direction:column; font-family:'Segoe UI',Roboto,sans-serif; }
+.tg-head { background:#17212b; padding:12px 16px; display:flex; align-items:center; gap:11px; }
+.tg-avatar { width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,#2a5c45,#3d7a5d); color:#f7f4ef; display:flex; align-items:center; justify-content:center; font-family:'Cormorant Garamond',serif; font-size:20px; font-weight:500; flex:none; }
+.tg-name { color:#fff; font-size:14px; font-weight:600; }
+.tg-name span { color:#708499; font-weight:400; font-size:12px; margin-left:6px; }
+.tg-sub { color:#708499; font-size:11.5px; margin-top:1px; }
+.tg-body { flex:1; padding:16px 14px 14px; display:flex; flex-direction:column; justify-content:flex-end; }
+.tg-bubble { background:#182533; border-radius:12px 12px 12px 4px; padding:11px 13px 8px; color:#f1f5f8; font-size:12.5px; line-height:1.52; max-width:100%; }
+.tg-bubble b { font-weight:600; }
+.tg-bubble .title { font-weight:600; font-size:13px; display:block; margin:7px 0; }
+.tg-bubble .link { color:#6ab3f3; }
+.tg-bubble .row { margin:2px 0; }
+.tg-bubble .foot { color:#aebac6; font-size:11.5px; margin-top:8px; }
+.tg-time { text-align:right; color:#708499; font-size:10.5px; margin-top:4px; }
+.tg-kb { margin-top:6px; display:flex; flex-direction:column; gap:4px; }
+.tg-kb-row { display:flex; gap:4px; }
+.tg-btn { flex:1; text-align:center; padding:9px 0; border-radius:7px; background:rgba(255,255,255,0.065); color:#cfe4ff; font-size:12.5px; font-weight:500; }
+.tg-btn.tapped { background:rgba(106,179,243,0.22); box-shadow:0 0 0 2px rgba(106,179,243,0.55), 0 0 22px rgba(106,179,243,0.35); position:relative; }
+.tg-date { align-self:center; background:rgba(255,255,255,0.06); color:#8fa3b3; font-size:11px; padding:3px 12px; border-radius:99px; margin-bottom:auto; }
+
+/* ---------- connector ---------- */
+.connector { width:118px; position:relative; flex:none; }
+.connector svg { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); overflow:visible; }
+.connector .lbl { position:absolute; top:calc(50% - 40px); left:0; right:0; text-align:center; font-family:'Cormorant Garamond',serif; font-style:italic; font-size:18px; color:#2a5c45; }
+
+/* ---------- PR card ---------- */
+.pr { width:566px; background:#ffffff; border:1px solid rgba(28,25,23,0.09); border-radius:18px; box-shadow:0 24px 60px rgba(28,25,23,0.10); overflow:hidden; display:flex; flex-direction:column; }
+.pr-head { padding:16px 22px 14px; border-bottom:1px solid rgba(28,25,23,0.07); }
+.pr-repo { display:flex; align-items:center; gap:8px; font-family:'DM Mono',monospace; font-size:11.5px; color:#6b6460; }
+.pr-repo svg { flex:none; }
+.pr-merged { margin-left:auto; background:#2a5c45; color:#f7f4ef; font-family:'Jost',sans-serif; font-size:11.5px; font-weight:500; letter-spacing:.04em; padding:4px 12px 5px; border-radius:99px; display:flex; align-items:center; gap:5px; }
+.pr-title { margin-top:9px; font-size:17.5px; font-weight:400; letter-spacing:.005em; }
+.pr-title span { color:#a09890; font-weight:300; }
+.pr-branch { margin-top:6px; font-family:'DM Mono',monospace; font-size:10.5px; color:#a09890; }
+.pr-branch code { background:rgba(42,92,69,0.08); color:#2a5c45; padding:1.5px 6px; border-radius:5px; }
+.pr-filebar { display:flex; align-items:center; padding:9px 22px; background:#f7f4ef; border-bottom:1px solid rgba(28,25,23,0.07); font-family:'DM Mono',monospace; font-size:11.5px; color:#1c1917; }
+.pr-filebar .counts { margin-left:auto; font-size:11px; }
+.pr-filebar .add { color:#2a5c45; } .pr-filebar .del { color:#c0392b; margin-left:8px; }
+.diff { flex:1; font-family:'DM Mono',monospace; font-size:12px; line-height:1.95; padding:12px 0; }
+.dl { display:flex; white-space:pre; }
+.dl .ln { width:44px; flex:none; text-align:right; padding-right:12px; color:#c6bfb7; font-size:10.5px; line-height:inherit; }
+.dl .code { flex:1; padding-right:18px; }
+.dl.ctx .code { color:#6b6460; }
+.dl.del { background:rgba(192,57,43,0.065); } .dl.del .code { color:#8c3b30; }
+.dl.add { background:rgba(42,92,69,0.09); } .dl.add .code { color:#234d3a; }
+.dl.hunk .code { color:#a09890; font-size:11px; }
+.pr-foot { padding:11px 22px; border-top:1px solid rgba(28,25,23,0.07); font-size:12px; color:#6b6460; display:flex; gap:18px; }
+.pr-foot .ok { color:#2a5c45; font-weight:400; }
+</style>
+</head>
+<body>
+  <div class="wordmark">Velyr</div>
+  <div class="tagline-chip">Autonomous growth agent</div>
+
+  <div class="headline">You approve. <em>Velyr ships the code.</em></div>
+  <div class="subline">Every week it finds your biggest conversion leak — and fixes it with a real pull request, gated by one tap.</div>
+
+  <div class="stage">
+    <!-- Telegram -->
+    <div class="tg">
+      <div class="tg-head">
+        <div class="tg-avatar">V</div>
+        <div>
+          <div class="tg-name">Velyr Agent <span>bot</span></div>
+          <div class="tg-sub">Monday 09:04</div>
+        </div>
+      </div>
+      <div class="tg-body">
+        <div class="tg-date">Monday</div>
+        <div class="tg-bubble">
+          🤖 <b>Velyr Growth Agent</b>
+          <span class="title">Your primary CTA is buried below the fold on mobile</span>
+          <div class="row">📊 <b>Hypothesis:</b> 68% of mobile visitors never scroll past the hero — the trial CTA first appears at 1,340px.</div>
+          <div class="row">🎯 <b>Expected:</b> decrease bounce_rate ~6pp (medium confidence)</div>
+          <div class="row">📁 <b>File:</b> src/components/Hero.jsx</div>
+          <div class="row">⚠️ <b>Blind spots:</b> paid-traffic landing variants</div>
+          <div class="row" style="margin-top:7px">🔗 <span class="link">View PR</span></div>
+          <div class="foot">Tap a button below (or reply <b>YES</b> to merge / <b>NO</b> to reject). Full receipt in the PR.</div>
+          <div class="tg-time">09:04</div>
+        </div>
+        <div class="tg-kb">
+          <div class="tg-kb-row">
+            <div class="tg-btn tapped">✅ Apply</div>
+            <div class="tg-btn">❌ Skip</div>
+          </div>
+          <div class="tg-kb-row"><div class="tg-btn">🔍 Preview</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- connector -->
+    <div class="connector">
+      <div class="lbl">one tap</div>
+      <svg width="108" height="36" viewBox="0 0 108 36">
+        <path d="M2,18 C34,4 74,4 96,16" fill="none" stroke="#2a5c45" stroke-width="2" stroke-dasharray="1 7" stroke-linecap="round"/>
+        <path d="M88,8 L100,17 L85,21" fill="none" stroke="#2a5c45" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <!-- PR -->
+    <div class="pr">
+      <div class="pr-head">
+        <div class="pr-repo">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="#6b6460"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+          acme-store / website
+          <div class="pr-merged">✓&nbsp; Merged</div>
+        </div>
+        <div class="pr-title">Velyr — Conversion Fix Proposal <span>#23</span></div>
+        <div class="pr-branch"><code>velyr/fix-hero-cta-mobile</code> &nbsp;→&nbsp; <code>main</code></div>
+      </div>
+      <div class="pr-filebar">src/components/Hero.jsx <span class="counts"><span class="add">+4</span><span class="del">−3</span></span></div>
+      <div class="diff">
+        <div class="dl hunk"><span class="ln"></span><span class="code">@@ -41,7 +41,8 @@ export default function Hero() {</span></div>
+        <div class="dl ctx"><span class="ln">41</span><span class="code">  &lt;h1 className="hero-title"&gt;{title}&lt;/h1&gt;</span></div>
+        <div class="dl ctx"><span class="ln">42</span><span class="code">  &lt;p className="hero-sub"&gt;{subline}&lt;/p&gt;</span></div>
+        <div class="dl del"><span class="ln">43</span><span class="code">- &lt;a className="cta cta--ghost" href="#features"&gt;</span></div>
+        <div class="dl del"><span class="ln">44</span><span class="code">-   Learn more</span></div>
+        <div class="dl del"><span class="ln">45</span><span class="code">- &lt;/a&gt;</span></div>
+        <div class="dl add"><span class="ln">43</span><span class="code">+ &lt;a className="cta cta--solid cta--above-fold" href="/signup"&gt;</span></div>
+        <div class="dl add"><span class="ln">44</span><span class="code">+   Start your free trial →</span></div>
+        <div class="dl add"><span class="ln">45</span><span class="code">+ &lt;/a&gt;</span></div>
+        <div class="dl add"><span class="ln">46</span><span class="code">+ {/* CTA now renders inside the first viewport on mobile */}</span></div>
+        <div class="dl ctx"><span class="ln">47</span><span class="code">  &lt;SocialProof logos={logos} /&gt;</span></div>
+        <div class="dl ctx"><span class="ln">48</span><span class="code">&lt;/section&gt;</span></div>
+      </div>
+      <div class="pr-foot"><span class="ok">✓ Babel syntax check passed</span><span>Full receipt in the PR body</span><span style="margin-left:auto">merged 09:07</span></div>
+    </div>
+  </div>
+
+  <div class="url">velyr.io</div>
+</body>
+</html>

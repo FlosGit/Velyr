@@ -1,0 +1,9 @@
+{
+  "snippet": {
+    "title": "I gave an AI access to my code. It ships a conversion fix every week.",
+    "description": "Your site is leaking signups every week — and you can't see where. So I connected an AI growth agent to my code.\n\nEvery week it:\n→ reads your real analytics + code and finds your single biggest conversion leak\n→ writes the fix as a real GitHub pull request (or a staged Shopify edit)\n→ sends it to Telegram — you reply YES and it ships, never before\n→ measures for 48h and proposes a rollback if a fix ever hurts your numbers\n\nOne conversion fix, every week, shipped with your approval. No dashboard of to-dos you still have to build yourself.\n\n14-day free trial, no card → https://velyr.io\n\n#Shorts #conversion #cro #saas #buildinpublic #shopify",
+    "tags": ["conversion rate optimization", "cro", "saas", "buildinpublic", "shopify", "ai agent", "growth", "indie hackers", "startup"],
+    "categoryId": "28"
+  },
+  "status": { "privacyStatus": "public", "selfDeclaredMadeForKids": false }
+}

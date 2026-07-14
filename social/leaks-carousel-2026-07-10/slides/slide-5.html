@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Slide 5</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1080px; height:1350px; overflow:hidden; position:relative;
+  background:#191512; color:#f7f4ef;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(760px 560px at 90% -8%, rgba(125,201,160,0.07), transparent 70%),
+    radial-gradient(680px 520px at 2% 108%, rgba(140,115,85,0.09), transparent 70%);
+}
+.wordmark { position:absolute; top:56px; left:72px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:34px; letter-spacing:.01em; z-index:2; }
+.wordmark::after { content:''; display:inline-block; width:10px; height:10px; border-radius:50%; background:#7dc9a0; margin-left:9px; margin-bottom:2px; }
+.pageno { position:absolute; top:66px; right:72px; font-family:'DM Mono',monospace; font-size:20px; color:#8a8078; letter-spacing:.12em; z-index:2; }
+.url { position:absolute; bottom:48px; right:72px; font-size:19px; color:#8a8078; letter-spacing:.08em; z-index:2; }
+em { font-style:italic; color:#7dc9a0; font-weight:400; }
+
+/* leak slides */
+.bignum {
+  position:absolute; top:96px; right:34px; z-index:1;
+  font-family:'Cormorant Garamond',serif; font-weight:300; font-size:400px; line-height:1;
+  color:transparent; -webkit-text-stroke:1.5px rgba(247,244,239,0.14);
+}
+.label { position:absolute; top:236px; left:72px; font-family:'DM Mono',monospace; font-size:23px; letter-spacing:.26em; text-transform:uppercase; color:#7dc9a0; z-index:2; }
+.claim { position:absolute; top:320px; left:72px; right:72px; font-family:'Cormorant Garamond',serif; font-weight:300; font-size:67px; line-height:1.14; letter-spacing:-0.01em; z-index:2; }
+.card {
+  position:absolute; left:72px; right:72px; bottom:270px; z-index:2;
+  background:#221d18; border:1px solid rgba(247,244,239,0.09); border-radius:20px;
+  box-shadow:0 30px 70px rgba(0,0,0,0.35); overflow:hidden;
+}
+.card-head { padding:20px 30px; border-bottom:1px solid rgba(247,244,239,0.07); font-family:'DM Mono',monospace; font-size:20px; color:#8a8078; display:flex; }
+.card-head .fix-chip { margin-left:auto; color:#7dc9a0; }
+.diff { font-family:'DM Mono',monospace; font-size:27px; line-height:2.1; padding:18px 0; }
+.dl { display:flex; white-space:pre; padding:0 30px; }
+.dl.del { background:rgba(224,120,86,0.10); color:#e09a80; }
+.dl.add { background:rgba(125,201,160,0.10); color:#9fd8ba; }
+.dl .sign { width:44px; flex:none; }
+.fixline { position:absolute; left:72px; right:72px; bottom:150px; font-size:31px; font-weight:300; color:#cfc8c0; z-index:2; }
+.fixline b { color:#7dc9a0; font-weight:500; font-family:'DM Mono',monospace; font-size:26px; letter-spacing:.12em; text-transform:uppercase; margin-right:14px; }
+.swipe { position:absolute; bottom:48px; left:72px; font-family:'DM Mono',monospace; font-size:20px; color:#8a8078; letter-spacing:.12em; z-index:2; }
+</style></head>
+<body>
+<div class="wordmark">Velyr</div><div class="pageno">05 / 07</div>
+<div class="bignum">04</div>
+<div class="label">Leak 04 — Proof nobody can check</div>
+<div class="claim">“Loved by thousands” reads as filler. A number someone <em>could verify</em> reads as proof.</div>
+<div class="card">
+  <div class="card-head">the one-line fix<span class="fix-chip">+1 −1</span></div>
+  <div class="diff">
+    <div class="dl del"><span class="sign">−</span>Trusted by industry leaders</div>
+    <div class="dl add"><span class="sign">+</span>1,204 invoices sent last week</div>
+  </div>
+</div>
+<div class="fixline"><b>Fix</b>Specific beats superlative — if it’s true.</div>
+<div class="swipe">swipe →</div>
+<div class="url">velyr.io</div>
+</body></html>

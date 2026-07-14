@@ -1,0 +1,66 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>yes</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1080px; height:1920px; overflow:hidden; position:relative;
+  background:#191512; color:#f7f4ef;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(900px 700px at 88% -6%, rgba(125,201,160,0.08), transparent 70%),
+    radial-gradient(820px 640px at 4% 106%, rgba(140,115,85,0.10), transparent 70%);
+}
+.wordmark { position:absolute; top:70px; left:84px; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:44px; letter-spacing:.01em; z-index:5; }
+.wordmark::after { content:''; display:inline-block; width:12px; height:12px; border-radius:50%; background:#7dc9a0; margin-left:11px; margin-bottom:3px; }
+.step { position:absolute; top:82px; right:84px; font-family:'DM Mono',monospace; font-size:24px; color:#8a8078; letter-spacing:.14em; z-index:5; }
+.url { position:absolute; bottom:70px; right:84px; font-size:24px; color:#8a8078; letter-spacing:.08em; z-index:5; }
+em { font-style:italic; color:#7dc9a0; font-weight:400; }
+
+.phone { position:absolute; left:84px; right:84px; top:210px; bottom:200px; z-index:3;
+  background:#0f0d0b; border:1px solid rgba(247,244,239,0.10); border-radius:44px; overflow:hidden;
+  box-shadow:0 40px 120px rgba(0,0,0,0.55); display:flex; flex-direction:column; }
+.tg-head { display:flex; align-items:center; gap:22px; padding:34px 40px; background:#181513; border-bottom:1px solid rgba(247,244,239,0.07); }
+.tg-av { width:74px; height:74px; border-radius:50%; background:linear-gradient(150deg,#7dc9a0,#3f6b56); display:flex; align-items:center; justify-content:center; font-family:'Cormorant Garamond',serif; font-weight:500; font-size:42px; color:#0f0d0b; }
+.tg-name { font-family:'Jost'; font-weight:500; font-size:38px; }
+.tg-name span { display:block; font-size:24px; color:#7dc9a0; font-weight:400; margin-top:4px; }
+.tg-body { flex:1; padding:44px 40px; display:flex; flex-direction:column; gap:30px; }
+.bubble { max-width:78%; padding:30px 34px; border-radius:30px; font-size:34px; line-height:1.42; }
+.bot { align-self:flex-start; background:#221d18; border:1px solid rgba(247,244,239,0.08); border-bottom-left-radius:10px; color:#f2ede7; }
+.me  { align-self:flex-end; background:#7dc9a0; color:#12100e; font-weight:500; border-bottom-right-radius:10px; }
+.tag { font-family:'DM Mono',monospace; font-size:23px; letter-spacing:.16em; text-transform:uppercase; color:#7dc9a0; margin-bottom:14px; }
+.ba { margin-top:24px; display:flex; gap:16px; }
+.ba .mini { flex:1; background:#15120f; border:1px solid rgba(247,244,239,0.09); border-radius:16px; padding:18px; }
+.ba .mlabel { font-family:'DM Mono',monospace; font-size:19px; color:#8a8078; letter-spacing:.12em; text-transform:uppercase; margin-bottom:14px; }
+.ba .sk { height:12px; border-radius:6px; background:rgba(247,244,239,0.14); margin-bottom:12px; }
+.ba .sk.w70 { width:70%; } .ba .sk.w45 { width:45%; } .ba .sk.w90 { width:90%; }
+.ba .cta-lo { margin-top:44px; height:34px; width:60%; border-radius:8px; background:rgba(224,154,128,0.35); }
+.ba .cta-hi { margin-top:12px; height:34px; width:60%; border-radius:8px; background:#7dc9a0; }
+.hint { align-self:flex-start; font-family:'DM Mono',monospace; font-size:26px; color:#8a8078; letter-spacing:.04em; margin-top:6px; }
+.shipped { align-self:flex-start; background:rgba(125,201,160,0.12); border:1px solid rgba(125,201,160,0.4); color:#9fd8ba; padding:24px 30px; border-radius:24px; font-family:'DM Mono',monospace; font-size:28px; letter-spacing:.02em; }
+</style></head><body>
+<div class="wordmark">Velyr</div><div class="step">one tap</div>
+<div class="phone"><div class="tg-head"><div class="tg-av">V</div>
+      <div class="tg-name">Velyr agent<span>bot · online</span></div></div>
+  <div class="tg-body">
+    <div class="bubble bot">
+  <div class="tag">Weekly fix · /pricing</div>
+  Your primary CTA sits <b>below the fold on mobile</b>. 61% of visitors never scroll to it.
+  <div class="ba">
+    <div class="mini"><div class="mlabel">Before</div>
+      <div class="sk w90"></div><div class="sk w70"></div><div class="sk w45"></div>
+      <div class="cta-lo"></div></div>
+    <div class="mini"><div class="mlabel">After</div>
+      <div class="sk w90"></div><div class="cta-hi"></div><div class="sk w70"></div>
+      <div class="sk w45"></div></div>
+  </div>
+</div>
+    <div class="bubble me">YES ✅</div>
+    <div class="shipped">↑ shipped · PR #128 merged</div>
+  </div>
+</div>
+<div class="url">velyr.io</div>
+</body></html>
