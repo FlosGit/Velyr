@@ -1,0 +1,15 @@
+﻿{
+    "query":  "mutation($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) { themeFilesUpsert(themeId: $themeId, files: $files) { upsertedThemeFiles { filename } userErrors { field message } } }",
+    "variables":  {
+                      "themeId":  "gid://shopify/OnlineStoreTheme/148893728833",
+                      "files":  [
+                                    {
+                                        "body":  {
+                                                     "value":  "\u003c!-- velyr write test --\u003e",
+                                                     "type":  "TEXT"
+                                                 },
+                                        "filename":  "snippets/velyr-write-test.liquid"
+                                    }
+                                ]
+                  }
+}

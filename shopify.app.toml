@@ -1,0 +1,20 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "749e9adc7afea38f3b91dab5e453c9cb"
+application_url = "https://velyr.io"
+embedded = false
+name = "Velyr"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_themes,write_themes"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://mtqctjgecbscjmottauv.supabase.co/functions/v1/shopify-oauth"
+]
+
+[webhooks]
+api_version = "2026-04"

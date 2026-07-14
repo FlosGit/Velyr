@@ -153,3 +153,9 @@ vite.config.ts.timestamp-*
 
 # Rendered lifecycle-email previews (scripts/email-preview.mjs)
 .email-preview/
+
+client_secret.json
+
+client_secret.json.json
+token.json
+*.pickle
