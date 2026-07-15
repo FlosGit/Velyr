@@ -2,6 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 import { App } from 'npm:@octokit/app@14'
 import { Octokit } from 'npm:@octokit/rest@20'
 import { throttling } from 'npm:@octokit/plugin-throttling@8'
+import { retry } from 'npm:@octokit/plugin-retry@6'
 import { parse as babelParse } from 'npm:@babel/parser@7.27.0'
 import { discoverFrameworkAndStructure, detectLintInfo, isShopifyThemeRepo, type MapResult, type LintInfo, type TreeEntry } from './repo-mapper.ts'
 import { buildImportGraph, type ImportGraph, type GraphNode } from './import-graph.ts'
@@ -16,7 +17,12 @@ import { validateHtmlShell, extractInlineScripts } from './html-validate.ts'
 // Stage 5.D: Octokit with automatic rate-limit + secondary-rate-limit
 // handling. Honors GitHub's Retry-After header and retries a bounded number
 // of times instead of hard-failing a weekly run on a transient 403/429.
-const ThrottledOctokit = Octokit.plugin(throttling)
+// plugin-retry (2026-07-15) additionally retries transient request failures
+// (5xx, ECONNRESET) with backoff — before it, ONE flaky getTree/getBlob/
+// createPR response failed the customer's whole week. plugin-retry@6 is the
+// @octokit/rest@20-compatible line; both plugins compose (retry handles
+// server errors, throttling handles 403/429 rate limits).
+const ThrottledOctokit = Octokit.plugin(throttling, retry)
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -55,18 +61,23 @@ async function dbWrite<T extends { error: any; status?: number }>(
 // a Claude run going long must NEVER drain the OpenRouter wallet. Every value
 // is overridable via env var so you can re-tune without a deploy.
 const LLM_CAPS = {
-  // Max output tokens per call. Sonnet 4.5 charges per output token, so cap
+  // Max output tokens per call. The model charges per output token, so cap
   // them at "enough for this call's contract" not "context window".
-  MAX_TOKENS_ANALYSIS: Number(Deno.env.get('LLM_MAX_TOKENS_ANALYSIS') || '6000'),  // callAI JSON (Pass 2) — find+replace can carry sizeable verbatim code blocks; 2000 truncated mid-JSON
+  // 8000, not 6000 (2026-07-15, Opus era): find+replace can carry sizeable
+  // verbatim code blocks AND Opus-class models write longer prose fields; a
+  // finish_reason 'length' on Pass 2 is a FAILED run (the length-retry in
+  // callLLMCapped re-pays the full input price, so headroom here is cheaper).
+  MAX_TOKENS_ANALYSIS: Number(Deno.env.get('LLM_MAX_TOKENS_ANALYSIS') || '8000'),  // callAI JSON (Pass 2)
   MAX_TOKENS_ROAST:    Number(Deno.env.get('LLM_MAX_TOKENS_ROAST')    || '1500'),  // monthly roast
   // RA3 Pass-1 component ranker. Authoritative home for the ranker cap — the
   // ranker module delegates max_tokens to the injected callAI closure, which
   // applies this value (single source of truth, no duplicated magic number).
-  // 2000, not 600: the ranked/skipped/unsure-with-reasons JSON for a ~50-node
+  // 3000, not 600: the ranked/skipped/unsure-with-reasons JSON for a ~50-node
   // graph overflows 600 output tokens → finish_reason 'length' → silent
-  // heuristic fallback on exactly the sites where LLM ranking matters most.
-  // Worst-case added cost ≈ €0.02/run at current output pricing.
-  MAX_TOKENS_RANKER:   Number(Deno.env.get('LLM_MAX_TOKENS_RANKER')   || '2000'),  // callAI JSON (Pass 1)
+  // heuristic fallback on exactly the sites where LLM ranking matters most
+  // (2000 was the Sonnet-calibrated value; Opus writes longer reasons).
+  // Worst-case added cost ≈ €0.03/run at current output pricing.
+  MAX_TOKENS_RANKER:   Number(Deno.env.get('LLM_MAX_TOKENS_RANKER')   || '3000'),  // callAI JSON (Pass 1)
   // Hard ceiling on the JSON body we POST to OpenRouter. 500 KB ≈ 125 K
   // tokens — well under Sonnet 4.5's 200 K context, leaves room for output.
   // If exceeded, abort the run rather than send a giant prompt.
@@ -80,6 +91,17 @@ const LLM_CAPS = {
 // the native dash ID — verify a new slug via live GET /models before setting.
 // Twin: VISUAL_CHECK_MODEL in api/agent/run.js reads the same env var.
 const LLM_MODEL = Deno.env.get('AGENT_LLM_MODEL') || 'anthropic/claude-sonnet-4.6'
+
+// LLM wall-clock timeouts, tuned for the PRODUCTION model class. Opus-class
+// models generate ~15-40 output tok/s, so a Pass-2 JSON with verbatim code
+// blocks routinely needs 60-150s of pure generation — the old hardcoded
+// 45s/90s (Sonnet-era) values would make every slow-but-healthy Opus call
+// look like a network failure and fail the run. Overridable via Supabase
+// secrets (no redeploy). Keep both comfortably under the edge isolate's
+// wall-clock; postOpenRouterWithRetry deliberately does NOT retry a timeout
+// on long-budget calls (see there) so one slow call can't burn 2× its budget.
+const LLM_TIMEOUT_MS        = Number(Deno.env.get('AGENT_LLM_TIMEOUT_MS')        || '120000')
+const LLM_TIMEOUT_IMAGES_MS = Number(Deno.env.get('AGENT_LLM_TIMEOUT_IMAGES_MS') || '160000')
 
 // Pricing for LLM_MODEL via OpenRouter, in EUR per million tokens. Verified
 // against live GET /models 2026-07-05 for claude-sonnet-4.6: $3/$15 per M,
@@ -3359,6 +3381,17 @@ async function postOpenRouterWithRetry(requestBody: string, callerLabel: string,
   }
   let r = await attempt()
   if (!r.ok && (r.networkError || r.status === 429 || r.status >= 500)) {
+    // A TIMEOUT on a long-budget call is almost never transient — the model is
+    // just slow on this prompt (Opus-class generation), and a same-length
+    // second attempt would double the isolate's wall-clock burn (the
+    // WallClockTimeout failure class). Fail fast instead: the CALLERS have the
+    // cheaper degradation paths (Pass 2 retries without images, the ranker
+    // falls back to heuristics, the verify-gate fails open). Short-budget
+    // timeouts and genuine network blips / 429 / 5xx keep the single retry.
+    const isTimeout = r.networkError && (r.networkError?.name === 'TimeoutError' || r.networkError?.name === 'AbortError')
+    if (isTimeout && timeoutMs >= 60_000) {
+      throw new Error(`${callerLabel}: OpenRouter request timed out after ${timeoutMs}ms (long-budget call, not retried)`)
+    }
     slog('warn', 'openrouter_retry', { callerLabel, status: r.status, error: r.networkError ? String(r.networkError?.message || r.networkError).slice(0, 120) : undefined })
     await new Promise(res => setTimeout(res, 2000))
     r = await attempt()
@@ -3370,9 +3403,9 @@ async function postOpenRouterWithRetry(requestBody: string, callerLabel: string,
 }
 
 async function callLLMCapped(subscriptionId: string, system: string, user: string, maxTokens: number, callerLabel: string, imageUrls: string[] = []): Promise<string> {
-  const requestBody = JSON.stringify({
+  const buildBody = (cap: number) => JSON.stringify({
     model: LLM_MODEL,
-    max_tokens: maxTokens,
+    max_tokens: cap,
     messages: [
       { role: 'system', content: system },
       // Multimodal (item 3a): screenshot URLs ride as image_url blocks in the
@@ -3387,23 +3420,35 @@ async function callLLMCapped(subscriptionId: string, system: string, user: strin
       },
     ],
   })
+  const requestBody = buildBody(maxTokens)
   assertPromptSize(requestBody, callerLabel)
 
   // B1: image-bearing Pass-2 calls get a longer budget (the provider fetches the
-  // screenshot URLs); everything else 45s. Both under the edge wall-clock.
-  const timeoutMs = imageUrls.length > 0 ? 90_000 : 45_000
-  const data = await postOpenRouterWithRetry(requestBody, callerLabel, timeoutMs)
+  // screenshot URLs); everything else LLM_TIMEOUT_MS. Both under the edge wall-clock.
+  const timeoutMs = imageUrls.length > 0 ? LLM_TIMEOUT_IMAGES_MS : LLM_TIMEOUT_MS
+  let data = await postOpenRouterWithRetry(requestBody, callerLabel, timeoutMs)
+  if (data?.usage) await recordLLMUsage(subscriptionId, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0, callerLabel)
 
-  const usage = data?.usage
-  if (usage) await recordLLMUsage(subscriptionId, usage.prompt_tokens || 0, usage.completion_tokens || 0, callerLabel)
+  // Truncation self-heal (2026-07-15): finish_reason 'length' used to throw
+  // straight away, and every caller's degradation path is worse than one more
+  // attempt (Pass 2 → failed run; ranker → heuristic fallback; verify-gate →
+  // fail-open; find-repair → find_mismatch stands). ONE retry at a doubled cap
+  // fixes the truncation whenever the contract merely outgrew a Sonnet-era
+  // budget; a second truncation still throws honestly below. Both attempts are
+  // recorded against the wallet.
+  if (data.choices?.[0]?.finish_reason === 'length') {
+    slog('warn', 'llm_length_retry', { callerLabel, maxTokens, retryCap: maxTokens * 2 })
+    data = await postOpenRouterWithRetry(buildBody(maxTokens * 2), callerLabel, timeoutMs)
+    if (data?.usage) await recordLLMUsage(subscriptionId, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0, callerLabel)
+  }
 
   const text = data.choices?.[0]?.message?.content
   if (!text) throw new Error(`${callerLabel}: AI returned empty response: ${JSON.stringify(data).slice(0, 200)}`)
   // Distinguish truncation (hit max_tokens) from a genuinely malformed reply —
   // both otherwise surface downstream as the opaque "invalid JSON". finish_reason
-  // 'length' means the cap was too low for this call's contract; say so.
+  // 'length' here means even the doubled retry cap was too low; say so.
   if (data.choices?.[0]?.finish_reason === 'length') {
-    throw new Error(`${callerLabel}: response truncated at max_tokens=${maxTokens} (finish_reason=length) — raise the cap`)
+    throw new Error(`${callerLabel}: response truncated at max_tokens=${maxTokens * 2} even after the length-retry (finish_reason=length) — raise the cap`)
   }
   return text
 }
@@ -3969,6 +4014,8 @@ Return JSON only (no markdown), at most 5 claims, every free-text field at most 
       // max_tokens 1000, NOT less: callLLMCapped throws on finish_reason
       // 'length', and under fail-open a truncated verdict would silently
       // disable the gate exactly on claim-heavy (interesting) proposals.
+      // (Since 2026-07-15 callLLMCapped additionally self-heals one truncation
+      // with a doubled-cap retry, so a verbose verdict costs a retry, not the gate.)
       text = await callLLMCapped(subscriptionId, system, user, 1000, 'fix_verify', urls)
     } catch (err: any) {
       if (urls.length === 0) throw err
@@ -5504,10 +5551,25 @@ async function processConnection(conn: any) {
     const rankerCallAI = (args: { system: string; user: string }) =>
       callLLMCapped(conn.subscription_id, args.system, args.user, LLM_CAPS.MAX_TOKENS_RANKER, 'ranker')
 
+    // W4 (2026-07-15): a plain-html site's graph is its root index.html (± a
+    // script) — permanently below the sparse gate, yet since W3 the shell
+    // itself is the editable fix surface (deep-reader promotion + createPR
+    // .html allowance + validateHtmlEdit all exist and were unreachable for
+    // exactly these sites). Opt tiny plain-html graphs into the shell-fix
+    // path instead of skipping. Gated on the SAME kill-switch as W3 (no shell
+    // edit ⇒ no reason to rank a shell-only graph) plus its own
+    // AGENT_SPARSE_SHELL_FIX escape hatch. Pass 2 keeps every honest out
+    // (skip, verify-gate, no-data gate upstream), so this only widens what
+    // the model may look at — never what it must ship.
+    const sparseShellOk = mapResult.framework === 'plain-html'
+      && (Deno.env.get('AGENT_HTML_EDIT') ?? 'true') !== 'false'
+      && (Deno.env.get('AGENT_SPARSE_SHELL_FIX') ?? 'true') !== 'false'
+
     const rankerResult: RankerResult = await rankComponentsForConversion(
       graph, rankerAnalyticsContext, rankerCallAI,
       { framework: mapResult.framework, cssApproach: mapResult.cssApproach },
       rankerOwnerDirectives,
+      { sparseOk: sparseShellOk },
     )
     if (rankerResult.pass1_fallback) {
       slog('warn', 'ranker_pass1_fallback', { runId: run.id, subscriptionId: conn.subscription_id, nodeCount: rankerResult.node_count, reason: rankerResult.fallback_reason })

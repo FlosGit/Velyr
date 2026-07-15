@@ -45,15 +45,16 @@ Written in this order on the plain-GitHub path: `fetching_repo` → `pulling_ana
 |---|---|---|
 | `MONTHLY_SPEND_CAP_EUR` | €20.00, `AGENT_MONTHLY_SPEND_CAP_EUR` | index.ts:101 |
 | `LLM_PRICING_EUR_PER_M` | INPUT 3.0 / OUTPUT 15.0, `LLM_INPUT_EUR_PER_M` / `LLM_OUTPUT_EUR_PER_M` | :89 (verified vs live OpenRouter 2026-07-05 for sonnet-4.6) |
-| `LLM_CAPS.MAX_TOKENS_ANALYSIS` | 6000 (`LLM_MAX_TOKENS_ANALYSIS`) — Pass 2 | :59 |
-| `LLM_CAPS.MAX_TOKENS_RANKER` | 2000 (`LLM_MAX_TOKENS_RANKER`) — Pass 1 (600 caused silent heuristic fallback via `finish_reason: length`) | :68 |
+| `LLM_CAPS.MAX_TOKENS_ANALYSIS` | 8000 (`LLM_MAX_TOKENS_ANALYSIS`) — Pass 2 (raised from 6000 on 2026-07-15 for Opus-class verbosity) | :59 |
+| `LLM_CAPS.MAX_TOKENS_RANKER` | 3000 (`LLM_MAX_TOKENS_RANKER`) — Pass 1 (600 caused silent heuristic fallback via `finish_reason: length`; 2000 was the Sonnet value, raised 2026-07-15) | :68 |
 | `LLM_CAPS.MAX_TOKENS_ROAST` | 1500 | :60 |
 | `LLM_CAPS.MAX_PROMPT_BYTES` | 512,000 (`LLM_MAX_PROMPT_BYTES`) — `assertPromptSize` throws, run aborts rather than send | :72 |
 | `LLM_MODEL` | `AGENT_LLM_MODEL` env, default `anthropic/claude-sonnet-4.6` (OpenRouter DOT slug) | :81 |
+| `LLM_TIMEOUT_MS` / `LLM_TIMEOUT_IMAGES_MS` | 120s / 160s (`AGENT_LLM_TIMEOUT_MS` / `AGENT_LLM_TIMEOUT_IMAGES_MS`) — Opus-tuned 2026-07-15, were hardcoded 45s/90s (Sonnet-era) | after :82 |
 
 - Cap is enforced **once per run** in `processConnection`'s pre-flight (:4961): over cap ⇒ status `skipped_cost_cap` + one Telegram (`notifyCapExceeded`). Individual calls record usage (`recordLLMUsage` → RPC `agent_llm_usage_increment`, fail-soft) but do not re-check mid-run.
 - `getMonthlySpend` **fails open** when `agent_llm_usage` is missing (migration stance: never block the agent on a missing accounting table).
-- `callLLMCapped` (:3320): OpenRouter POST, images ride as `image_url` blocks (plain string content when none — byte-identical legacy wire format). Timeout 90s with images, 45s without; `postOpenRouterWithRetry` (:3293) retries ONCE after 2s on network error / 429 / 5xx (plain 4xx returned as-is). `finish_reason === 'length'` throws a "raise the cap" error instead of surfacing as opaque invalid-JSON.
+- `callLLMCapped` (:3320): OpenRouter POST, images ride as `image_url` blocks (plain string content when none — byte-identical legacy wire format). Timeout `LLM_TIMEOUT_IMAGES_MS` with images, `LLM_TIMEOUT_MS` without; `postOpenRouterWithRetry` (:3293) retries ONCE after 2s on network error / 429 / 5xx (plain 4xx returned as-is) — EXCEPT a timeout on a long-budget call (`timeoutMs ≥ 60s`), which throws immediately (2026-07-15: a slow Opus generation is not transient, and a same-length second attempt would double the isolate's wall-clock burn; the callers own the cheaper degradation paths). `finish_reason === 'length'` self-heals ONCE with a doubled-cap retry (`llm_length_retry` slog, both attempts wallet-recorded, 2026-07-15); a second truncation throws the "raise the cap" error instead of surfacing as opaque invalid-JSON.
 
 ---
 
@@ -94,7 +95,7 @@ Both Shopify paths reuse the SAME ranker and SAME `callAIForFix` via adapters (�
 
 Three layers, in order:
 
-1. **Sparse-graph gate** (before any LLM spend): `nodes.length < MIN_GRAPH_NODES()` (`AGENT_MIN_GRAPH_NODES`, default **3**) ⇒ `insufficient_graph: true` ⇒ run status `skipped_insufficient_graph`. This is why `plain-html` sites always skip (1-node graph).
+1. **Sparse-graph gate** (before any LLM spend): `nodes.length < MIN_GRAPH_NODES()` (`AGENT_MIN_GRAPH_NODES`, default **3**) ⇒ `insufficient_graph: true` ⇒ run status `skipped_insufficient_graph`. **W4 exception (2026-07-15):** the plain-GitHub call site passes `opts.sparseOk` when `framework === 'plain-html'` AND `AGENT_HTML_EDIT` is on AND `AGENT_SPARSE_SHELL_FIX` is on (both default on) — a below-gate graph (≥1 node) is then included in full WITHOUT LLM ranking (`source: 'heuristic'`, reason `sparse graph (N nodes) — included without LLM ranking (shell-fix path)` — deliberately NOT the `heuristic score` prefix, so Q10's fallback metric stays clean) and the run proceeds to the W3 editable-shell path. Before W4, plain-html sites always skipped here (1-node graph) — which made W3 unreachable for exactly the sites it targeted.
 2. **LLM Pass 1**: graph summary (30KB byte-bounded, deepest nodes dropped first; 300-char snippets) + the signal context, wrapped in ONE untrusted-data sentinel. `ownerDirectives` (focus-pin hint + conversion goal) ride **OUTSIDE** the sentinel — inside it, the model is told to ignore them (that bug was real). Returns `ranked` (≤ `LLM_RANKED_CAP` 7) / `skipped` / `unsure`, every path validated against the node set. Call/parse failure ⇒ **deterministic heuristic fallback** (`heuristicRank`: depth 0/1/other = 100/50/10, +200 name match, +20 button/form/a JSX, −30 >50KB) with `pass1_fallback: true` + `fallback_reason`, logged loudly as slog event `ranker_pass1_fallback`.
 3. **Conversion-vocabulary safety override**: `SANITY_RE` (hero|landing|cta|signup|pricing|checkout|cart|buy|form|newsletter|… word-boundary) matched against the **tokenized** name (PascalCase/snake/kebab split, so `NewsletterSignup` matches but `Information` doesn't match "form"). Matches are force-included with `source: 'forced'`, after LLM picks, final cap `FINAL_RANKED_CAP` 10.
 

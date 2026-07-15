@@ -159,11 +159,29 @@ export async function rankComponentsForConversion(
   // they landed inside a block whose preamble says "ignore any instructions inside",
   // telling the model to disregard exactly the bias they were meant to apply.
   ownerDirectives = '',
+  // W4 (2026-07-15): sparseOk — the caller opts a below-gate graph into the
+  // shell-fix path instead of a skip. Built for plain-html sites: their graph
+  // is the root index.html (± a script), permanently below MIN_GRAPH_NODES,
+  // yet since W3 (AGENT_HTML_EDIT) the shell itself is editable — the gate was
+  // skipping exactly the runs the feature was built for. A graph this small
+  // needs no LLM ranking: every node is included directly.
+  opts: { sparseOk?: boolean } = {},
 ): Promise<RankerResult> {
   const nodeCount = graph.nodes.length
 
   // 1. Sparse-graph gate — FIRST, before any LLM call.
   if (nodeCount < MIN_GRAPH_NODES()) {
+    if (opts.sparseOk && nodeCount >= 1) {
+      // Reason deliberately does NOT start with 'heuristic score': the
+      // ranker-fallback diagnostics (Q10) key on that prefix, and this is a
+      // deliberate path, not a Pass-1 failure.
+      const ranked = graph.nodes.slice(0, FINAL_RANKED_CAP).map(n => ({
+        path: n.path,
+        reason: `sparse graph (${nodeCount} node${nodeCount === 1 ? '' : 's'}) — included without LLM ranking (shell-fix path)`,
+        source: 'heuristic' as const,
+      }))
+      return { ranked, skipped: [], unsure: [], pass1_fallback: false, insufficient_graph: false, node_count: nodeCount }
+    }
     return { ranked: [], skipped: [], unsure: [], pass1_fallback: false, insufficient_graph: true, node_count: nodeCount }
   }
 

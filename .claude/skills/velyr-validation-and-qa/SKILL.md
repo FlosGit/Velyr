@@ -90,7 +90,7 @@ Thresholds are **named constants**, env-overridable where operational, **twinned
 | `MEASURED_WIN_MIN_PP` | 5 pp | `api/agent/run.js:216` | 7d DNA promotion: ≥5pp bounce improvement = `measured_win`, else `survived`. Within-noise band at `run.js:1698-1704` hardcodes the 15 — keep in sync with the rollback threshold |
 | `NO_DATA_THRESHOLDS.MIN_UNIQUE_VISITORS_7D` | 5 | edge `index.ts:388` | Engagement/no-data gate: <5 sessions/7d = no analytics signal |
 | `NO_DATA_THRESHOLDS.MIN_REPO_FILES` | 2 | edge `index.ts:389` | Import-graph floor for the no-data skip |
-| `MIN_GRAPH_NODES` (`AGENT_MIN_GRAPH_NODES`) | 3 | `component-ranker.ts:55` | Sparse-graph gate — below it Pass 1 skips (why plain-html always skips) |
+| `MIN_GRAPH_NODES` (`AGENT_MIN_GRAPH_NODES`) | 3 | `component-ranker.ts:55` | Sparse-graph gate — below it Pass 1 skips (plain-html is exempt since W4 2026-07-15 when `AGENT_HTML_EDIT`+`AGENT_SPARSE_SHELL_FIX` are on) |
 | `STALE_RUN_THRESHOLD_MS` | 60 min (env-overridable) | `api/agent/run.js:331` ↔ **twin** edge `index.ts:5526` | Zombie `running` row sweep |
 | `MONTHLY_SPEND_CAP_EUR` (`AGENT_MONTHLY_SPEND_CAP_EUR`) | €20.00 | edge `index.ts:101` | Per-subscription monthly LLM wallet cap |
 

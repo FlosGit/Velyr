@@ -347,6 +347,130 @@ async function cleanupStaleRuns() {
   return data?.length || 0
 }
 
+// ─── AUTO-RETRY OF TRANSIENTLY FAILED WEEKLY RUNS (daily) ─────────────────────
+// A run that ends status='failed' (uncaught throw: LLM timeout, GitHub 5xx,
+// hard-killed isolate swept to 'failed' by cleanupStaleRuns) previously had NO
+// second chance before the next Monday cron — one transient error cost the
+// customer the whole week. This sweep re-dispatches ONE bounded retry per
+// failed run via the same single_run intent as the manual button; the edge
+// side re-checks eligibility and takes the advisory lock, and a cron-style
+// dispatch never touches last_manual_run_at (no allowance consumed).
+// Bounds, in order of defense:
+//   • window: the failed run must be 1h–72h old (let infra blips settle;
+//     anything older is closer to the next Monday than to the failure)
+//   • one retry ever per failed run — claim-first via analysis_result.auto_retry
+//     with a status='failed' guard + .select() check, so a concurrent sweep or
+//     a crashed one can't double-dispatch
+//   • skip when ANY newer run exists for the subscription, or when a pending
+//     approval / running row exists (same statuses as handleTriggerRun's guard)
+//   • skip subscriptions with ≥3 failed runs in 7d — that's persistent
+//     breakage (dead token, unsupported repo state), not a transient; hammering
+//     it daily would just burn LLM budget and Telegram goodwill
+//   • ≤5 dispatches per daily sweep
+// Best-effort like every pass in enforce_subscriptions: never throws.
+const AUTO_RETRY_MIN_AGE_MS    = 60 * 60 * 1000
+const AUTO_RETRY_MAX_AGE_MS    = 72 * 60 * 60 * 1000
+const AUTO_RETRY_MAX_DISPATCH  = 5
+const AUTO_RETRY_FAIL_STREAK   = 3
+async function retryFailedRuns() {
+  try {
+    const now = Date.now()
+    const { data: failedRuns, error } = await supabase
+      .from('agent_runs')
+      .select('id, subscription_id, analysis_result, created_at')
+      .eq('status', 'failed')
+      .gte('created_at', new Date(now - AUTO_RETRY_MAX_AGE_MS).toISOString())
+      .lte('created_at', new Date(now - AUTO_RETRY_MIN_AGE_MS).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(50)
+    if (error) {
+      console.warn('[auto-retry] failed-run query failed:', error.message)
+      return 0
+    }
+    if (!failedRuns?.length) return 0
+
+    // Newest failed run per subscription; already-claimed runs drop out here.
+    const newestPerSub = new Map()
+    for (const r of failedRuns) {
+      if (!newestPerSub.has(r.subscription_id)) newestPerSub.set(r.subscription_id, r)
+    }
+
+    let dispatched = 0
+    for (const run of newestPerSub.values()) {
+      if (dispatched >= AUTO_RETRY_MAX_DISPATCH) break
+      if (run.analysis_result?.auto_retry) continue
+
+      // Anything newer (the sub already ran again) or in-flight/pending blocks
+      // the retry — same status set as handleTriggerRun's in-flight guard.
+      const { data: newer } = await supabase
+        .from('agent_runs').select('id')
+        .eq('subscription_id', run.subscription_id)
+        .gt('created_at', run.created_at)
+        .limit(1).maybeSingle()
+      if (newer) continue
+      const { data: inflight } = await supabase
+        .from('agent_runs').select('id')
+        .eq('subscription_id', run.subscription_id)
+        .in('status', ['running', 'waiting_approval', 'shopify_awaiting_approval', 'shopify_rollback_pending'])
+        .limit(1).maybeSingle()
+      if (inflight) continue
+
+      // Persistent-failure guard: 3+ failed runs in 7d ⇒ not a transient.
+      const { count: failStreak } = await supabase
+        .from('agent_runs').select('id', { count: 'exact', head: true })
+        .eq('subscription_id', run.subscription_id)
+        .eq('status', 'failed')
+        .gte('created_at', new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString())
+      if ((failStreak || 0) >= AUTO_RETRY_FAIL_STREAK) {
+        console.warn(`[auto-retry] sub=${run.subscription_id} has ${failStreak} failed runs in 7d — persistent breakage, not retrying`)
+        continue
+      }
+
+      // Claim BEFORE dispatch (email_log pattern): the status guard + .select()
+      // makes a lost race visible as 0 rows, in which case we skip the dispatch.
+      const { data: claimed, error: claimErr } = await supabase
+        .from('agent_runs')
+        .update({ analysis_result: { ...(run.analysis_result || {}), auto_retry: { dispatched_at: new Date().toISOString() } } })
+        .eq('id', run.id)
+        .eq('status', 'failed')
+        .select('id')
+      if (claimErr || !claimed?.length) continue
+
+      // Same 2s-abort fire-and-forget dispatch as handleTriggerRun — AbortError
+      // means the request landed and the edge run is starting.
+      const edgeUrl    = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agent-run`
+      const controller = new AbortController()
+      const timeoutId  = setTimeout(() => controller.abort(), 2000)
+      try {
+        await fetch(edgeUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ intent: 'single_run', subscriptionId: run.subscription_id }),
+          signal: controller.signal,
+        })
+        dispatched++
+        console.log(`[auto-retry] re-dispatched failed run ${run.id} (sub=${run.subscription_id})`)
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          dispatched++
+          console.log(`[auto-retry] re-dispatched failed run ${run.id} (sub=${run.subscription_id})`)
+        } else {
+          console.warn(`[auto-retry] dispatch failed for sub=${run.subscription_id}:`, err?.message || String(err))
+        }
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }
+    return dispatched
+  } catch (e) {
+    console.warn('[auto-retry] sweep failed:', e?.message || String(e))
+    return 0
+  }
+}
+
 // ─── LIFECYCLE DRIP EMAILS (daily) ───────────────────────────────────────────
 // Day-2 setup reminder (only while onboarding is unfinished) and day-7 feature
 // tips. Fixed templates from api/_lib/email.js — never LLM output. The age
@@ -411,6 +535,13 @@ async function handleEnforceSubscriptions(res) {
   // isolate's zombie 'running' row heals within a day instead of next Monday.
   // Best-effort (never throws) like every GC below.
   await cleanupStaleRuns()
+
+  // Auto-retry transiently failed runs — AFTER the stale sweep on purpose: a
+  // zombie 'running' row the sweep just marked 'failed' becomes a retry
+  // candidate in the same daily pass (its created_at is already past the 1h
+  // settle window). Bounded + claim-first; see retryFailedRuns.
+  const failedRunRetries = await retryFailedRuns()
+    .catch(e => { console.error('[enforce-subscriptions] auto-retry sweep failed:', e); return 0 })
 
   // Stage 5.D: GC the Telegram webhook dedupe table. Telegram never replays an
   // update older than ~24h, so 7 days is a safe retention floor. Piggybacked
@@ -541,7 +672,7 @@ async function handleEnforceSubscriptions(res) {
   const dripEmailsSent = await sendDripEmails()
     .catch(e => { console.error('[enforce-subscriptions] drip emails failed:', e); return 0 })
 
-  return res.json({ ok: true, ran_at: now, afterShotsCaptured, visualChecks, dripEmailsSent })
+  return res.json({ ok: true, ran_at: now, afterShotsCaptured, visualChecks, dripEmailsSent, failedRunRetries })
 }
 
 // ─── EMAIL OPT-OUT (public, HMAC-verified) ───────────────────────────────────

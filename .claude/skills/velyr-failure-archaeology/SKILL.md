@@ -81,7 +81,7 @@ Status vocabulary: **RESOLVED (commit)** = fixed, verified; **PARKED** = deliber
 - **Symptom:** Pass-1 LLM ranking silently degraded to the heuristic fallback on exactly the larger sites where ranking matters.
 - **Root cause:** `MAX_TOKENS_RANKER` default 600 — the ranked/skipped/unsure JSON for a ~50-node graph overflowed 600 output tokens (verified in commit message ba63599). Also: Pass 1 previously saw no conversion evidence.
 - **Fix (ba63599, 2026-07-05):** token cap 600→2000; new `buildRankerSignalContext` feeds Pass 1 the same conversion evidence Pass 2 gets, on all three pipeline paths; loud `ranker_pass1_fallback` structured log on every fallback (`index.ts:4418`, `:4765`, `:5261`).
-- **Detection today:** fallback runs are queryable — `agent_site_network.nodes` (jsonb) items carry `rankReason`; heuristic runs read `'heuristic score…'` (`index.ts:4253` writes it). The sparse-graph gate is separate and deliberate: graphs with fewer than `AGENT_MIN_GRAPH_NODES` (default 3, `component-ranker.ts:55`) always skip LLM ranking — that's why `plain-html` sites never produce fixes.
+- **Detection today:** fallback runs are queryable — `agent_site_network.nodes` (jsonb) items carry `rankReason`; heuristic runs read `'heuristic score…'` (`index.ts:4253` writes it). The sparse-graph gate is separate and deliberate: graphs with fewer than `AGENT_MIN_GRAPH_NODES` (default 3, `component-ranker.ts:55`) always skip LLM ranking. (Until 2026-07-15 that meant `plain-html` sites never produced fixes; the W4 sparse-shell exception now lets plain-html graphs through WITHOUT LLM ranking when `AGENT_HTML_EDIT` + `AGENT_SPARSE_SHELL_FIX` are on, feeding the W3 editable-shell path. All other frameworks still skip below the gate.)
 - **Status: RESOLVED.**
 
 ## 7. Monday-run wall-clock → fan-out (DO NOT RE-PROPOSE BATCHING)
@@ -163,7 +163,7 @@ All findings below shipped and were re-verified. Re-auditing them wastes a sessi
 | 2026-07-06/07 audit wave | A1–A20 confirmed bugs + B-hardening + C1–C12 features; post-audit re-verification by 4 independent review agents found 6 more, all fixed | branches `audit-fixes-2026-07`, `audit-followups-2026-07`, feature branches; main through b2b07f9 |
 | 2026-07-10 landing-truth pass | 5 copy contradictions + UTC countdown bug | 7880e5f, 6706ab3, b854ae6 |
 
-Established facts from those waves that keep saving audit time: **guardrails are prompt-only** (no post-parse enforcement — copy must never claim rejection-before-reach); **rollback is checked Wednesdays 10:00 UTC** over deploy±48h windows (never promise "within 48 hours"); **competitor scans are weekly** (never "the moment"); **plain-html sites always skip** at the sparse gate; the first run fires at `start_trial`, and nothing starts on `trialDenied`.
+Established facts from those waves that keep saving audit time: **guardrails are prompt-only** (no post-parse enforcement — copy must never claim rejection-before-reach); **rollback is checked Wednesdays 10:00 UTC** over deploy±48h windows (never promise "within 48 hours"); **competitor scans are weekly** (never "the moment"); **plain-html sites always skipped** at the sparse gate until the W4 sparse-shell exception (2026-07-15; other frameworks below the gate still skip); the first run fires at `start_trial`, and nothing starts on `trialDenied`.
 
 ## 18. PARKED items (deliberate, with unpark conditions)
 
