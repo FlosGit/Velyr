@@ -107,6 +107,7 @@ Three layers, in order:
 - Budget `AGENT_DEEP_CONTEXT_BYTES` default **400,000 bytes** total; per-file cap `LLM_MAX_FILE_BYTES` default **60 KB** with a loud truncation marker.
 - **Supporting reads first** (small, Pass-2-critical, fetched concurrently): tailwind `theme:` block (≤5KB), global styles (first 200 lines), `index.html` head + first 100 body lines, `public/llms.txt`, and the **siteRoot** `package.json` deps (monorepo root manifest is just plumbing).
 - Then ranked components in rank order + sibling CSS, prefetched at concurrency 8 while the **budget walk stays strictly in rank order** (prompt bytes identical to sequential; over-budget prefetches are discarded).
+- **W3 (2026-07-14): root `index.html` promotion.** On `vite-react`/`plain-html` (kill-switch `AGENT_HTML_EDIT=false`), the FULL root `index.html` is appended as the **last** editable component (never starves a ranked component's budget; dedupe covers plain-html where it's already the graph entry) and the head-extract supporting read is skipped (`indexHtml: null` — no duplicate bytes, drops out of block [3] and the receipt's supporting list). This makes the page shell (cookie banner, meta, inline styles) fixable — the PR-#10 class of unreachable root causes.
 - Honest fail: `skippedDueToBudget[]` + `skippedUnreadable[]` — both rendered in the receipt.
 
 ---
@@ -136,7 +137,9 @@ System prompt: "elite web conversion optimization expert … MUST be honest abou
 
 **Outside every sentinel** (trusted, server-validated): brand guardrails (`fetchBrandGuardrails` — prompt-only, no post-parse enforcement exists), OWNER CONVERSION GOAL (`conversion_goal`, trimmed+capped 300), OWNER PRIORITY (focus pin — "biases, never forces"), and the screenshot context.
 
-**Screenshot context & visual-claim rule:** when images attached, the prompt names each attached viewport and enforces: a #1 problem resting on a visual/layout claim MUST be verified in the attached screenshots and cited in `hypothesis`; if the screenshots don't show it, pick a different problem or skip. When NO screenshots reached the model, an explicit block forbids purely-visual premises outright. (Never silence — the no-image case is an instruction, not an omission.)
+**Screenshot context & visual-claim rule:** when images attached, the prompt names each attached viewport and enforces: a #1 problem resting on a visual/layout claim MUST be verified in the attached screenshots and cited in `hypothesis`; if the screenshots don't show it, pick a different problem or skip. **Since 2026-07-14** the rule additionally requires every visual claim to name the exact viewport where it was confirmed (a 360×640-only finding must not be generalized to "mobile") and encodes fixed-overlay semantics (a dismissible banner covers content only until dismiss/scroll — "completely hidden" needs the pixel overlap AND a dismissal-aware hypothesis). When NO screenshots reached the model, an explicit block forbids purely-visual premises outright. (Never silence — the no-image case is an instruction, not an omission.) The shot list is built by the shared `fixShotList` so the verify-gate reviewer sees byte-identical viewport labels.
+
+**Coherence constraint (2026-07-14):** a CONSTRAINTS bullet requires `code_change` to fix the STATED problem — same issue in title/problem and diff. If the root cause lives outside the editable list: re-frame honestly around a fixable problem, or skip; either way the unreachable item goes into `backlog` (+ optionally `question_for_owner`). Enforced downstream by the verify-gate (§5.0).
 
 ### Response schema (post-parse sanitization in the same function)
 
@@ -151,11 +154,21 @@ Sanitization rules (all in :3681–3742):
 - **Focus pin is consumed here** — `clearFocusPage` runs after the LLM call, **even on a skip** (consideration counts); a run dying before Pass 2 keeps the pin.
 - Image-bearing call failure ⇒ ONE retry **without images** (screenshotContext swapped for the no-image instruction) so a screenshot can never cost the weekly fix.
 
-Edit-type constraint in the prompt (A3): theme runs may only target `.liquid` / template `.json`; all other runs only the JS/TS family — a standalone stylesheet is explicitly forbidden (style changes go inside the component), because createPR would hard-fail it anyway.
+Edit-type constraint in the prompt (A3): theme runs may only target `.liquid` / template `.json`; all other runs only the JS/TS family — plus, when deep-reader promoted it (W3), the root `index.html` (with an explicit prohibition on removing the PostHog loader or consent logic — restyle/reposition only). A standalone stylesheet stays explicitly forbidden (style changes go inside the component), because createPR would hard-fail it anyway.
 
 ---
 
 ## 5. From fix to approval
+
+### 5.0 Verify-gate — `applyVerifyGate` (all three paths, 2026-07-14)
+
+Between the ranked-list guard and the first write (PR branch / theme staging) on ALL THREE paths, `applyVerifyGate` runs `verifyProposedFix`: ONE adversarial vision call (`callLLMCapped`, label `fix_verify`, max_tokens 1000 — NOT lower: `finish_reason==='length'` throws, and under fail-open a truncated verdict would silently disable the gate on claim-heavy proposals) over four per-UUID-sealed blocks (STATED PROBLEM / HYPOTHESIS / CONFIDENCE REASON / PROPOSED EDITS — Pass-2 output is transitively untrusted) plus the SAME screenshots via `fixShotList`. Three questions: (1) does the diff plausibly fix the stated problem, (2) is every visual claim confirmed in a named-viewport screenshot (dismissible-overlay semantics included), (3) does the prose describe only edits that exist. Refute ONLY on those concrete grounds; `not_assessable` alone never refutes; uncertain ⇒ pass. Born from PR #10 (problem/diff mismatch + hallucinated screenshot confirmation + prose describing a nonexistent edit).
+
+- **pass** ⇒ `fixResult.verify = verdict` rides `analysis_result` on the shipped fix (P1 denominator).
+- **refute** ⇒ honest skip: REUSES `skipped_low_confidence` (no migration), `error_message: 'Fix refuted by verify-gate: …'`, `analysis_result: {skip, reason, refuted_fix, verify, backlog}` (loss-autopsy artifact; discriminator `analysis_result->'verify'->>'verdict'`), Telegram `notifyFixRefuted` (honest wording — NOT notifyInsufficientData) + `notifyOwnerQuestion`. On the Shopify-direct path the gate sits BEFORE locate/apply, so a refuted fix never becomes `pending_write`.
+- **error** (call failed / unparseable) ⇒ **fail-open** with `fix_verify_failed_open` warn log — a verifier outage never kills the fix week; log events `fix_verify_call_failed` / `fix_verify_unparseable` / `fix_verify_image_retry` (one retry without images, mirroring Pass 2).
+- Runs BEFORE createPR ⇒ before the B4 find-repair; a repaired fix is deliberately NOT re-verified (repair only re-anchors `find` verbatim).
+- Kill-switch: `AGENT_FIX_VERIFY=false` (default ON, `(env ?? 'true') !== 'false'`). Edge-only — no Vercel twin.
 
 ### 5.1 Screenshot pipeline (item 3a + item 2)
 
@@ -170,10 +183,10 @@ Edit-type constraint in the prompt (A3): theme runs may only target `.liquid` / 
 Order per file, for **every** edit (primary + additional), **all before the branch is cut** (no orphan branches, no partial interdependent edits):
 
 1. `isForbiddenEditPath` (:441, denylist `FORBIDDEN_EDIT_PATHS` :410 — `.github/`, `.env*`, `package.json` + all lockfiles, `vercel.json`/`netlify.toml`/`wrangler.toml`, framework configs, `tsconfig*`, babel configs, Docker, `.gitignore`, `.npmrc`, `Makefile`, key files, `supabase/migrations/` + `supabase/functions/` (self-modification), `.husky/`, `config/settings_*.json`) ⇒ **throw** → generic `failed`.
-2. Extension guard: `VERIFIABLE_EDIT_EXTENSIONS` = js/mjs/cjs/jsx/ts/tsx; theme runs additionally liquid/json ⇒ throw on anything else.
+2. Extension guard: `VERIFIABLE_EDIT_EXTENSIONS` = js/mjs/cjs/jsx/ts/tsx; theme runs additionally liquid/json; W3 additionally allows `.html` ONLY for the exact root/workspace `index.html` on `vite-react`/`plain-html` runs (`AGENT_HTML_EDIT` kill-switch — keep in sync with deep-reader's promotion) ⇒ throw on anything else. (The per-path ranked-list guard upstream is a UNION of ranked paths and deep-read components on the plain-GitHub path — that union is what admits the promoted index.html.)
 3. Base branch resolved ONCE: theme run with `connectedBranch` ⇒ that branch, else repo default — governs the file re-fetch, the branch cut, AND the PR base (must agree or a merged PR never syncs — SG3b).
 4. Re-fetch each file at the base branch; `validateFindReplaceSafe` (:317): exact-unique fast path, else **whitespace-normalized** match mapped back to real bytes (`actualFind`) — the splice always replaces actual file content, never the model's copy. 0 matches ⇒ `find_mismatch` (+3 closest lines); >1 ⇒ `find_ambiguous` (+snippets). These return as **distinct statuses**, never generic `failed` (frequency monitoring depends on the split).
-5. Syntax check on the spliced content: Babel parse for JS/TS; `validateThemeSyntax` (:242) for liquid/json — JSON.parse for `.json`; for `.liquid` layer 1 `liquidDelimitersBalanced` (:212, flags dropped-opens only, deliberately never stray-closes) then layer 2 `validateLiquidBlocks` (`liquid-block-validate.ts` — provable-only block pairing + `{% schema %}` JSON; `{% liquid %}` opts the file out; tested by `node scripts/test-liquid-blocks.mjs`). Failure ⇒ throw.
+5. Syntax check on the spliced content: Babel parse for JS/TS; `validateThemeSyntax` (:242) for liquid/json — JSON.parse for `.json`; for `.liquid` layer 1 `liquidDelimitersBalanced` (:212, flags dropped-opens only, deliberately never stray-closes) then layer 2 `validateLiquidBlocks` (`liquid-block-validate.ts` — provable-only block pairing + `{% schema %}` JSON; `{% liquid %}` opts the file out; tested by `node scripts/test-liquid-blocks.mjs`); for the editable `index.html` (W3) `validateHtmlEdit` — COMPARATIVE (rejects only regressions the edit introduced): provable shell checks (`html-validate.ts`: orphan open-comment, script/style count balance, JSON-LD parses; tested by `node scripts/test-html-validate.mjs`), Babel on inline `<script>` bodies the edit touched, and PostHog-marker survival (marker in old but not new ⇒ reject — the agent must never blind its own measurement). Failure ⇒ throw.
 6. Only then: branch `agent/fix-<timestamp>-<uuid8>`, one commit per file, PR titled `🤖 Agent: <problem>` with the receipt as body.
 
 **B4 self-heal** (find_mismatch ONLY — ambiguous is deliberately not retried): `attemptFindRepair` (:3791) fetches the failing file's current content (connected branch on the theme path), `repairFindText` (:3753) makes one focused capped LLM call (`find_repair`, 2000 tokens, file content capped 60,000 chars) that must return the verbatim unique `find` or `{"impossible": true}`; the repaired fix re-runs the FULL guard chain via a second `createPR`. The retry's result is reported as the latest truth, and the attempt is persisted in `analysis_result` so block [13] carries it next run.
@@ -223,7 +236,7 @@ Pure function; PR body sections: Hypothesis / Problem / Why this fix (`ranked_hi
 | `skipped_setup_pending` | PostHog Setup-PR opened / snippet setup pending (also `run_type: 'setup_posthog'` on the Shopify propose) |
 | `skipped_no_data` | no-data gate; also empty theme file set on both Shopify paths |
 | `skipped_insufficient_graph` | ranker sparse gate (< 3 nodes) |
-| `skipped_low_confidence` | Pass 2 returned `{skip}` (carries `backlog` + optional `question_for_owner`) |
+| `skipped_low_confidence` | Pass 2 returned `{skip}` (carries `backlog` + optional `question_for_owner`) — **double-duty since 2026-07-14**: also a verify-gate refute (deliberate reuse, no migration); split the two via `analysis_result->'verify'->>'verdict'` (refutes carry `verify` + `refuted_fix`) |
 | `find_mismatch` / `find_ambiguous` | find guard failed after the B4 retry; `analysis_result` persisted |
 | `shopify_needs_reconsent` / `shopify_not_configured` / `shopify_token_failed` | token refresh outcomes (Shopify-direct) |
 | `shopify_theme_read_failed` | theme read failed / staged file missing from read bytes |

@@ -57,7 +57,7 @@ Secondary metrics (each has a query):
 
 | Metric | Query | Healthy direction |
 |---|---|---|
-| Skip-rate composition | Q4 (30d skip breakdown incl. `find_mismatch`/`find_ambiguous`) vs Q3 (all statuses) | fewer `skipped_low_confidence`/`skipped_no_data` relative to deployed |
+| Skip-rate composition | Q4 (30d skip breakdown incl. `find_mismatch`/`find_ambiguous`) vs Q3 (all statuses) | fewer `skipped_low_confidence`/`skipped_no_data` relative to deployed. **Interpretation note (2026-07-14): `skipped_low_confidence` is double-duty** — a Pass-2 `{skip}` OR a verify-gate refute; split via `analysis_result->'verify'->>'verdict'` (refutes carry `verify` + `refuted_fix`) |
 | Rejection rate + reasons | Q3 for `rejected`/`shopify_rejected` counts; §CAMPAIGN-SQL A for the owner's stated reasons | falling, and reasons should stop repeating |
 | visual_check `not_visible` rate | Q11 | ~0 — a merged fix that never rendered is a deploy-pipeline problem, not a content problem (`api/agent/run.js:966,1017`) |
 | `find_mismatch` incidence | Q4 rows `find_mismatch`/`find_ambiguous` | ~0 after the B4 self-heal retry; a rise = Pass 2 emitting non-verbatim `find` strings |
@@ -187,6 +187,23 @@ C3 `AGENT_SHOPIFY_PREVIEW_THEMES`), and — a cheap, high-value analysis —
 model's own predicted effect size; compare it against realized Q7 improvements
 per run. Systematic over-prediction is evidence for (c)-style honesty tuning
 and costs nothing to measure.
+
+## Active experiments (registered 2026-07-14, horizon 3 Mondays ≈ 2026-08-03)
+
+Two experiments shipped together after the PR-#10 autopsy (problem/diff mismatch +
+hallucinated screenshot claims — see velyr-failure-archaeology). Judge each ONLY
+against its pre-registered predictions; tiny-N caveat applies to every readout.
+
+1. **Coherence enforcement** (W1 verify-gate + W2 prompt hardening, flag `AGENT_FIX_VERIFY`):
+   - P1: refute-rate 5–40% of fix-bearing Pass-2 outputs (`analysis_result->'verify'->>'verdict'` grouped by status). **Trip-wire: >50% over ≥4 gated runs ⇒ flag off + refute_reasons autopsy.**
+   - P2: owner-rejection reasons (CAMPAIGN-SQL A) stop repeating mismatch/hallucination themes.
+   - P3: `find_mismatch`/`find_ambiguous` unchanged (the gate never touches find strings).
+   - P5: `skipped_low_confidence` may rise slightly (honest refutes) — expected, not a regression.
+   - P6: fail-open events ≈ 0 (edge logs `fix_verify_call_failed` / `fix_verify_unparseable`).
+2. **Shell editability** (W3 index.html promotion, flag `AGENT_HTML_EDIT`):
+   - P4: ≥1 index.html fix within the horizon on a vite connection (`analysis_result->>'file_to_edit'` / `pages_fixed`); zero + persisting unreachable-root-cause skips ⇒ check deep-context logs.
+
+Retire honestly: predictions miss at horizon ⇒ flag off + velyr-failure-archaeology entry.
 
 ## Fenced wrong paths (do not walk these)
 

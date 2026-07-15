@@ -183,6 +183,17 @@ export async function readDeepContext(
   let llmsTxt: string | null = null
   let packageJsonDeps = '{}'
 
+  // W3 (2026-07-14): on vite-react / plain-html the root index.html is PROMOTED
+  // from read-only supporting context (head extract) to a FULL, editable
+  // component — it is the served page shell where cookie banners, meta tags and
+  // inline styles live (the PR-#10 class of unreachable root causes). When
+  // promoted, the head-extract supporting read is skipped (no duplicate bytes);
+  // the full file is appended LAST after the ranked walk so it can never starve
+  // a ranked component's budget. Kill-switch: AGENT_HTML_EDIT=false (keep in
+  // sync with createPR's html allowlist in index.ts).
+  const htmlEditable = (Deno.env.get('AGENT_HTML_EDIT') ?? 'true') !== 'false'
+    && (mapResult.framework === 'vite-react' || mapResult.framework === 'plain-html')
+
   // Item 8b: the five supporting reads are independent — fetch them
   // concurrently. The sequential budget gating between them was theoretical
   // (they aggregate ~25KB against a budget an order of magnitude larger), and
@@ -197,7 +208,7 @@ export async function readDeepContext(
     const [tw, gs, ih, lt, deps] = await Promise.all([
       mapResult.tailwindConfigPath ? readSupporting(mapResult.tailwindConfigPath, true, extractTailwindTheme) : Promise.resolve(null),
       mapResult.globalStylesPath   ? readSupporting(mapResult.globalStylesPath, true, raw => firstLines(raw, 200)) : Promise.resolve(null),
-      readSupporting(idx, has(idx), extractHtmlHeadAndBody),
+      readSupporting(idx, has(idx) && !htmlEditable, extractHtmlHeadAndBody),
       readSupporting(llms, has(llms), raw => raw),
       readSupporting(pkg, has(pkg), extractDeps),
     ])
@@ -249,6 +260,24 @@ export async function readDeepContext(
       }
     }
     components.push({ path: item.path, content, cssContent, truncated })
+  }
+
+  // W3: append the FULL root index.html as the LAST editable component (see the
+  // htmlEditable comment above). Dedupe covers plain-html, where index.html is
+  // already the graph entry and may have been ranked into the walk above.
+  if (htmlEditable && has(fullPath('index.html')) && !components.some(c => c.path === 'index.html')) {
+    if (totalBytes >= budget) {
+      skippedDueToBudget.push({ path: 'index.html', reason: 'budget_exceeded' })
+    } else {
+      const res = await fetchByFull(fullPath('index.html'))
+      if (!res.ok) {
+        skippedUnreadable.push({ path: 'index.html', reason: res.reason })
+      } else {
+        const { content, truncated } = truncateForLLM(res.content)
+        totalBytes += byteLength(content)
+        components.push({ path: 'index.html', content, cssContent: null, truncated })
+      }
+    }
   }
 
   return { components, tailwindTheme, globalStyles, indexHtml, llmsTxt, packageJsonDeps, skippedDueToBudget, skippedUnreadable, totalBytes }

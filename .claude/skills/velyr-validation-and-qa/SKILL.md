@@ -19,6 +19,7 @@ Run the cheapest rung that can catch your mistake; state which rungs you ran. Ev
 | 2 | Frontend/compile + blog gate | `npx vite build` | SPA compiles; blog articles pass the gate (required frontmatter, `related:` slugs resolve, near-dup dedupe) via `scripts/vite-plugin-blog.mjs` `generateBundle` → `loadArticles()` | Anything about `api/` or the edge fn; visual correctness |
 | 3 | Pure-lib tests | `node --test "api/_lib/*.test.mjs"` (**quoted glob** — bare `node --test api/_lib/` fails on this setup) | The 8 pinned behavior sets below | Handler wiring, DB schema, network I/O |
 | 4 | Liquid validator tests | `node scripts/test-liquid-blocks.mjs` | Theme block-validation logic (27 assertions) | Real-theme edge cases beyond the provable-only rules |
+| 4b | HTML validator tests | `node scripts/test-html-validate.mjs` | W3 shell-validation logic (19 assertions) | Full HTML parsing; the comparative old-vs-new logic in index.ts's `validateHtmlEdit` |
 | 5 | Deno type-check | `npx supabase functions deploy agent-run --project-ref <ref>` — **OPERATOR** | Edge fn type-checks (this is the ONLY Deno gate; no local toolchain) | Logic correctness |
 | 6 | Dev-store harness | `SHOPIFY_SHOP=… SHOPIFY_TOKEN=… SHOPIFY_THEME_ID=… node scripts/shopify-dv-verify.mjs` — **OPERATOR, dev store only, never a merchant store** | The six live Shopify GraphQL shapes (upsert effect, checksum re-query, read body, delete, themeDuplicate, themeDelete). Steps 5+6 must both pass before `AGENT_SHOPIFY_PREVIEW_THEMES` may be enabled | Anything about a real merchant's theme |
 | 7 | Prod observation | Telegram messages, dashboard, read-only DB query (announce first; see velyr-diagnostics-and-tooling) | The deployed system's actual behavior | — |
@@ -41,6 +42,7 @@ Run all: `node --test "api/_lib/*.test.mjs" && node scripts/test-liquid-blocks.m
 | `api/_lib/trial-fingerprint.test.mjs` | `trial-fingerprint.js` (pure) | 37 | `canonicalizeHost`, HMAC fingerprint stability, `computeTrialFingerprints` shapes |
 | `api/_lib/win-card.test.mjs` | `win-card.js` (pure) | 15 | `escapeXml` (all five XML chars + nullish), SVG builders escape hostile input, honest no-win fallback line |
 | `scripts/test-liquid-blocks.mjs` | `supabase/functions/agent-run/liquid-block-validate.ts` logic | 27 | Provable-only Liquid block pairing, `{% schema %}` JSON parse, `{% liquid %}` tag opt-out |
+| `scripts/test-html-validate.mjs` | `supabase/functions/agent-run/html-validate.ts` logic (W3) | 19 | Orphan open-comment, script/style count balance, JSON-LD parse, inline-script extraction (src/ld+json/commented-out excluded, module flag) |
 
 ## 3. How to add a test (house pattern)
 
