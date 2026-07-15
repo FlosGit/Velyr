@@ -1,6 +1,6 @@
 # Velyr
 
-Velyr is an AI growth agent that ships one weekly conversion fix: a GitHub Pull Request on your repo, or a direct theme change on your Shopify store. Your code, your approval. €29/month after a 14-day free trial.
+Velyr is an AI growth agent that ships one weekly conversion fix: a GitHub Pull Request on your repo, or a direct theme change on your Shopify store. Your code, your approval. €49/month after a 14-day free trial.
 
 > Velyr finds your site's #1 conversion problem each week, writes the code fix, and waits for your one-tap approval over Telegram. On GitHub the fix is a Pull Request; on Shopify it is written to your live theme after your YES. If a change hurts your numbers in the 48 hours after it ships, Velyr proposes a rollback.
 
@@ -27,7 +27,7 @@ React, Next.js, or Vite sites in a GitHub repo that auto-deploys (Vercel, Netlif
 Wix, Squarespace, and Webflow. The agent edits source code, and these site builders don't expose that.
 
 ## Pricing
-€29/month. 14-day free trial with all features included; no credit card is required to start, and nothing is charged unless you subscribe after the trial. Cancel anytime.
+€49/month. 14-day free trial with all features included; no credit card is required to start, and nothing is charged unless you subscribe after the trial. Cancel anytime.
 
 ## Common questions
 - **Do I approve every change?** Yes. Nothing ships without your explicit approval — you see the exact change first, and a Preview button shows your site with the change applied before you decide.

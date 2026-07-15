@@ -103,7 +103,7 @@ export default function AGB({ navigate }) {
             <h2>§ 1 — Scope & Services</h2>
             <p style={{ marginBottom: 12 }}>Velyr provides an AI-powered Growth Agent service that delivers weekly conversion optimization improvements to subscribers' websites. The following service is offered:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Growth Agent (€29/month)</strong> — a semi-autonomous AI agent that analyses your GitHub repository and PostHog analytics weekly, identifies the highest-impact conversion issue, writes a code fix, opens a Pull Request, and notifies you via Telegram (reply YES to deploy or NO to skip). Nothing is deployed without your explicit approval. Additional features include: competitor weekly scanning of up to 2 sites you choose; an optional public timeline page; and a brutally honest monthly roast report summarising progress and gaps.</li>
+              <li><strong style={{ fontWeight: 500 }}>Growth Agent (€49/month)</strong> — a semi-autonomous AI agent that analyses your GitHub repository and PostHog analytics weekly, identifies the highest-impact conversion issue, writes a code fix, opens a Pull Request, and notifies you via Telegram (reply YES to deploy or NO to skip). Nothing is deployed without your explicit approval. Additional features include: competitor weekly scanning of up to 2 sites you choose; an optional public timeline page; and a brutally honest monthly roast report summarising progress and gaps.</li>
             </ul>
             <p style={{ marginTop: 12 }}>All services are provided as-is based on publicly available data and automated AI analysis. Results are informational only and do not constitute legal, financial, or professional business advice.</p>
           </div>
@@ -127,8 +127,8 @@ export default function AGB({ navigate }) {
             <h2>§ 3 — Prices & Payment</h2>
             <ul>
               <li>All prices are final. As a small business under § 19 UStG (German VAT exemption), we don't charge VAT and therefore do not show it separately.</li>
-              <li>The <strong style={{ fontWeight: 500 }}>Growth Agent</strong> costs €29 per month, billed monthly in advance via Stripe. The subscription renews automatically each month until cancelled.</li>
-              <li><strong style={{ fontWeight: 500 }}>Free trial:</strong> New subscribers receive a 14-day free trial. A valid payment method is required at signup. The trial ends automatically and the subscription continues at €29/month unless cancelled before the trial ends. Cancellation during the trial: no charge. Cancellation after trial start: the subscription ends at the end of the current billing period.</li>
+              <li>The <strong style={{ fontWeight: 500 }}>Growth Agent</strong> costs €49 per month, billed monthly in advance via Stripe. The subscription renews automatically each month until cancelled.</li>
+              <li><strong style={{ fontWeight: 500 }}>Free trial:</strong> New subscribers receive a 14-day free trial. A valid payment method is required at signup. The trial ends automatically and the subscription continues at €49/month unless cancelled before the trial ends. Cancellation during the trial: no charge. Cancellation after trial start: the subscription ends at the end of the current billing period.</li>
               <li>All payments are processed by Stripe Payments Europe, Ltd. Velyr never stores your card details.</li>
               <li>In case of a failed payment for the Growth Agent, Stripe will retry according to its standard retry schedule. If payment cannot be collected, the subscription will be paused and you will be notified via email and/or Telegram.</li>
             </ul>

@@ -2256,12 +2256,16 @@ async function handleDnaVerdict(req, res, user) {
 //   • subscription must be active (not paused) + subscription_status active/trialing
 //   • no run already in-flight (running/waiting_approval) — also protects the
 //     "at most one waiting_approval per subscription" invariant
-//   • at most ONE manual run per 24h (last_manual_run_at)
+//   • at most ONE manual run per 24h (last_manual_run_at) — trialing subs get a
+//     72h cooldown instead (LLM-cost control; the Monday cron is unaffected)
 // The post-onboarding auto-run and the scheduled cron runs deliberately do NOT
 // set last_manual_run_at, so they don't consume the daily allowance.
 // subscriptionId is derived from the authenticated user — never from the request
 // body (no IDOR; the user never calls the Edge Function directly).
-const MANUAL_RUN_COOLDOWN_MS = 24 * 60 * 60 * 1000
+// Keep the two cooldown values in sync with the StatusHero button logic in
+// src/pages/AgentDashboard.jsx (client-side disabled state + label).
+const MANUAL_RUN_COOLDOWN_MS       = 24 * 60 * 60 * 1000
+const TRIAL_MANUAL_RUN_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000
 async function handleTriggerRun(req, res, user) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -2307,14 +2311,21 @@ async function handleTriggerRun(req, res, user) {
     return res.status(409).json({ error: 'A run is already in progress. Wait for it to finish, or respond to the pending PR in Telegram.' })
   }
 
-  // Daily limit: at most one manual run per 24h.
+  // Rolling limit: one manual run per 24h — per 72h while trialing.
+  const isTrialing = sub.subscription_status === 'trialing'
+  const cooldownMs = isTrialing ? TRIAL_MANUAL_RUN_COOLDOWN_MS : MANUAL_RUN_COOLDOWN_MS
   if (sub.last_manual_run_at) {
     const last    = new Date(sub.last_manual_run_at).getTime()
     const elapsed = Date.now() - last
-    if (elapsed < MANUAL_RUN_COOLDOWN_MS) {
-      const nextManualRunAt = new Date(last + MANUAL_RUN_COOLDOWN_MS).toISOString()
-      res.setHeader('Retry-After', String(Math.ceil((MANUAL_RUN_COOLDOWN_MS - elapsed) / 1000)))
-      return res.status(429).json({ error: 'You can trigger one manual run per day. Your scheduled runs keep going automatically.', nextManualRunAt })
+    if (elapsed < cooldownMs) {
+      const nextManualRunAt = new Date(last + cooldownMs).toISOString()
+      res.setHeader('Retry-After', String(Math.ceil((cooldownMs - elapsed) / 1000)))
+      return res.status(429).json({
+        error: isTrialing
+          ? 'During your free trial you can trigger one manual run every 3 days. Your scheduled runs keep going automatically.'
+          : 'You can trigger one manual run per day. Your scheduled runs keep going automatically.',
+        nextManualRunAt,
+      })
     }
   }
 
@@ -2348,8 +2359,8 @@ async function handleTriggerRun(req, res, user) {
     return res.status(502).json({ error: 'Could not start the run. Please try again.' })
   }
 
-  // Only consume the daily allowance after a confirmed dispatch.
-  const nextManualRunAt = new Date(Date.now() + MANUAL_RUN_COOLDOWN_MS).toISOString()
+  // Only consume the allowance after a confirmed dispatch.
+  const nextManualRunAt = new Date(Date.now() + cooldownMs).toISOString()
   await supabase.from('agent_subscriptions')
     .update({ last_manual_run_at: new Date().toISOString() })
     .eq('id', sub.id)

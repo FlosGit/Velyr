@@ -35,7 +35,7 @@ async function maybeDispatchFirstRun(subscriptionId) {
 // CONVERSION checkout. As of the no-card-trial change, this path runs ONLY at
 // trial-end: the 14-day trial was created WITHOUT a payment method and Stripe's
 // trial_settings.end_behavior.missing_payment_method:'cancel' cancelled it, so
-// the user clicks "Restart" to subscribe for real. It charges €29 immediately
+// the user clicks "Restart" to subscribe for real. It charges €49 immediately
 // (NO trial_period_days) and reuses the existing Stripe customer from the lapsed
 // trial so we don't orphan/duplicate customers. First-time users never reach
 // here — they start a no-card trial through onboarding (api/onboarding.js

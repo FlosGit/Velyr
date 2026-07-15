@@ -235,7 +235,7 @@ export default function CodeVsOverlay({ navigate }) {
 
           <div style={{ marginTop: 56, padding: 24, background: '#ffffff', borderRadius: 14, border: '1px solid rgba(28,25,23,0.08)' }}>
             <h2 style={{ marginBottom: 8 }}>See it on your own site</h2>
-            <p style={{ marginBottom: 12 }}>€29/month after a 14-day free trial — no credit card required to start. Every fix is code you keep.</p>
+            <p style={{ marginBottom: 12 }}>€49/month after a 14-day free trial — no credit card required to start. Every fix is code you keep.</p>
             <p>
               <button onClick={() => navigate('/agent/login')} style={{ background: '#2a5c45', color: '#f7f4ef', border: 'none', borderRadius: 8, padding: '10px 20px', fontSize: 14, fontFamily: 'Jost, sans-serif', fontWeight: 400, cursor: 'pointer', letterSpacing: '.02em' }}>Start the Growth Agent</button>
               {' '}or read the <a href="/faq" onClick={e => { e.preventDefault(); navigate('/faq') }}>FAQ</a>.

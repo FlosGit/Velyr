@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 // Pre-checkout confirmation modal. Required for EU consumer-law compliance:
-//   - subscription (€29/mo):    Recurring-charge acknowledgment + §312j BGB summary
+//   - subscription (€49/mo):    Recurring-charge acknowledgment + §312j BGB summary
 //
 // The modal gates the existing Stripe-redirect flow. The hosting component
 // keeps full control over the redirect — this only collects an explicit
@@ -66,7 +66,7 @@ export default function CheckoutConfirmModal({ type, open, onCancel, onConfirm, 
 
         {/* Summary block */}
         <div style={{ background: 'rgba(42,92,69,0.04)', border: '1px solid rgba(42,92,69,0.15)', borderRadius: 10, padding: '14px 16px', marginBottom: 18 }}>
-          <p style={{ fontSize: 14, color: C.text, fontWeight: 500, marginBottom: 4 }}>Growth Agent — €29 / month</p>
+          <p style={{ fontSize: 14, color: C.text, fontWeight: 500, marginBottom: 4 }}>Growth Agent — €49 / month</p>
           <p style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.6 }}>
             Recurring monthly charge, billed in advance via Stripe. You can cancel anytime from your dashboard — cancellation takes effect at the end of the current billing period.
           </p>
@@ -82,7 +82,7 @@ export default function CheckoutConfirmModal({ type, open, onCancel, onConfirm, 
             style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0, accentColor: C.accent }}
           />
           <span style={{ fontSize: 13, color: C.textMuted, fontWeight: 300, lineHeight: 1.55 }}>
-            I understand this is a recurring monthly charge of €29 and agree to the Terms of Service.
+            I understand this is a recurring monthly charge of €49 and agree to the Terms of Service.
           </span>
         </label>
 

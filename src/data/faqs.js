@@ -57,7 +57,7 @@ export const FAQS = [
   },
   {
     q: 'What happens when the trial ends?',
-    a: 'The agent pauses — nothing is charged automatically, because no card is on file. To keep it running, you subscribe from your dashboard for €29/month, and you can cancel that anytime.'
+    a: 'The agent pauses — nothing is charged automatically, because no card is on file. To keep it running, you subscribe from your dashboard for €49/month, and you can cancel that anytime.'
   },
   {
     q: 'Which sites are supported?',

@@ -321,7 +321,7 @@ export default function AgentPublic({ navigate, slug }) {
               Want this for your website?
             </p>
             <p style={{ fontSize: 14, color: 'rgba(247,244,239,0.7)', fontWeight: 300 }}>
-              €29 / month · cancel anytime
+              €49 / month · cancel anytime
             </p>
           </div>
           <button className="v-press" onClick={() => navigate('/agent/register')} style={{

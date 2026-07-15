@@ -133,7 +133,7 @@ export default function Impressum({ navigate }) {
 
           <div style={block}>
             <span style={label}>Payment Processing</span>
-            <p>Payment processing for paid services (Growth Agent €29/month) is handled by Stripe Payments Europe, Ltd., 1 Grand Canal Street Lower, Grand Canal Dock, Dublin, D02 H210, Ireland. Payment data is processed solely by Stripe and is not stored by Velyr.</p>
+            <p>Payment processing for paid services (Growth Agent €49/month) is handled by Stripe Payments Europe, Ltd., 1 Grand Canal Street Lower, Grand Canal Dock, Dublin, D02 H210, Ireland. Payment data is processed solely by Stripe and is not stored by Velyr.</p>
           </div>
 
           <hr style={{ border: 'none', borderTop: '1px solid rgba(28,25,23,0.09)', margin: '8px 0 36px' }} />

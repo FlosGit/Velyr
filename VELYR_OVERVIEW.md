@@ -11,7 +11,7 @@
 ## 1. Was Velyr HEUTE ist
 
 ### One-Liner
-Velyr ist ein **autonomer "AI Growth Agent"** (Einzelprodukt, €29/Monat): Er findet jede Woche
+Velyr ist ein **autonomer "AI Growth Agent"** (Einzelprodukt, €49/Monat): Er findet jede Woche
 das größte Conversion-Leck einer Website, **schreibt den Code-Fix selbst**, zeigt dem Betreiber
 eine Vorschau und deployt ihn nach **One-Tap-Freigabe über Telegram**. Auf einem GitHub-Repo landet
 der Fix als **Pull Request**, auf einem Shopify-Store als **direkte (freigabe-gated) Theme-Änderung**.
@@ -172,19 +172,22 @@ Plus: **On-Demand-Run** ("Run now" im Dashboard, max. 1×/Tag) und der **Sofort-
   - "Honest fail"-Prinzip: unbekanntes Framework → Skip statt Raten; ehrliche Skip-Status statt
     Pseudo-Fixes.
   - Anti-Abuse-Ledger (`trial_fingerprints`), das Account-Löschung überlebt.
-  - Betrieben von **Claude** (OpenRouter, `anthropic/claude-sonnet-4.6`); pro-Subscription
-    Monats-Wallet-Cap gegen Kostenausreißer.
+  - Betrieben von **Claude** (OpenRouter, produktiv `anthropic/claude-opus-4.8` seit 2026-07,
+    Code-Default `anthropic/claude-sonnet-4.6`); pro-Subscription Monats-Wallet-Cap gegen
+    Kostenausreißer.
 
 ---
 
 ## 4. Pricing & Trial
 
-- **Modell:** Ein Abo, **€29/Monat** (Stripe-Price `STRIPE_PRICE_GROWTH`), Währung EUR, monatlich,
-  jederzeit kündbar. Kein Tier-Modell, kein Add-on.
+- **Modell:** Ein Abo, **€49/Monat** (Stripe-Price `STRIPE_PRICE_GROWTH`), Währung EUR, monatlich,
+  jederzeit kündbar. Kein Tier-Modell, kein Add-on. **Preiserhöhung 2026-07-15** (€29 → €49, Opus-4.8-
+  Upgrade): zahlende Bestandskunden bleiben auf dem alten €29-Price-Objekt grandfathered; laufende
+  Trials konvertieren über den Conversion-Checkout zum neuen Preis.
 - **Trial:** **14 Tage, kostenlos, OHNE Kreditkarte** (`api/stripe.js`: `trial_period_days: 14`,
   `trial_settings.end_behavior.missing_payment_method: 'cancel'`). Läuft die Trial ohne hinterlegte
   Karte aus, **cancelt Stripe automatisch** → Zugang wird gated. Für die Weiternutzung ist dann ein
-  regulärer €29-Checkout (mit Karte) nötig.
+  regulärer €49-Checkout (mit Karte) nötig.
   - **[ERLEDIGT 2026-07-10]** Die veraltete *"credit card is required to start"*-Copy wurde in allen
     drei betroffenen Flächen korrigiert (`src/data/faqs.js` inkl. Trial-Ende-Antwort, `index.html`,
     `public/llms.txt`) — Marketing-Copy und Code sind wieder konsistent (No-Card-Trial).
@@ -192,12 +195,15 @@ Plus: **On-Demand-Run** ("Run now" im Dashboard, max. 1×/Tag) und der **Sofort-
   `init_subscription` (Onboarding-Mount, `subscription_status = NULL`) → nach Abschluss
   `api/stripe.js?action=start_trial` flippt auf `'trialing'`. Erst dann darf der Agent laufen
   (Cron-/Manual-Gates verlangen `subscription_status ∈ {active, trialing}`).
-- **Wallet-Cap:** **Ja, aber intern** — `MONTHLY_SPEND_CAP_EUR` Default **€20,00/Monat pro
-  Subscription** (überschreibbar via `AGENT_MONTHLY_SPEND_CAP_EUR`). Das ist ein **Kostenschutz für
-  Velyr** (OpenRouter-Wallet), **kein kundenseitiges Feature**. Realverbrauch liegt laut Kommentar
-  weit darunter (Ranker ~€0,05). Fehlende `agent_llm_usage`-Tabelle sperrt den Agent NICHT (no-op +
+- **Manuelle Runs im Trial gedrosselt (2026-07-15):** `trigger_run` erlaubt Trials nur **einen
+  manuellen Run pro 72h** (`TRIAL_MANUAL_RUN_COOLDOWN_MS`, zahlende Kunden: 24h) — LLM-Kostenschutz
+  fürs Opus-Modell. Der automatische Montags-Run läuft für Trials unverändert.
+- **Wallet-Cap:** **Ja, aber intern** — `MONTHLY_SPEND_CAP_EUR` Code-Default **€20,00/Monat pro
+  Subscription**; **produktiv seit 2026-07 auf €35 gesetzt** (`AGENT_MONTHLY_SPEND_CAP_EUR`, wegen
+  Opus 4.8: ~1,67× Sonnet-Kosten, Full-Run ~€0,33–0,67). Das ist ein **Kostenschutz für
+  Velyr** (OpenRouter-Wallet), **kein kundenseitiges Feature**. Fehlende `agent_llm_usage`-Tabelle sperrt den Agent NICHT (no-op +
   warn).
-- **Freemium:** **Nein.** Nur das €29-Abo mit 14-Tage-Trial. Kein Free-Scan mehr.
+- **Freemium:** **Nein.** Nur das €49-Abo mit 14-Tage-Trial. Kein Free-Scan mehr.
 - **Anti-Abuse:** `trial_fingerprints`-Ledger — eine Gratis-Trial pro Site-Identität; überlebt
   Account-Löschung (verhindert Delete-and-Retrial). Failt OPEN bei Infra-Fehlern.
 - **Dunning:** Bei Zahlungsfehler pausiert der Agent, 7 Tage zum Aktualisieren, dann Kündigung.
@@ -208,7 +214,7 @@ Plus: **On-Demand-Run** ("Run now" im Dashboard, max. 1×/Tag) und der **Sofort-
 ## 5. Aktueller Stand / Reifegrad
 
 ### Live & funktionsfähig
-- €29-Abo + 14-Tage-No-Card-Trial (Stripe), Anti-Abuse-Ledger.
+- €49-Abo + 14-Tage-No-Card-Trial (Stripe), Anti-Abuse-Ledger.
 - **Alle drei Connect-Pfade live:** GitHub, Shopify-via-GitHub (SG1–SG4), Shopify-direct (Stages 1–4).
 - Vollständige Wochen-Pipeline (RA1–RA7), zwei LLM-Pässe, Screenshots (3 Viewports), PostHog-
   Heatmap-Signale inkl. Rage-/Dead-Clicks (Dead-Clicks-Toggle seit 2026-07-07 aktiv).
@@ -282,6 +288,6 @@ Plus: **On-Demand-Run** ("Run now" im Dashboard, max. 1×/Tag) und der **Sofort-
 React 18 SPA (manuelles Client-Routing, **kein** React Router trotz Dependency) · Vite 5 · Vercel
 (Serverless Functions, 12-Function-Limit) · Supabase (Postgres + Auth + Edge Functions/Deno) ·
 Stripe (Abo) · Telegram Bot API (Approvals) · GitHub App / Octokit (PRs) · Shopify Admin GraphQL API
-(Theme-I/O) · PostHog (Analytics, shared project) · Claude via OpenRouter (`anthropic/claude-sonnet-4.6`).
+(Theme-I/O) · PostHog (Analytics, shared project) · Claude via OpenRouter (produktiv `anthropic/claude-opus-4.8`).
 Migrationen werden **manuell** über den Supabase-SQL-Editor angewandt (Dateien in
 `supabase/migrations/` sind das Repo-Protokoll, keine Auto-Pipeline).

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase.js'
 
 const LABELS = {
-  subscription: 'Start free trial – €29/month after',
+  subscription: 'Start free trial – €49/month after',
 }
 
 // Higher-level trial entry point used by CTAs. Handles the guest case:

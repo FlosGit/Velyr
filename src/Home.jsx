@@ -470,7 +470,7 @@ function Nav({ navigate }) {
         <button onClick={goAndClose(() => document.getElementById('pricing-section')?.scrollIntoView({ behavior:'smooth' }))}
           style={{ width:'100%', background:'transparent', color:C.accent, border:`1px solid rgba(42,92,69,0.35)`, borderRadius:10, padding:'13px 16px', fontSize:14, fontFamily:'Jost,sans-serif', fontWeight:400, cursor:'pointer', textAlign:'left', letterSpacing:'.01em', display:'flex', alignItems:'center', gap:8 }}
         >
-          Growth Agent — €29/mo
+          Growth Agent — €49/mo
         </button>
         <button onClick={goAndClose(() => navigate('/blog'))}
           style={{ width:'100%', background:'transparent', color:C.textMuted, border:'none', borderRadius:10, padding:'12px 16px', fontSize:13, fontFamily:'Jost,sans-serif', fontWeight:300, cursor:'pointer', textAlign:'left' }}
@@ -701,7 +701,7 @@ function GrowthAgentSection({ navigate }) {
           <div className="hiw-cta agent-cta-card" style={{ background:C.accent, borderRadius:16, padding:'28px 32px' }}>
             <div style={{ maxWidth:440 }}>
               <p style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:26, color:'#fff', letterSpacing:'-.015em', marginBottom:6 }}>Ready to let the agent work?</p>
-              <p style={{ fontSize:13.5, color:'rgba(247,244,239,0.62)', fontWeight:300 }}>Set up in a few minutes. 14-day free trial, then €29/month. Cancel anytime.</p>
+              <p style={{ fontSize:13.5, color:'rgba(247,244,239,0.62)', fontWeight:300 }}>Set up in a few minutes. 14-day free trial, then €49/month. Cancel anytime.</p>
             </div>
             <div className="hiw-cta-actions" style={{ display:'flex', gap:10, flexShrink:0 }}>
               <button onClick={() => navigate('/agent/register')} style={{
@@ -828,7 +828,7 @@ function Pricing({ navigate }) {
             </div>
             <p style={{ fontWeight:500, fontSize:15, marginBottom:5, color:'rgba(247,244,239,0.9)' }}>Growth Agent</p>
             <p style={{ color:'rgba(247,244,239,0.6)', fontSize:13, fontWeight:300, marginBottom:20 }}>One fix a week, with your approval.</p>
-            <span style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:52, letterSpacing:'-.03em', color:'#fff' }}><CountUp value={visible ? 29 : 0} format={(n)=>`€${Math.round(n)}`} /></span>
+            <span style={{ fontFamily:'Cormorant Garamond, serif', fontWeight:300, fontSize:52, letterSpacing:'-.03em', color:'#fff' }}><CountUp value={visible ? 49 : 0} format={(n)=>`€${Math.round(n)}`} /></span>
             <sup style={{ fontSize:14, color:'rgba(247,244,239,0.5)', fontWeight:300, marginLeft:2 }}>*</sup>
             <p style={{ color:'rgba(247,244,239,0.5)', fontSize:12, marginBottom:4, fontWeight:300, marginTop:4 }}>per month · cancel anytime</p>
             <div style={{ display:'flex', flexDirection:'column', gap:9, marginBottom:0 }}>
@@ -898,7 +898,7 @@ function FAQ() {
   const agentItems = [
     { q:'What is the Growth Agent?', a:'An AI agent that runs every Monday and on demand. It reads your PostHog analytics and your code, on GitHub or Shopify, finds the biggest conversion problem, writes the fix, and sends it to you on Telegram. Reply YES to ship it or NO to skip it.' },
     { q:'Does it work with Shopify?', a:'Yes, two ways. Connect your store directly in onboarding: Velyr reads your live theme and writes approved fixes straight to it. No GitHub needed. Or, if your theme is already synced to a GitHub repo, connect the repo and fixes arrive as pull requests.' },
-    { q:'When does it start, and can I run it myself?', a:'The agent gets to work the moment you finish setup, no waiting for Monday. After that it runs every Monday morning, and you can trigger an extra run any time from the dashboard with the Run now button, up to once a day.' },
+    { q:'When does it start, and can I run it myself?', a:'The agent gets to work the moment you finish setup, no waiting for Monday. After that it runs every Monday morning, and you can trigger an extra run any time from the dashboard with the Run now button — up to once a day on a paid plan, once every 3 days during the free trial.' },
     { q:'Do I have to approve every change before it goes live?', a:'Yes, always. You get a Telegram message with the problem, the data behind it, and the exact change — and a Preview button that shows your site with the change applied before you decide. Approve or skip with one tap, in Telegram or from your dashboard. Nothing goes live without you.' },
     { q:'What does it optimize for?', a:'Your goal. Tell the agent the one action that matters most — start a trial, add to cart, book a call — and it picks fixes for that goal and measures every shipped change against it, alongside bounce rate. No goal set? It optimizes engagement and bounce.' },
     { q:"What happens if a change makes things worse?", a:'The agent compares your bounce rate in the 48 hours after every deploy with the 48 hours before. If it rose 15 percentage points or more, it proposes a rollback on Telegram and reverts the change once you approve. On GitHub that is a revert PR, on Shopify the previous theme files are restored.' },
@@ -1008,7 +1008,7 @@ function WhySection() {
   const [ref, visible] = useReveal()
   const [rowsRef, rowsVis] = useReveal()
   const rows = [
-    { old:'Hire a CRO agency at €2–5k/mo, or never get around to it.', neu:'€29/mo. One high-impact fix every week.' },
+    { old:'Hire a CRO agency at €2–5k/mo, or never get around to it.', neu:'€49/mo. One high-impact fix every week.' },
     { old:'Receive a slide deck of recommendations to build yourself.', neu:'Get the fix already written. You approve it, it ships.' },
     { old:'Ship the change and hope it helped.', neu:'Measured over the first 48 hours. If it made things worse, the agent proposes the rollback.' },
   ]
@@ -1195,7 +1195,7 @@ function ClosingCTA({ navigate }) {
           <button className="btn-primary" style={{ width:'auto' }} onClick={() => navigate('/agent/register')}>Start free trial →</button>
           <button className="btn-ghost" style={{ width:'auto' }} onClick={() => document.getElementById('pricing-section')?.scrollIntoView({ behavior:'smooth' })}>See pricing</button>
         </div>
-        <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:16 }}>14-day free trial · €29/month after · Cancel anytime</p>
+        <p style={{ fontSize:12.5, color:C.textLight, fontWeight:300, marginTop:16 }}>14-day free trial · €49/month after · Cancel anytime</p>
       </div>
     </section>
   )

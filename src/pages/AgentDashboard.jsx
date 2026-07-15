@@ -640,17 +640,24 @@ function StatusHero({subscription, runs, onTogglePause, actionLoading, onTrigger
 
   // "Run now" gating: blocked while a run is running/awaiting approval (this is
   // also what stops a double-run right after the post-onboarding auto-run), or
-  // within the 24h manual-run cooldown (last_manual_run_at). Scheduled cron runs
+  // within the manual-run cooldown (last_manual_run_at) — 24h, 72h while
+  // trialing. Keep both values in sync with MANUAL_RUN_COOLDOWN_MS /
+  // TRIAL_MANUAL_RUN_COOLDOWN_MS in api/agent/run.js. Scheduled cron runs
   // and the auto-run never set last_manual_run_at, so they don't consume it.
   // runStarting covers the dispatch gap: trigger_run succeeded but the edge
   // function hasn't inserted the run row yet.
   const inFlight             = isRunning || runStarting || pending.length > 0
+  const isTrialing           = subscription?.subscription_status === 'trialing'
+  const manualCooldownMs     = isTrialing ? 3*24*3600000 : 24*3600000
   const lastManualMs         = subscription?.last_manual_run_at ? new Date(subscription.last_manual_run_at).getTime() : 0
-  const manualCooldownLeftMs = lastManualMs ? Math.max(0, 24*3600000 - (Date.now() - lastManualMs)) : 0
+  const manualCooldownLeftMs = lastManualMs ? Math.max(0, manualCooldownMs - (Date.now() - lastManualMs)) : 0
   const runNowDisabled       = isPaused || inFlight || manualCooldownLeftMs > 0 || triggerLoading
+  const cooldownHrs = Math.ceil(manualCooldownLeftMs/3600000)
+  const cooldownStr = cooldownHrs >= 24 ? `${Math.floor(cooldownHrs/24)}d${cooldownHrs%24 ? ` ${cooldownHrs%24}h` : ''}`
+    : cooldownHrs >= 1 ? `${cooldownHrs}h` : '<1h'
   const runNowLabel = triggerLoading ? '…'
     : inFlight ? 'Run in progress'
-    : manualCooldownLeftMs > 0 ? `Next run in ${manualCooldownLeftMs >= 3600000 ? Math.ceil(manualCooldownLeftMs/3600000)+'h' : '<1h'}`
+    : manualCooldownLeftMs > 0 ? `Next run in ${cooldownStr}`
     : 'Run now'
 
   const target = useMemo(() => nextMonday9am(), [])
@@ -740,7 +747,7 @@ function StatusHero({subscription, runs, onTogglePause, actionLoading, onTrigger
           <p className="reveal-in" style={{fontSize:11,lineHeight:1.5,color:triggerMessage.error?C.redText:C.accent}}>{triggerMessage.text}</p>
         )}
         {!isPaused && !inFlight && manualCooldownLeftMs===0 && !triggerMessage && (
-          <p style={{fontSize:10,color:C.textLight,lineHeight:1.4,textAlign:'center'}}>One manual run/day · scheduled runs continue automatically</p>
+          <p style={{fontSize:10,color:C.textLight,lineHeight:1.4,textAlign:'center'}}>{isTrialing ? 'One manual run every 3 days during your trial · scheduled runs continue automatically' : 'One manual run/day · scheduled runs continue automatically'}</p>
         )}
       </div>
     </Card>
@@ -1932,7 +1939,7 @@ function StripeSubscriptionPanel({ navigate }) {
               <span style={{width:7,height:7,borderRadius:'50%',background:C.green}}/>
               <span style={{fontSize:12.5,color:'#4A5248'}}>
                 Free trial{trialDaysLeft != null ? ` — ${trialDaysLeft} day${trialDaysLeft === 1 ? '' : 's'} left` : ''}
-                {cancelAtPeriodEnd ? ' · ends, won’t renew' : ' · then €29/mo'}
+                {cancelAtPeriodEnd ? ' · ends, won’t renew' : ' · then €49/mo'}
               </span>
             </div>
           )}
@@ -1982,7 +1989,7 @@ function StripeSubscriptionPanel({ navigate }) {
             fontSize:12.5,fontWeight:500,borderRadius:9,padding:'10px 18px',
             opacity:subscribeLoading?.7:1,cursor:subscribeLoading?'not-allowed':'pointer',whiteSpace:'nowrap',
           }}>
-            {subscribeLoading ? 'Opening Stripe…' : 'Activate — €29/mo →'}
+            {subscribeLoading ? 'Opening Stripe…' : 'Activate — €49/mo →'}
           </button>
         )}
         {!isActive && !isTrialing && !isPastDue && !isCancelled && !isDenied && (
@@ -2879,7 +2886,8 @@ export default function AgentDashboard({ navigate }) {
   }
 
   // "Run now" — fires a single manual run (api/agent/run.js?action=trigger_run).
-  // Server enforces: active + not paused, no run in-flight, max 1/day. We
+  // Server enforces: active + not paused, no run in-flight, max 1/day (1 per
+  // 3 days while trialing). We
   // optimistically stamp last_manual_run_at so the button locks immediately, and
   // surface 409/429/402 errors inline. fetchData polling (every 30s) picks up the
   // new 'running' run.
@@ -3211,13 +3219,13 @@ export default function AgentDashboard({ navigate }) {
                     display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap',
                   }}>
                     <span style={{fontSize:12,color:C.yellowText,lineHeight:1.4}}>
-                      This website already used a Velyr free trial, so a second trial isn't available. Subscribe to activate your Growth Agent — €29/mo, cancel anytime.
+                      This website already used a Velyr free trial, so a second trial isn't available. Subscribe to activate your Growth Agent — €49/mo, cancel anytime.
                     </span>
                     <button className="btn v-press" onClick={()=>setUnlockConfirmOpen(true)} style={{
                       fontSize:11,fontWeight:500,padding:'6px 13px',borderRadius:7,flexShrink:0,
                       background:C.ink,color:C.sideText,
                     }}>
-                      Activate — €29/mo →
+                      Activate — €49/mo →
                     </button>
                   </div>
                 )}

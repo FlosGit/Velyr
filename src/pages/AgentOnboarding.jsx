@@ -1070,7 +1070,7 @@ function OnboardingBuild({ subscriptionId, websiteUrl, navigate, connectionType,
           {trialDenied && (
             <p style={{ fontSize: 12.5, color: '#8A6D1A', lineHeight: 1.6, marginBottom: 6 }}>
               One note: this website already used a Velyr free trial, so a second trial isn’t available.
-              Activate your agent from the dashboard — €29/mo, cancel anytime.
+              Activate your agent from the dashboard — €49/mo, cancel anytime.
             </p>
           )}
           <button className="ob-btn" onClick={() => navigate('/agent/dashboard')} style={{ width: 'auto', padding: '12px 24px', marginTop: 12 }}>

@@ -67,7 +67,7 @@ function compareFallback() {
     h2('When an overlay tool is the better fit'),
     p('Enterprise sites with heavy traffic and a dedicated CRO team running many parallel experiments are what overlay experimentation platforms are built for. Velyr is built for the opposite case: indie founders, small SaaS teams, and store owners who want one well-evidenced improvement a week that they own forever.'),
     h2('How Velyr ships code'),
-    p('Every week, Velyr reads your PostHog analytics, scans your pages, and writes the single highest-impact conversion fix as a GitHub Pull Request or a staged Shopify theme change. You approve or skip with one tap in Telegram or from the dashboard — nothing ships without your YES. After a fix ships, Velyr compares bounce rate in the 48 hours after against the 48 hours before and proposes a rollback if the numbers got worse. €29/month after a 14-day free trial; every fix is code you keep.'),
+    p('Every week, Velyr reads your PostHog analytics, scans your pages, and writes the single highest-impact conversion fix as a GitHub Pull Request or a staged Shopify theme change. You approve or skip with one tap in Telegram or from the dashboard — nothing ships without your YES. After a fix ships, Velyr compares bounce rate in the 48 hours after against the 48 hours before and proposes a rollback if the numbers got worse. €49/month after a 14-day free trial; every fix is code you keep.'),
   ].join('')
   return `<div id="root">${MAIN_OPEN}${H1('Overlay scripts vs. real code')}${body}${HOME_LINK}</main></div>`
 }
@@ -117,11 +117,11 @@ const ROUTES = [
     path: '/agb',
     title: 'Terms & Conditions (AGB) — Velyr',
     description:
-      'Velyr terms and conditions (AGB) for the €29/month AI growth agent subscription, including the 14-day free trial and cancellation.',
+      'Velyr terms and conditions (AGB) for the €49/month AI growth agent subscription, including the 14-day free trial and cancellation.',
     robots: 'noindex, nofollow',
     fallback: legalFallback(
       'Terms & Conditions',
-      'The terms governing your use of Velyr, the €29/month AI growth agent subscription, the 14-day free trial, billing, and cancellation.'
+      'The terms governing your use of Velyr, the €49/month AI growth agent subscription, the 14-day free trial, billing, and cancellation.'
     ),
   },
   {
