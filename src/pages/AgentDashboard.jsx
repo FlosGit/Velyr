@@ -2168,7 +2168,12 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
           <div className="reveal-in" style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${C.borderSoft}`}}>
             <p style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:6}}>Win badge for your site</p>
             <img src={`/api/agent/run?action=win_badge&slug=${subscription.public_slug}`} alt="Velyr win badge preview" width="320" height="64" style={{display:'block',marginBottom:8}}/>
-            <input readOnly onFocus={e=>e.target.select()} value={`<a href="https://velyr.io/agent/${subscription.public_slug}"><img src="https://velyr.io/api/agent/run?action=win_badge&slug=${subscription.public_slug}" alt="Optimized weekly by Velyr" width="320" height="64"></a>`}
+            {/* Single-line twin of buildBadgeBlock(slug, 'html') in api/_lib/badge-install.js
+                (newlines → single spaces, so the agent-install marker check treats a
+                hand-pasted copy as already installed). Keep in sync — incl. the
+                opacity/animation guard that stops the badge flashing at the top of
+                client-rendered pages before the app mounts. */}
+            <input readOnly onFocus={e=>e.target.select()} value={`<!-- Velyr Badge --> <style>@keyframes velyrBadgeIn{to{opacity:1}}</style> <div style="text-align:center;padding:16px 0;opacity:0;animation:velyrBadgeIn .6s ease .9s forwards"><a href="https://velyr.io/agent/${subscription.public_slug}" target="_blank" rel="noopener"><img src="https://velyr.io/api/agent/run?action=win_badge&amp;slug=${subscription.public_slug}" alt="Optimized weekly by Velyr" width="320" height="64" loading="lazy" style="display:inline-block;border:0"></a></div> <!-- /Velyr Badge -->`}
               style={{...monoInput,width:'100%',fontSize:11,color:C.textMuted}}/>
             <p style={{fontSize:11,color:C.label,marginTop:6}}>Paste this into your site's footer — it updates automatically with your latest measured win.</p>
             {/* Agent install: one click ships the badge into the footer (merged PR on

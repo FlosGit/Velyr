@@ -53,9 +53,18 @@ function safeSlug(slug) {
 }
 
 // Build the full marker-wrapped embed block for a slug + variant.
-// html: correct-HTML entity escaping (&amp;) for .html/.liquid.
+// html: correct-HTML entity escaping (&amp;) for .html/.liquid. The badge starts
+//       opacity:0 and fades in via a delayed CSS animation: on client-rendered
+//       SPA shells (vite/CRA index.html) the badge is static HTML outside the
+//       app root, so at first paint it is the only visible element and flashes
+//       at the TOP of a blank page until the app mounts and pushes it to the
+//       footer. CSS-only on purpose — an inline reveal script would be silently
+//       killed by a strict CSP (script-src without unsafe-inline) on customer
+//       sites, leaving the badge permanently invisible.
 // jsx:  JSX style objects + numeric width/height; a bare & in a JSX string
-//       attribute stays literal, so no entity is needed.
+//       attribute stays literal, so no entity is needed. No fade here: the jsx
+//       targets (Next layouts/_document) are server-rendered, the surrounding
+//       page always paints with the badge, so hiding it would only delay it.
 export function buildBadgeBlock(slug, variant) {
   const s = safeSlug(slug)
   const timeline = `https://velyr.io/agent/${s}`
@@ -65,7 +74,7 @@ export function buildBadgeBlock(slug, variant) {
     return `${open}\n<div style={{textAlign:'center',padding:'16px 0'}}><a href="${timeline}" target="_blank" rel="noopener noreferrer"><img src="${img}" alt="Optimized weekly by Velyr" width={320} height={64} loading="lazy" style={{display:'inline-block',border:0}}/></a></div>\n${close}`
   }
   const img = `https://velyr.io/api/agent/run?action=win_badge&amp;slug=${s}`
-  return `${open}\n<div style="text-align:center;padding:16px 0"><a href="${timeline}" target="_blank" rel="noopener"><img src="${img}" alt="Optimized weekly by Velyr" width="320" height="64" loading="lazy" style="display:inline-block;border:0"></a></div>\n${close}`
+  return `${open}\n<style>@keyframes velyrBadgeIn{to{opacity:1}}</style>\n<div style="text-align:center;padding:16px 0;opacity:0;animation:velyrBadgeIn .6s ease .9s forwards"><a href="${timeline}" target="_blank" rel="noopener"><img src="${img}" alt="Optimized weekly by Velyr" width="320" height="64" loading="lazy" style="display:inline-block;border:0"></a></div>\n${close}`
 }
 
 function normWs(s) {

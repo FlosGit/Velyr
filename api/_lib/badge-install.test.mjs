@@ -13,10 +13,18 @@ assert(htmlBlock.startsWith(BADGE_MARKERS.html.open) && htmlBlock.endsWith(BADGE
 assert(htmlBlock.includes('action=win_badge&amp;slug=my-shop'), 'html img URL uses &amp; + slug')
 assert(htmlBlock.includes('href="https://velyr.io/agent/my-shop"'), 'html links the public timeline')
 
+// SPA-flash guard: on client-rendered shells the badge is the only painted
+// element until the app mounts, so it must start hidden and fade in via CSS
+// (never an inline script — strict CSP would kill it silently).
+assert(htmlBlock.includes('opacity:0') && htmlBlock.includes('animation:velyrBadgeIn'), 'html badge starts hidden + animates in')
+assert(htmlBlock.includes('<style>@keyframes velyrBadgeIn{to{opacity:1}}</style>'), 'html block ships its own keyframes')
+assert(!htmlBlock.includes('<script'), 'reveal is CSS-only (CSP-safe)')
+
 const jsxBlock = buildBadgeBlock('my-shop', 'jsx')
 assert(jsxBlock.startsWith(BADGE_MARKERS.jsx.open) && jsxBlock.endsWith(BADGE_MARKERS.jsx.close), 'jsx block is marker-wrapped')
 assert(jsxBlock.includes('action=win_badge&slug=my-shop') && !jsxBlock.includes('&amp;'), 'jsx img URL uses a bare &')
 assert(jsxBlock.includes('style={{') && jsxBlock.includes('width={320}'), 'jsx uses style objects + numeric attrs')
+assert(!jsxBlock.includes('opacity:0'), 'jsx (server-rendered shells) stays immediately visible')
 
 // Hostile slug is stripped, never breaks out of the attribute.
 const hostile = buildBadgeBlock('x"><script>alert(1)</script>', 'html')
@@ -46,6 +54,18 @@ const re = decideBadgeInjection(stale, htmlBlock, 'html')
 assert(re.action === 'reinject', 'edited/stale block → reinject')
 assert(re.newContent.includes('slug=my-shop') && !re.newContent.includes('slug=old-slug'), 'reinject swaps the slug')
 assert(re.newContent.split(BADGE_MARKERS.html.open).length === 2, 'reinject never leaves two blocks')
+
+// A pre-flash-fix block (the 2026-07-15 format without the opacity guard, as it
+// sits on already-installed sites) self-heals to the new embed on reinstall.
+const legacyBlock = `${BADGE_MARKERS.html.open}\n<div style="text-align:center;padding:16px 0"><a href="https://velyr.io/agent/my-shop" target="_blank" rel="noopener"><img src="https://velyr.io/api/agent/run?action=win_badge&amp;slug=my-shop" alt="Optimized weekly by Velyr" width="320" height="64" loading="lazy" style="display:inline-block;border:0"></a></div>\n${BADGE_MARKERS.html.close}`
+const legacy = page.replace('</body>', legacyBlock + '\n</body>')
+const heal = decideBadgeInjection(legacy, htmlBlock, 'html')
+assert(heal.action === 'reinject' && heal.newContent.includes('animation:velyrBadgeIn'), 'legacy no-guard block self-heals to the fading embed')
+
+// The dashboard's hand-paste snippet is the same block with newlines collapsed
+// to single spaces — whitespace-normalized equal, so it must count as installed.
+const pastedOneLine = page.replace('</body>', htmlBlock.replace(/\n/g, ' ') + '</body>')
+assert(decideBadgeInjection(pastedOneLine, htmlBlock, 'html').action === 'skip', 'one-line hand-pasted twin → skip')
 
 // No </body> anywhere → honest no_anchor (never a blind append).
 assert(decideBadgeInjection('<div>fragment page</div>', htmlBlock, 'html').action === 'no_anchor', 'no anchor → no_anchor')
