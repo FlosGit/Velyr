@@ -13,6 +13,7 @@ import { fileToRoutePath } from './route-map.ts'
 import { decidePostHogInjection, buildMarkerBlock } from './posthog-inject.mjs'
 import { validateLiquidBlocks } from './liquid-block-validate.ts'
 import { validateHtmlShell, extractInlineScripts } from './html-validate.ts'
+import { extractJsonObject } from './json-extract.ts'
 
 // Stage 5.D: Octokit with automatic rate-limit + secondary-rate-limit
 // handling. Honors GitHub's Retry-After header and retries a bounded number
@@ -3778,16 +3779,19 @@ ${editTypeConstraint}
 - backlog is OPTIONAL (max 3): OTHER credible problems you considered and ranked below your #1, each with the site-relative page path it lives on (start with "/"). It becomes the owner's visible "next up" roadmap. Omit it when nothing else credible exists — never pad it.
 - If you cannot find a confident #1 problem, return { "skip": true, "reason": "..." } and we will not open a PR this week. A skip MAY also carry "question_for_owner" — a skip is exactly when the question reaches the owner, so if missing business context caused the skip, ask for it there. A skip may carry "backlog" too (near-credible problems worth watching).`
 
-  let text: string
-  try {
-    text = await callLLMCapped(subscriptionId, system, user, LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix', shotUrls)
-  } catch (err: any) {
-    if (shotUrls.length === 0) throw err
-    // Image-bearing call failed (provider image fetch / multimodal hiccup) —
-    // one retry without images, so a screenshot can never cost the weekly fix.
-    slog('warn', 'fix_call_image_retry', { subscriptionId, error: String(err?.message || err).slice(0, 200) })
-    text = await callLLMCapped(subscriptionId, system, user.replace(screenshotContext, 'SCREENSHOTS: none available this run. Do not make visual claims, and do not propose a fix whose premise is purely visual (element overlap, fold position, spacing, mobile rendering) — you cannot confirm it. Pick a problem verifiable from the code and analytics inputs instead, or skip.'), LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix')
+  // One shared call helper so BOTH the first attempt and the JSON-format retry
+  // get the image-failure fallback (one retry without images, so a screenshot
+  // can never cost the weekly fix).
+  const callFix = async (userMsg: string): Promise<string> => {
+    try {
+      return await callLLMCapped(subscriptionId, system, userMsg, LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix', shotUrls)
+    } catch (err: any) {
+      if (shotUrls.length === 0) throw err
+      slog('warn', 'fix_call_image_retry', { subscriptionId, error: String(err?.message || err).slice(0, 200) })
+      return await callLLMCapped(subscriptionId, system, userMsg.replace(screenshotContext, 'SCREENSHOTS: none available this run. Do not make visual claims, and do not propose a fix whose premise is purely visual (element overlap, fold position, spacing, mobile rendering) — you cannot confirm it. Pick a problem verifiable from the code and analytics inputs instead, or skip.'), LLM_CAPS.MAX_TOKENS_ANALYSIS, 'fix')
+    }
   }
+  let text = await callFix(user)
 
   // Consume the one-shot focus pin now that Pass 2 has run with it — even a
   // skip outcome counts as consideration; the owner can re-pin from the Funnel
@@ -3795,20 +3799,19 @@ ${editTypeConstraint}
   // before Pass 2 (cost cap, sparse graph) keeps the pin for the next attempt.
   if (focusPagePath) await clearFocusPage(subscriptionId)
 
-  let parsed: FixResult
-  try {
-    // Strip a leading/trailing markdown code fence ONLY (the LLM commonly wraps
-    // its JSON in ```json … ```). The old global replace(/```json|```/g) also
-    // stripped any ``` inside the JSON body (e.g. a code_change.replace string
-    // that itself contains a fence), which produced invalid JSON and killed the
-    // run with "Pass 2 returned invalid JSON".
-    let cleaned = text.trim()
-    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7).trim()
-    else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3).trim()
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3).trim()
-    parsed = JSON.parse(cleaned)
-  } catch {
-    throw new Error(`Pass 2 returned invalid JSON: ${text.slice(0, 200)}`)
+  // extractJsonObject (json-extract.ts) handles fenced JSON AND JSON buried in
+  // prose. Opus sometimes ignores "JSON only" and answers with a markdown
+  // analysis containing no JSON at all (incident 2026-07-15, "I'll analyze this
+  // material carefully…") — that gets one bounded corrective retry with a hard
+  // format reminder; only a second non-JSON answer fails the run.
+  let parsed = extractJsonObject(text) as FixResult | null
+  if (!parsed) {
+    slog('warn', 'fix_json_retry', { subscriptionId, head: text.slice(0, 160) })
+    text = await callFix(`FORMAT FAILURE — your previous answer was prose, not JSON, and was discarded unread. Respond with ONLY the single JSON object described below. The very first character of your reply MUST be "{" and the last MUST be "}". No preamble, no markdown headings, no analysis outside JSON string values.\n\n${user}`)
+    parsed = extractJsonObject(text) as FixResult | null
+  }
+  if (!parsed) {
+    throw new Error(`Pass 2 returned invalid JSON (after format retry): ${text.slice(0, 200)}`)
   }
   // `replace` must be validated too: it is spliced verbatim into the customer's
   // file (createPR) or the live theme (applyCodeChangeToContent), so a missing
@@ -3889,12 +3892,8 @@ ${sealed(`[REPLACE — unchanged, context only]\n${replaceText.slice(0, 2000)}`)
 Return JSON only: {"find": "<verbatim unique substring copied from the file>"} or {"impossible": true}`
   try {
     const text = await callLLMCapped(subscriptionId, system, user, 2000, 'find_repair')
-    let cleaned = text.trim()
-    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7).trim()
-    else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3).trim()
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3).trim()
-    const parsed = JSON.parse(cleaned)
-    if (parsed?.impossible || typeof parsed?.find !== 'string' || !parsed.find.trim()) return null
+    const parsed = extractJsonObject(text) as any // prose-tolerant; null on no JSON
+    if (!parsed || parsed.impossible || typeof parsed.find !== 'string' || !parsed.find.trim()) return null
     return parsed.find
   } catch (err: any) {
     slog('warn', 'find_repair_call_failed', { subscriptionId, error: String(err?.message || err).slice(0, 200) })
@@ -4024,11 +4023,7 @@ Return JSON only (no markdown), at most 5 claims, every free-text field at most 
       slog('warn', 'fix_verify_image_retry', { subscriptionId, error: String(err?.message || err).slice(0, 200) })
       text = await callLLMCapped(subscriptionId, system, user.replace(screenshotPara, noShotsPara), 1000, 'fix_verify')
     }
-    let cleaned = text.trim()
-    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7).trim()
-    else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3).trim()
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3).trim()
-    const parsed = JSON.parse(cleaned)
+    const parsed = extractJsonObject(text) as any // prose-tolerant; null on no JSON
     if (parsed?.verdict !== 'pass' && parsed?.verdict !== 'refute') {
       slog('warn', 'fix_verify_unparseable', { subscriptionId, got: String(parsed?.verdict ?? '(missing)').slice(0, 50) })
       return { verdict: 'error', error: 'unrecognized verdict' }

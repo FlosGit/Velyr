@@ -28,6 +28,7 @@
 //   • Pure helpers; no module-level mutable state.
 
 import type { ImportGraph, GraphNode } from './import-graph.ts'
+import { extractJsonObject } from './json-extract.ts'
 
 // Injected AI call. The cap (LLM_CAPS.MAX_TOKENS_RANKER) is applied by the
 // closure index.ts binds — this module deliberately does not own the number.
@@ -113,18 +114,9 @@ function buildGraphSummary(nodes: GraphNode[]): { text: string; included: GraphN
 }
 
 function parseRankerJson(text: string): any | null {
-  try {
-    // Strip a leading/trailing markdown code fence ONLY. The old global
-    // replace(/```json|```/g) also nuked any ``` *inside* the JSON body (e.g. a
-    // code_change string containing a fence), corrupting otherwise-valid output.
-    let cleaned = text.trim()
-    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7).trim()
-    else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3).trim()
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3).trim()
-    return JSON.parse(cleaned)
-  } catch {
-    return null
-  }
+  // Shared prose-tolerant extraction (json-extract.ts): handles fenced JSON and
+  // JSON buried in a prose answer. null → caller falls back to heuristicRank.
+  return extractJsonObject(text)
 }
 
 // Deterministic fallback when Pass 1 is unavailable (call/parse failure).
