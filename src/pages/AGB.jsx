@@ -93,7 +93,7 @@ export default function AGB({ navigate }) {
         <div className="legal-page-pad" style={{ maxWidth: 680, margin: '0 auto', padding: '72px 24px 96px' }}>
           <p style={{ fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: '#2a5c45', marginBottom: 16, fontWeight: 400 }}>Legal</p>
           <h1 style={{ marginBottom: 12 }}>Terms & Conditions</h1>
-          <p style={{ marginBottom: 8, color: '#a09890', fontSize: 13 }}>Last updated: May 2026</p>
+          <p style={{ marginBottom: 8, color: '#a09890', fontSize: 13 }}>Last updated: July 15, 2026</p>
           <p style={{ marginBottom: 48, color: '#a09890', fontSize: 13 }}>These Terms & Conditions apply to all services offered by Velyr, operated by Florian Rappold, Maikäferstraße 3f, 85551 Kirchheim bei München, Germany (hereinafter "Velyr", "we", "us").</p>
 
           <hr style={{ border: 'none', borderTop: '1px solid rgba(28,25,23,0.09)', margin: '8px 0 36px' }} />
@@ -103,7 +103,7 @@ export default function AGB({ navigate }) {
             <h2>§ 1 — Scope & Services</h2>
             <p style={{ marginBottom: 12 }}>Velyr provides an AI-powered Growth Agent service that delivers weekly conversion optimization improvements to subscribers' websites. The following service is offered:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Growth Agent (€49/month)</strong> — a semi-autonomous AI agent that analyses your GitHub repository and PostHog analytics weekly, identifies the highest-impact conversion issue, writes a code fix, opens a Pull Request, and notifies you via Telegram (reply YES to deploy or NO to skip). Nothing is deployed without your explicit approval. Additional features include: competitor weekly scanning of up to 2 sites you choose; an optional public timeline page; and a brutally honest monthly roast report summarising progress and gaps.</li>
+              <li><strong style={{ fontWeight: 500 }}>Growth Agent (€49/month)</strong> — a semi-autonomous AI agent that analyses your connected site weekly, identifies the highest-impact conversion issue, writes a code fix, and asks you to approve or reject it via Telegram or your dashboard. Nothing is deployed without your explicit approval. You can connect your site in one of two ways: (a) a <strong style={{ fontWeight: 500 }}>GitHub repository</strong> — the agent opens a Pull Request with the proposed fix, which is only merged after your approval; or (b) a <strong style={{ fontWeight: 500 }}>Shopify store connected directly</strong> — the agent prepares a change to your store's theme and applies it to the theme only after your approval (nothing is written to your store before you approve). Additional features include: analytics-based measurement of each deployed fix; a rollback proposal if a deployed fix measurably hurts your metrics; competitor weekly scanning of up to 2 sites you choose; an optional public timeline page; and a brutally honest monthly roast report summarising progress and gaps.</li>
             </ul>
             <p style={{ marginTop: 12 }}>All services are provided as-is based on publicly available data and automated AI analysis. Results are informational only and do not constitute legal, financial, or professional business advice.</p>
           </div>
@@ -115,7 +115,8 @@ export default function AGB({ navigate }) {
             <h2>§ 2 — Contract Formation</h2>
             <p style={{ marginBottom: 12 }}>A contract is formed as follows:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Growth Agent:</strong> By completing the onboarding process and confirming your first monthly subscription payment via Stripe. The contract is formed at the moment Stripe confirms your payment.</li>
+              <li><strong style={{ fontWeight: 500 }}>Free trial:</strong> By completing the onboarding process and starting your 14-day free trial, a contract for the free trial period is formed. No payment method is required for the trial.</li>
+              <li><strong style={{ fontWeight: 500 }}>Paid subscription:</strong> By subscribing via Stripe checkout (during or after your trial). The paid contract is formed at the moment Stripe confirms your payment.</li>
             </ul>
             <p style={{ marginTop: 12 }}>By using any paid service, you confirm that you are at least 18 years old and legally entitled to enter into this contract.</p>
           </div>
@@ -128,7 +129,8 @@ export default function AGB({ navigate }) {
             <ul>
               <li>All prices are final. As a small business under § 19 UStG (German VAT exemption), we don't charge VAT and therefore do not show it separately.</li>
               <li>The <strong style={{ fontWeight: 500 }}>Growth Agent</strong> costs €49 per month, billed monthly in advance via Stripe. The subscription renews automatically each month until cancelled.</li>
-              <li><strong style={{ fontWeight: 500 }}>Free trial:</strong> New subscribers receive a 14-day free trial. A valid payment method is required at signup. The trial ends automatically and the subscription continues at €49/month unless cancelled before the trial ends. Cancellation during the trial: no charge. Cancellation after trial start: the subscription ends at the end of the current billing period.</li>
+              <li><strong style={{ fontWeight: 500 }}>Free trial:</strong> New subscribers receive a 14-day free trial. <strong style={{ fontWeight: 500 }}>No payment method is required to start the trial.</strong> The trial does not convert automatically: if you do not actively subscribe by the end of the trial, it simply expires and you are never charged. To continue after (or during) the trial, you subscribe at €49/month via Stripe checkout; billing starts at that moment. Each website/store is eligible for one free trial.</li>
+              <li>Price changes do not affect already-running paid subscriptions during their current term; any price change for existing subscribers will be announced at least 30 days in advance in accordance with § 11.</li>
               <li>All payments are processed by Stripe Payments Europe, Ltd. Velyr never stores your card details.</li>
               <li>In case of a failed payment for the Growth Agent, Stripe will retry according to its standard retry schedule. If payment cannot be collected, the subscription will be paused and you will be notified via email and/or Telegram.</li>
             </ul>
@@ -141,7 +143,8 @@ export default function AGB({ navigate }) {
             <h2>§ 4 — Right of Withdrawal (Widerrufsrecht)</h2>
             <p style={{ marginBottom: 12 }}>As a consumer within the EU, you generally have a 14-day right of withdrawal from distance contracts. However, please note the following:</p>
             <ul>
-              <li><strong style={{ fontWeight: 500 }}>Growth Agent:</strong> You have a 14-day right of withdrawal from the date of contract formation. If you expressly request that the service begin immediately, you acknowledge that your right of withdrawal expires once the service has been fully performed. If you withdraw before the first agent run, you will receive a full refund. If the agent has already run at least once, a proportional fee for the service rendered may be retained.</li>
+              <li><strong style={{ fontWeight: 500 }}>Free trial:</strong> The trial is free of charge, so withdrawing from it never costs you anything.</li>
+              <li><strong style={{ fontWeight: 500 }}>Paid subscription:</strong> You have a 14-day right of withdrawal from the date the paid contract is formed (Stripe payment confirmation). If you expressly request that the service begin immediately, you acknowledge that your right of withdrawal expires once the service has been fully performed. If you withdraw before the first agent run of the paid period, you will receive a full refund. If the agent has already run at least once, a proportional fee for the service rendered may be retained.</li>
             </ul>
             <p style={{ marginTop: 12 }}>To exercise your right of withdrawal, contact us at <a href="mailto:info@velyr.io">info@velyr.io</a> within 14 days of contract formation. No specific form is required.</p>
           </div>
@@ -230,12 +233,13 @@ export default function AGB({ navigate }) {
             <h2>§ 6 — Growth Agent — User Responsibilities</h2>
             <p style={{ marginBottom: 12 }}>By using the Growth Agent, you agree to the following:</p>
             <ul>
-              <li>You are the owner of, or have full authorisation to grant access to, the GitHub repository and PostHog project you connect to Velyr.</li>
-              <li>You understand that the Growth Agent will open Pull Requests on your GitHub repository. No changes are merged or deployed without your explicit approval via Telegram (reply YES to deploy or NO to skip).</li>
-              <li>You are solely responsible for reviewing and approving any Pull Request before merging. Velyr is not liable for the outcome of code changes you approve (YES) and deploy.</li>
+              <li>You are the owner of, or have full authorisation to grant access to, the GitHub repository, Shopify store, and analytics data you connect to Velyr.</li>
+              <li><strong style={{ fontWeight: 500 }}>GitHub connection:</strong> the Growth Agent will open Pull Requests on your repository. No changes are merged or deployed without your explicit approval via Telegram or your dashboard.</li>
+              <li><strong style={{ fontWeight: 500 }}>Direct Shopify connection:</strong> the Growth Agent will read your store's theme files and, only after your explicit approval via Telegram or your dashboard, write the approved change to your connected theme. Nothing is written to your store before you approve. Because approved changes are applied to your live theme, you should review each proposal carefully before approving.</li>
+              <li>You are solely responsible for reviewing and approving any proposed change before it is merged or applied. Velyr is not liable for the outcome of changes you approve and deploy.</li>
               <li>You are responsible for ensuring that your Brand Guardrails are accurate and up to date. The agent follows them as written.</li>
-              <li>The auto-rollback feature is a safety measure, not a guarantee. Velyr is not liable for any business impact resulting from a deployed change, whether or not a rollback occurs.</li>
-              <li>You must not use the Growth Agent to violate any third-party terms of service, including GitHub's and PostHog's.</li>
+              <li>The rollback feature is a safety measure, not a guarantee: if analytics indicate that a deployed change hurt your metrics, the agent proposes a rollback for your approval. Velyr is not liable for any business impact resulting from a deployed change, whether or not a rollback occurs.</li>
+              <li>You must not use the Growth Agent to violate any third-party terms of service, including GitHub's, Shopify's, and PostHog's.</li>
             </ul>
           </div>
 
@@ -246,7 +250,8 @@ export default function AGB({ navigate }) {
             <h2>§ 7 — Availability & Service Levels</h2>
             <ul>
               <li>Velyr aims for high availability but does not guarantee uninterrupted service. Scheduled maintenance will be communicated in advance where possible.</li>
-              <li>The Growth Agent is designed to run every Monday at 9:00 AM (UTC). Velyr does not guarantee that every run will complete successfully. If a run fails due to a technical error on our side, no charge is made for that week and the agent will retry the following Monday.</li>
+              <li>The Growth Agent is designed to run every Monday at 9:00 AM (UTC), with an additional analytics check midweek. Velyr does not guarantee that every run will complete successfully. If a run fails due to a technical error on our side, the agent will retry the following Monday; if runs repeatedly fail due to an error on our side, you are entitled to a pro-rated refund for the affected period (§ 5).</li>
+              <li><strong style={{ fontWeight: 500 }}>Fair use:</strong> manually triggered runs ("Run now") are rate-limited to one per 24 hours (one per 72 hours during the free trial). The agent's AI analysis is subject to a reasonable monthly usage ceiling per subscription to prevent abuse; normal use is never affected by it.</li>
               <li>Velyr reserves the right to modify, update, or discontinue features with reasonable notice. For material changes to paid services, at least 30 days' notice will be given.</li>
             </ul>
           </div>
@@ -271,8 +276,8 @@ export default function AGB({ navigate }) {
           <div style={block}>
             <h2>§ 9 — Intellectual Property</h2>
             <ul>
-              <li>The Velyr platform, its design, and all content produced by Velyr (excluding your own website content and social media data) remain the intellectual property of Florian Rappold.</li>
-              <li>The Pull Requests and recommendations generated for you are licensed to you for personal and commercial use. You may share them freely.</li>
+              <li>The Velyr platform, its design, and all content produced by Velyr (excluding your own website content, code, and analytics data) remain the intellectual property of Florian Rappold.</li>
+              <li>The code changes, Pull Requests, and recommendations generated for you are licensed to you for personal and commercial use without restriction. Once merged or applied, the code belongs to your codebase or theme like any other code you own.</li>
               <li>You may not reverse-engineer, resell, or redistribute the Velyr platform or its outputs as your own product or service.</li>
             </ul>
           </div>
@@ -284,9 +289,8 @@ export default function AGB({ navigate }) {
             <h2>§ 10 — Prohibited Use</h2>
             <p style={{ marginBottom: 12 }}>You may not use Velyr to:</p>
             <ul>
-              <li>Use the Growth Agent on repositories or websites you do not own.</li>
-              <li>Attempt to circumvent, reverse-engineer, or exploit the platform.</li>
-              <li>Use the Growth Agent on a GitHub repository you are not authorised to modify.</li>
+              <li>Use the Growth Agent on repositories, Shopify stores, or websites you do not own or are not authorised to modify.</li>
+              <li>Attempt to circumvent, reverse-engineer, or exploit the platform, including circumventing the free-trial limitation or the fair-use rate limits.</li>
               <li>Violate any applicable law or regulation.</li>
             </ul>
             <p style={{ marginTop: 12 }}>Velyr reserves the right to terminate access immediately and without refund in the event of a material breach of these Terms.</p>
