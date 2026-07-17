@@ -159,3 +159,6 @@ client_secret.json
 client_secret.json.json
 token.json
 *.pickle
+
+# Social video pipelines: intermediate frame renders (final mp4 + scripts are committed)
+social/*/png/

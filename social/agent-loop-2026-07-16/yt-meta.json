@@ -1,0 +1,12 @@
+{
+  "snippet": {
+    "title": "I gave an AI agent access to my site's code #Shorts",
+    "description": "Every week it reads my real analytics, finds the one thing quietly costing me signups, and writes the fix as a real pull request — not a to-do list.\n\nThen it messages me on Telegram. I reply YES and it ships. I reply nothing and nothing happens. It watches the numbers for 48h afterwards, and if a fix ever makes things worse it proposes the rollback itself.\n\nNo dashboard full of suggestions you still have to build yourself. One conversion fix, every week, shipped with your YES.\n\nWorks on a GitHub repo or a Shopify store.\n14-day free trial, no card → https://velyr.io\n\n#Shorts #cro #saas #buildinpublic #shopify #webdev",
+    "tags": ["cro", "conversion rate optimization", "saas", "buildinpublic", "indie hackers", "shopify", "web development", "ai agent", "startup", "founders"],
+    "categoryId": "28"
+  },
+  "status": {
+    "privacyStatus": "public",
+    "selfDeclaredMadeForKids": false
+  }
+}

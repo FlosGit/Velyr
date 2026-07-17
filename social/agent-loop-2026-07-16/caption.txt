@@ -1,0 +1,13 @@
+I gave an AI agent access to my site's code. Here's what Monday looks like.
+
+Every week it reads my real analytics, finds the one thing quietly costing me signups, and writes the fix as a real pull request — not a to-do list.
+
+Then it messages me on Telegram. I reply YES and it ships. I reply nothing and nothing happens. It watches the numbers for 48h afterwards, and if a fix ever makes things worse it proposes the rollback itself.
+
+No dashboard full of suggestions I still have to build myself. One conversion fix, every week, shipped with my YES.
+
+Works on a GitHub repo or a Shopify store.
+
+14-day free trial · no card → velyr.io
+
+#buildinpublic #cro #conversionrateoptimization #indiehackers #saas #shopify #ecommerce #webdev #startup #founders

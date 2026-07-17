@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Velyr — agent loop</title>
+<!--
+  Single continuous animated scene, 1080x1920, ~10.2s.
+  Time is driven ONLY by window.__seek(t) so every frame is deterministic and
+  render.js can step it frame-by-frame. No CSS animations, no timers.
+
+  Built from the 2026-07-16 insights pull (9 posts):
+   - 18.7s reels averaged 3.5s watch (19% through) -> halve the length.
+   - Every prior post was static slides + zoompan -> real UI motion instead.
+   - Hook is first-person/loss-aversion (the reach-91 and reach-100 pattern),
+     on screen at frame 0.
+-->
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,400&family=Jost:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=block');
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1080px; height:1920px; overflow:hidden; position:relative;
+  background:#191512; color:#f7f4ef;
+  font-family:'Jost',sans-serif; font-weight:300;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:''; position:absolute; inset:0; z-index:0;
+  background:
+    radial-gradient(900px 700px at 88% -6%, rgba(125,201,160,0.09), transparent 70%),
+    radial-gradient(820px 640px at 4% 106%, rgba(140,115,85,0.10), transparent 70%);
+}
+
+.wordmark {
+  position:absolute; top:88px; left:88px; z-index:6;
+  font-family:'Cormorant Garamond',serif; font-weight:500; font-size:42px; letter-spacing:.01em;
+}
+.wordmark::after {
+  content:''; display:inline-block; width:11px; height:11px; border-radius:50%;
+  background:#7dc9a0; margin-left:10px; margin-bottom:3px;
+}
+
+/* ---- hook: on screen at frame 0, stays for late viewers ---- */
+#hook {
+  position:absolute; top:186px; left:88px; width:912px; z-index:6;
+  font-family:'Cormorant Garamond',serif; font-weight:300;
+  font-size:74px; line-height:1.08; letter-spacing:-0.015em;
+}
+#hook em { font-style:italic; color:#7dc9a0; font-weight:400; }
+
+/* ---- phone ---- */
+#phone {
+  position:absolute; top:536px; left:112px; width:856px; height:1164px; z-index:4;
+  background:#14100e; border:2px solid rgba(247,244,239,0.10); border-radius:54px;
+  display:flex; flex-direction:column; overflow:hidden;
+  box-shadow:0 40px 90px rgba(0,0,0,0.5);
+}
+#pheader {
+  flex:0 0 auto; display:flex; align-items:center; gap:20px;
+  padding:30px 34px; border-bottom:1px solid rgba(247,244,239,0.07);
+  background:rgba(247,244,239,0.02);
+}
+#avatar {
+  width:60px; height:60px; border-radius:50%;
+  background:linear-gradient(140deg,#7dc9a0,#4e8f6d);
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Cormorant Garamond',serif; font-size:34px; font-weight:500; color:#14100e;
+}
+#pname { font-size:31px; font-weight:400; letter-spacing:.01em; }
+#pstat { font-size:23px; color:#7dc9a0; margin-top:2px; }
+
+#chat {
+  flex:1 1 auto; display:flex; flex-direction:column; justify-content:flex-end;
+  padding:26px 30px 10px 30px; overflow:hidden;
+}
+.slot { overflow:hidden; flex:0 0 auto; }
+.bubble {
+  max-width:660px; padding:24px 28px; border-radius:26px; margin-bottom:20px;
+  font-size:33px; line-height:1.4; color:#ece7e0;
+  background:#242019; border:1px solid rgba(247,244,239,0.06);
+  border-bottom-left-radius:8px;
+}
+.bubble b { font-weight:500; color:#fbf8f3; }
+.bubble .hl { color:#7dc9a0; font-weight:500; }
+.slot.user { display:flex; justify-content:flex-end; }
+.bubble.user {
+  background:#7dc9a0; color:#14100e; font-weight:500;
+  border-bottom-left-radius:26px; border-bottom-right-radius:8px;
+  border:none; letter-spacing:.04em;
+}
+
+/* typing dots */
+.dots { display:flex; gap:11px; align-items:center; padding:30px 30px; width:132px; }
+.dots i { width:14px; height:14px; border-radius:50%; background:#8a8078; display:block; }
+
+/* fix card inside a bubble */
+.card {
+  margin-top:18px; border-radius:16px; overflow:hidden;
+  border:1px solid rgba(247,244,239,0.10); background:#191512;
+}
+.cardhead {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:13px 18px; border-bottom:1px solid rgba(247,244,239,0.08);
+  font-family:'DM Mono',monospace; font-size:22px; color:#b5aca3;
+}
+.cardhead span:last-child { color:#8a8078; font-size:20px; }
+.diff { font-family:'DM Mono',monospace; font-size:22px; line-height:1.62; padding:14px 18px; }
+.diff .del { color:#d98b7d; }
+.diff .add { color:#7dc9a0; }
+
+/* input bar */
+#inputbar {
+  flex:0 0 auto; display:flex; align-items:center; gap:18px;
+  padding:24px 30px 28px 30px; border-top:1px solid rgba(247,244,239,0.07);
+  background:rgba(247,244,239,0.02);
+}
+#field {
+  flex:1 1 auto; height:76px; border-radius:38px; background:#221e1a;
+  border:1px solid rgba(247,244,239,0.08);
+  display:flex; align-items:center; padding:0 28px;
+  font-size:31px; color:#f7f4ef; letter-spacing:.04em;
+}
+#ph { color:#6f665f; letter-spacing:0; }
+#cursor { display:inline-block; width:3px; height:36px; background:#7dc9a0; margin-left:3px; }
+#send {
+  width:76px; height:76px; border-radius:50%; flex:0 0 auto;
+  background:#7dc9a0; color:#14100e;
+  display:flex; align-items:center; justify-content:center; font-size:32px;
+}
+
+/* closer: full-bleed, so the loop cuts text->text on the same background */
+#closer {
+  position:absolute; inset:0; z-index:9; background:#191512;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:0 100px; text-align:center;
+}
+#closer::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(900px 700px at 88% -6%, rgba(125,201,160,0.09), transparent 70%),
+    radial-gradient(820px 640px at 4% 106%, rgba(140,115,85,0.10), transparent 70%);
+}
+#ctext {
+  position:relative; font-family:'Cormorant Garamond',serif; font-weight:300;
+  font-size:96px; line-height:1.1; letter-spacing:-0.02em;
+}
+#ctext em { font-style:italic; color:#7dc9a0; font-weight:400; }
+#csub { position:relative; margin-top:52px; font-size:36px; color:#b5aca3; letter-spacing:.02em; }
+#curl {
+  position:relative; margin-top:72px; font-family:'Cormorant Garamond',serif;
+  font-size:52px; font-weight:500; letter-spacing:.02em;
+}
+
+#url {
+  position:absolute; bottom:58px; left:0; right:0; text-align:center; z-index:6;
+  font-size:26px; color:#8a8078; letter-spacing:.10em;
+}
+</style>
+</head>
+<body>
+<div class="wordmark">Velyr</div>
+
+<div id="hook">I gave an AI agent access to my site's code.<br><em>Here's Monday.</em></div>
+
+<div id="phone">
+  <div id="pheader">
+    <div id="avatar">V</div>
+    <div>
+      <div id="pname">Velyr Agent</div>
+      <div id="pstat">online</div>
+    </div>
+  </div>
+
+  <div id="chat">
+    <div class="slot" data-at="0.30" data-until="0.95">
+      <div class="bubble dots"><i></i><i></i><i></i></div>
+    </div>
+
+    <div class="slot" data-at="1.00">
+      <div class="bubble">
+        Found your biggest leak this week:<br>
+        <b>your mobile CTA sits below the fold.</b><br>
+        <span class="hl">68%</span> of visitors never reach it.
+      </div>
+    </div>
+
+    <div class="slot" data-at="2.80">
+      <div class="bubble">
+        Fix is ready. Reply <span class="hl">YES</span> to ship it.
+        <div class="card">
+          <div class="cardhead"><span>Hero.jsx</span><span>1 file changed</span></div>
+          <div class="diff">
+            <div class="del">- &lt;button class="cta mt-96"&gt;</div>
+            <div class="add">+ &lt;button class="cta mt-16"&gt;</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slot user" data-at="5.40">
+      <div class="bubble user">YES</div>
+    </div>
+
+    <div class="slot" data-at="6.00" data-until="6.50">
+      <div class="bubble dots"><i></i><i></i><i></i></div>
+    </div>
+
+    <div class="slot" data-at="6.55">
+      <div class="bubble">
+        <span class="hl">✓ Shipped.</span> PR #128 merged.<br>
+        Watching it for 48h — I'll roll it back if it dips.
+      </div>
+    </div>
+  </div>
+
+  <div id="inputbar">
+    <div id="field"><span id="ph">Message</span><span id="typed"></span><span id="cursor"></span></div>
+    <div id="send">➤</div>
+  </div>
+</div>
+
+<div id="url">velyr.io</div>
+
+<div id="closer">
+  <div id="ctext">Nothing goes live<br>without your <em>YES</em>.</div>
+  <div id="csub">One conversion fix, shipped every week.</div>
+  <div id="curl">velyr.io</div>
+</div>
+
+<script>
+const DURATION = 10.2;
+const clamp01 = x => Math.max(0, Math.min(1, x));
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+const easeInOut = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+
+const slots = [...document.querySelectorAll('.slot')].map(el => ({
+  el,
+  inner: el.firstElementChild,
+  at: parseFloat(el.dataset.at),
+  until: el.dataset.until ? parseFloat(el.dataset.until) : null,
+  h: 0
+}));
+
+// Measure natural heights once, while slots are still auto-height.
+slots.forEach(s => { s.h = s.el.offsetHeight; });
+slots.forEach(s => { s.el.style.height = '0px'; });
+
+const typed  = document.getElementById('typed');
+const ph     = document.getElementById('ph');
+const cursor = document.getElementById('cursor');
+const send   = document.getElementById('send');
+const closer = document.getElementById('closer');
+const phone  = document.getElementById('phone');
+const hook   = document.getElementById('hook');
+
+const TYPE_START = 4.40, TYPE_END = 5.25, SENT = 5.40;
+const CLOSE_AT = 8.60;
+
+function seek(t) {
+  // --- chat bubbles: height grows (pushing older messages up), content slides in ---
+  slots.forEach(s => {
+    let g = easeOut(clamp01((t - s.at) / 0.30));
+    if (s.until != null && t > s.until) g = 1 - easeOut(clamp01((t - s.until) / 0.20));
+    s.el.style.height = (g * s.h) + 'px';
+
+    const a = easeOut(clamp01((t - s.at - 0.05) / 0.38));
+    let o = a;
+    if (s.until != null && t > s.until) o = 1 - clamp01((t - s.until) / 0.16);
+    s.inner.style.opacity = o;
+    s.inner.style.transform = 'translateY(' + ((1 - a) * 24) + 'px)';
+  });
+
+  // --- typing dots bounce ---
+  document.querySelectorAll('.dots').forEach(d => {
+    [...d.children].forEach((dot, i) => {
+      const p = (t * 2.6 + i * 0.18) % 1;
+      const lift = Math.sin(p * Math.PI * 2) * 0.5 + 0.5;
+      dot.style.transform = 'translateY(' + (-7 * lift) + 'px)';
+      dot.style.opacity = 0.35 + 0.5 * lift;
+    });
+  });
+
+  // --- "YES" typed into the field, then sent ---
+  const word = 'YES';
+  let shown = '';
+  if (t >= TYPE_START && t < SENT) {
+    const p = clamp01((t - TYPE_START) / (TYPE_END - TYPE_START));
+    shown = word.slice(0, Math.round(p * word.length));
+  }
+  typed.textContent = shown;
+  ph.style.opacity = (t >= TYPE_START && t < SENT) ? 0 : 1;
+
+  const typing = t >= TYPE_START - 0.25 && t < SENT;
+  cursor.style.opacity = typing ? (Math.floor(t * 1.8) % 2 === 0 ? 1 : 0.15) : 0;
+
+  // send button pulses as the message leaves
+  const sp = clamp01((t - (SENT - 0.16)) / 0.28);
+  const pulse = sp > 0 && sp < 1 ? Math.sin(sp * Math.PI) : 0;
+  send.style.transform = 'scale(' + (1 + 0.22 * pulse) + ')';
+
+  // --- slow drift so the frame never feels frozen (real motion, not zoompan) ---
+  const drift = Math.sin(t * 0.55) * 5;
+  phone.style.transform = 'translateY(' + drift + 'px)';
+  hook.style.transform = 'translateY(' + (drift * -0.35) + 'px)';
+
+  // --- closer wipes up over the phone ---
+  const c = easeInOut(clamp01((t - CLOSE_AT) / 0.55));
+  closer.style.opacity = c;
+  closer.style.transform = 'translateY(' + ((1 - c) * 60) + 'px)';
+  closer.style.pointerEvents = c > 0 ? 'auto' : 'none';
+}
+
+window.__seek = seek;
+window.__duration = DURATION;
+seek(0);
+document.fonts.ready.then(() => {
+  // re-measure after webfonts land, or bubble heights are wrong
+  slots.forEach(s => {
+    s.el.style.height = 'auto';
+  });
+  slots.forEach(s => { s.h = s.el.offsetHeight; });
+  seek(0);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
