@@ -12,6 +12,7 @@ related:
   - "can-ai-agent-open-pull-requests-repo-it-works"
   - "automate-conversion-fixes-github-pull-requests"
   - "safely-auto-roll-back-bad-deploy-using-bounce-rate"
+  - "validating-llm-code-edits-without-running-the-code"
 faqs:
   - q: "What is the approval-gate pattern?"
     a: "It's a safety pattern where an AI agent can propose a change but a human must approve it before it takes effect. The agent opens a Pull Request; a person reviews and merges. The gate separates doing the work (automated) from making the decision (human), so nothing reaches production without a human yes."
