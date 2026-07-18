@@ -1151,6 +1151,22 @@ async function notifyCapExceeded(chatId: string | null, spent: number, period: s
   }).catch(err => console.error('[llm-cap] notifyCapExceeded send failed:', err))
 }
 
+// Owner-facing Telegram brevity guard: LLM reason/question fields can run to
+// multi-paragraph essays (the owner-visible wall-of-text class, 2026-07-18).
+// The full text always survives in analysis_result / the dashboard — the phone
+// message is only the headline. Collapse whitespace, then cut at the last full
+// sentence before `max` (falling back to a word boundary + ellipsis) so the
+// truncation never ends mid-thought.
+function shortenOwnerText(text: string | undefined | null, max: number): string {
+  const t = (text || '').replace(/\s+/g, ' ').trim()
+  if (t.length <= max) return t
+  const cut = t.slice(0, max)
+  const sentenceEnd = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '))
+  if (sentenceEnd > max * 0.4) return cut.slice(0, sentenceEnd + 1)
+  const wordEnd = cut.lastIndexOf(' ')
+  return (wordEnd > 0 ? cut.slice(0, wordEnd) : cut) + '…'
+}
+
 // C11: surface the model's OPTIONAL question to the owner (sent on a skip). They reply
 // with the existing `note <answer>` command, which stores it in agent_learnings as
 // durable prompt context for future runs — so the agent learns business context it can
@@ -1162,22 +1178,23 @@ async function notifyOwnerQuestion(chatId: string | null, question: string | und
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `🤔 <b>One question to sharpen next week's fix</b>\n\n${escapeHtml(q.slice(0, 500))}\n\nReply <b>note</b> &lt;your answer&gt; and I'll factor it into every future run.`,
+      text: `🤔 <b>One question to sharpen next week's fix</b>\n\n${escapeHtml(shortenOwnerText(q, 300))}\n\nReply <b>note</b> &lt;your answer&gt; and I'll factor it into every future run.`,
       parse_mode: 'HTML',
     }),
   }).catch(err => console.error('[owner-question] send failed:', err))
 }
 
 // Honest "we don't have enough to suggest something" message. Used by the
-// no-data gate and the empty-repo gate so a missing-signal week doesn't ship
-// a fabricated PR. `reason` is a short single-line cause.
+// no-data gate, the empty-repo gate AND the Pass-2 skip paths — so `reason`
+// ranges from our own short cause strings to multi-paragraph LLM prose; it is
+// shortened to a headline here (full text stays in analysis_result).
 async function notifyInsufficientData(chatId: string | null, reason: string) {
   if (!chatId) return
   await fetch(`https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `🤖 <b>Velyr Agent — No fix this week</b>\n\nNot enough data to make a confident recommendation: <i>${escapeHtml(reason)}</i>\n\nThe agent will try again next run. To help it learn faster, you can:\n• Connect PostHog so it sees real visitor data\n• Add a competitor with <b>competitor add &lt;url&gt;</b>\n• Reply <b>YES</b>/<b>NO</b> on past PRs to build Business DNA`,
+      text: `🤖 <b>Velyr Agent — No fix this week</b>\n\n<b>Why:</b> ${escapeHtml(shortenOwnerText(reason, 350))}\n\nFull reasoning is in your dashboard. To help the agent learn faster:\n• Connect PostHog so it sees real visitor data\n• Add a competitor: <b>competitor add &lt;url&gt;</b>\n• Reply <b>YES</b>/<b>NO</b> on past PRs to build Business DNA`,
       parse_mode: 'HTML',
     }),
   }).catch(err => console.error('[no-data] notifyInsufficientData send failed:', err))
@@ -1193,7 +1210,7 @@ async function notifyFixRefuted(chatId: string | null, reason: string) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `🤖 <b>Velyr Agent — No fix this week</b>\n\nThe agent drafted a fix, but its own verification review refuted it before opening anything: <i>${escapeHtml(reason.slice(0, 400))}</i>\n\nAn unverified fix is worse than no fix — the agent will try a stronger candidate next run.`,
+      text: `🤖 <b>Velyr Agent — No fix this week</b>\n\nThe agent drafted a fix, but its own verification review refuted it before opening anything.\n\n<b>Why:</b> ${escapeHtml(shortenOwnerText(reason, 300))}\n\nAn unverified fix is worse than no fix. The agent will try a stronger candidate next run; full reasoning is in your dashboard.`,
       parse_mode: 'HTML',
     }),
   }).catch(err => console.error('[verify-gate] notifyFixRefuted send failed:', err))
@@ -3776,6 +3793,7 @@ CONSTRAINTS:
 - additional_edits is OPTIONAL and capped at 2. Use it ONLY for edits the primary change REQUIRES to function (e.g. a constant AND its call site, or a component AND a helper it imports) — never to bundle unrelated improvements. Same rules per entry: path from the list above, find appears exactly once in that file. Omit it (or use []) for a normal single-file fix.
 ${editTypeConstraint}
 - Respect all BRAND GUARDRAILS above; never re-attempt anything on the NEVER DO AGAIN list.
+- OWNER-FACING STYLE: problem_title, problem, reason, question_for_owner and blind_spots are read by a busy site owner on a phone (Telegram + dashboard). Keep them tight: "problem" and a skip's "reason" are MAX 2 short sentences naming only the decisive point (analysis detail belongs in hypothesis / ranked_higher_than / confidence_reason); "question_for_owner" is MAX 1 sentence. Write like a person, not a report. Use an em dash (—) only when it is genuinely the clearest punctuation — prefer commas or periods, and never more than one em dash per field.
 - backlog is OPTIONAL (max 3): OTHER credible problems you considered and ranked below your #1, each with the site-relative page path it lives on (start with "/"). It becomes the owner's visible "next up" roadmap. Omit it when nothing else credible exists — never pad it.
 - If you cannot find a confident #1 problem, return { "skip": true, "reason": "..." } and we will not open a PR this week. A skip MAY also carry "question_for_owner" — a skip is exactly when the question reaches the owner, so if missing business context caused the skip, ask for it there. A skip may carry "backlog" too (near-credible problems worth watching).`
 
@@ -4267,13 +4285,15 @@ async function sendTelegramNotification(fixResult: FixResult, pr: any, runId: st
   // blindSpot are uncontrolled LLM-or-path values — this is the message that
   // was failing with "can't find end of the entity" on an underscore.
   // problem_title leads when present (item 4, 2026-07-08) — the YES/NO decision
-  // headline; the full problem stays as the hypothesis line.
+  // headline; the full problem stays as the hypothesis line. LLM prose is
+  // headline-shortened (shortenOwnerText) — the full text lives in the PR
+  // receipt + dashboard, and a YES/NO decision message must fit one screen.
   const message = `🤖 <b>Velyr Growth Agent</b>${fixResult.problem_title ? `\n\n<b>${escapeHtml(fixResult.problem_title)}</b>` : ''}
 
-📊 <b>Hypothesis:</b> ${escapeHtml(fixResult.problem)}
+📊 <b>Hypothesis:</b> ${escapeHtml(shortenOwnerText(fixResult.problem, 300))}
 🎯 <b>Expected:</b> ${escapeHtml(expected)}
 📁 <b>File${(fixResult.additional_edits?.length || 0) > 0 ? 's' : ''}:</b> ${escapeHtml([fixResult.file_to_edit, ...(fixResult.additional_edits || []).map(e => e.file_to_edit)].join(', '))}
-⚠️ <b>Blind spots:</b> ${escapeHtml(blindSpot)}
+⚠️ <b>Blind spots:</b> ${escapeHtml(shortenOwnerText(blindSpot, 200))}
 
 🔗 <a href="${escapeHtml(pr.html_url)}">View PR</a>
 

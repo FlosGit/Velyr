@@ -1591,6 +1591,40 @@ function FunnelPage({funnelPages, loading, subscription, onSaveSettings}) {
 }
 
 // ─── BUSINESS DNA PAGE ────────────────────────────────────────────────────────
+// DNA notes arrive as "<Actor (channel)>: <LLM problem text>[ | 7d verdict: …]".
+// The actor prefix duplicates what the group header + outcome mark already say,
+// and rejected-run notes can be several sentences of LLM prose — so the prefix
+// is stripped for display and the text clamps to two lines with a Show more
+// toggle. The stored note is never modified; this is render-only.
+const DNA_NOTE_PREFIX_RE = /^(User rejected|Approved|Applied to live theme)\s*\([^)]{0,24}\):\s*/
+function DnaNote({ text }) {
+  const [expanded, setExpanded] = useState(false)
+  const [clamped, setClamped]   = useState(false)
+  const ref = useRef(null)
+  // Measured once per note (notes are immutable) — if the clamped box overflows,
+  // the toggle appears. No re-measure on resize: worst case the toggle lingers
+  // on a widened window, which is harmless.
+  useEffect(() => {
+    const el = ref.current
+    if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
+  }, [text])
+  const clean = String(text || '').replace(DNA_NOTE_PREFIX_RE, '')
+  return (
+    <>
+      <p ref={ref} style={{
+        fontSize:13, lineHeight:1.5, color:C.text,
+        ...(expanded ? {} : {display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden'}),
+      }}>{clean}</p>
+      {(clamped || expanded) && (
+        <button className="btn" onClick={()=>setExpanded(v=>!v)} style={{
+          background:'none', border:'none', padding:0, marginTop:2, fontSize:10.5,
+          color:C.textMuted, textDecoration:'underline', fontFamily:FONT.sans, cursor:'pointer',
+        }}>{expanded ? 'Show less' : 'Show more'}</button>
+      )}
+    </>
+  )
+}
+
 function DNAPage({ subscriptionId }) {
   const [dna, setDna]         = useState([])
   const [loading, setLoading] = useState(true)
@@ -1699,9 +1733,9 @@ function DNAPage({ subscriptionId }) {
                 padding:'13px 0',borderBottom:i<entries.length-1?`1px solid ${C.borderSoft}`:'none',
               }}>
                 <div style={{minWidth:0,opacity:rejected?.55:1,transition:'opacity .2s ease'}}>
-                  <p style={{fontSize:13,lineHeight:1.5,color:C.text}}>
-                    {e.notes || e.fix_type.replace(/_/g,' ')}
-                  </p>
+                  {e.notes
+                    ? <DnaNote text={e.notes}/>
+                    : <p style={{fontSize:13,lineHeight:1.5,color:C.text}}>{e.fix_type.replace(/_/g,' ')}</p>}
                   <div style={{fontSize:10.5,color:C.textLight,marginTop:4}}>
                     learned from <FileChip style={{fontSize:10.5,padding:'1.5px 6px'}}>{e.fix_type.replace(/_/g,' ')}</FileChip>
                     <span style={{marginLeft:8}}>{new Date(e.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>
@@ -2069,7 +2103,7 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
       const data = await onInstallBadge()
       if (data?.installed) {
         setBadgePhase('done')
-        setBadgeMsg(data.pr_url ? `Merged as PR #${data.pr_url.split('/').pop()} — your deploy pipeline is shipping it now.` : 'Written to your live theme — it renders at the bottom of every page.')
+        setBadgeMsg(data.pr_url ? `Merged as PR #${data.pr_url.split('/').pop()} — your deploy pipeline is shipping it now.` : 'Written to your live theme — it renders at the bottom of your home page.')
       } else if (data?.already_installed) {
         setBadgePhase('done'); setBadgeMsg('The badge is already on your site.')
       } else if (data?.needs_approval) {
@@ -2191,10 +2225,11 @@ function SettingsPage({subscription, user, onTogglePause, actionLoading, onDelet
                 (newlines → single spaces, so the agent-install marker check treats a
                 hand-pasted copy as already installed). Keep in sync — incl. the
                 opacity/animation guard that stops the badge flashing at the top of
-                client-rendered pages before the app mounts. */}
-            <input readOnly onFocus={e=>e.target.select()} value={`<!-- Velyr Badge --> <style>@keyframes velyrBadgeIn{to{opacity:1}}</style> <div style="text-align:center;padding:16px 0;opacity:0;animation:velyrBadgeIn .6s ease .9s forwards"><a href="https://velyr.io/agent/${subscription.public_slug}" target="_blank" rel="noopener"><img src="https://velyr.io/api/agent/run?action=win_badge&amp;slug=${subscription.public_slug}" alt="Optimized weekly by Velyr" width="320" height="64" loading="lazy" style="display:inline-block;border:0"></a></div> <!-- /Velyr Badge -->`}
+                client-rendered pages before the app mounts, and the route-guard
+                script that keeps the badge landing-page-only (BADGE_ROUTE_GUARD). */}
+            <input readOnly onFocus={e=>e.target.select()} value={`<!-- Velyr Badge --> <style>@keyframes velyrBadgeIn{to{opacity:1}}</style> <div style="text-align:center;padding:16px 0;opacity:0;animation:velyrBadgeIn .6s ease .9s forwards"><a href="https://velyr.io/agent/${subscription.public_slug}" target="_blank" rel="noopener"><img src="https://velyr.io/api/agent/run?action=win_badge&amp;slug=${subscription.public_slug}" alt="Optimized weekly by Velyr" width="320" height="64" loading="lazy" style="display:inline-block;border:0"></a></div> <script>(function(){var s=document.currentScript,b=s&&s.previousElementSibling;if(!b)return;var u=function(){var p=location.pathname;b.style.display=(p==='/'||p===''||p==='/index.html')?'':'none'};var w=function(f){return function(){var r=f.apply(this,arguments);u();return r}};try{history.pushState=w(history.pushState);history.replaceState=w(history.replaceState);addEventListener('popstate',u)}catch(e){}u()})()</script> <!-- /Velyr Badge -->`}
               style={{...monoInput,width:'100%',fontSize:11,color:C.textMuted}}/>
-            <p style={{fontSize:11,color:C.label,marginTop:6}}>Paste this into your site's footer — it updates automatically with your latest measured win.</p>
+            <p style={{fontSize:11,color:C.label,marginTop:6}}>Paste this into your site's footer — it shows on your landing page only and updates automatically with your latest measured win.</p>
             {/* Agent install: one click ships the badge into the footer (merged PR on
                 GitHub, direct theme write on Shopify). Costs no run — separate action,
                 never touches the daily manual-run allowance. */}

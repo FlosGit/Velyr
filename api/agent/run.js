@@ -2645,7 +2645,7 @@ async function installBadgeGithub(res, sub, conn) {
   const { data: pr } = await octokit.rest.pulls.create({
     owner, repo,
     title: '🏅 Add Velyr win badge',
-    body: `Adds the Velyr win badge to \`${target.path}\` (just above \`</body>\`). It links to your public timeline and updates automatically with your latest measured win.\n\n_Requested from the dashboard ("Let the agent install it") — merged immediately on your click._`,
+    body: `Adds the Velyr win badge to \`${target.path}\` (just above \`</body>\`). It renders on your landing page only, links to your public timeline, and updates automatically with your latest measured win.\n\n_Requested from the dashboard ("Let the agent install it") — merged immediately on your click._`,
     head: branchName, base: baseBranch,
   })
 
@@ -2653,7 +2653,7 @@ async function installBadgeGithub(res, sub, conn) {
   const analysis = {
     problem_title: 'Win badge added to your site',
     problem: `Added the Velyr win badge to ${target.path}`,
-    solution: 'Inserted the badge embed just above </body> so it renders at the bottom of every page.',
+    solution: 'Inserted the badge embed just above </body> so it renders at the bottom of your landing page only.',
     file_to_edit: target.path,
   }
 
@@ -2687,7 +2687,7 @@ async function installBadgeGithub(res, sub, conn) {
     analysis_result: analysis,
   })
   await sendBadgeTelegram(sub.telegram_chat_id,
-    `🏅 <b>Win badge installed</b>\n\nAdded to <code>${escapeHtml(target.path)}</code> and merged (PR #${pr.number}). Your deploy pipeline is shipping it now — the badge updates automatically with your latest measured win.`)
+    `🏅 <b>Win badge installed</b>\n\nAdded to <code>${escapeHtml(target.path)}</code> and merged (PR #${pr.number}). Your deploy pipeline is shipping it now. The badge shows on your landing page only and updates automatically with your latest measured win.`)
   return res.status(200).json({ success: true, installed: true, pr_url: pr.html_url, path: target.path })
 }
 
@@ -2711,8 +2711,11 @@ async function installBadgeShopifyDirect(res, sub, conn) {
     return res.status(502).json({ error: `Could not read your theme (${read.reason}). Nothing was changed.` })
   }
 
-  const expected = buildBadgeBlock(sub.public_slug, 'html')
-  const decision = decideBadgeInjection(read.content, expected, 'html')
+  // 'liquid' variant: the badge markup is wrapped in a server-side
+  // {% if request.page_type == 'index' %} so it renders on the store's home
+  // page only — no script, CSP-immune.
+  const expected = buildBadgeBlock(sub.public_slug, 'liquid')
+  const decision = decideBadgeInjection(read.content, expected, 'liquid')
   if (decision.action === 'skip') {
     return res.status(200).json({ already_installed: true, path: 'layout/theme.liquid' })
   }
@@ -2737,7 +2740,7 @@ async function installBadgeShopifyDirect(res, sub, conn) {
     analysis_result: {
       problem_title: 'Win badge added to your store',
       problem: 'Added the Velyr win badge to layout/theme.liquid',
-      solution: 'Inserted the badge embed just above </body> so it renders at the bottom of every page.',
+      solution: 'Inserted the badge embed just above </body>, wrapped in a page_type check so it renders at the bottom of your home page only.',
       file_to_edit: 'layout/theme.liquid',
       // Rollback basis, same shape executeShopifyDirectRollback consumes.
       applied_write: {
@@ -2747,7 +2750,7 @@ async function installBadgeShopifyDirect(res, sub, conn) {
     },
   })
   await sendBadgeTelegram(sub.telegram_chat_id,
-    `🏅 <b>Win badge installed</b>\n\nWritten to <code>layout/theme.liquid</code> on your live theme. It renders at the bottom of every page and updates automatically with your latest measured win.`)
+    `🏅 <b>Win badge installed</b>\n\nWritten to <code>layout/theme.liquid</code> on your live theme. It renders at the bottom of your home page only and updates automatically with your latest measured win.`)
   return res.status(200).json({ success: true, installed: true, path: 'layout/theme.liquid' })
 }
 
