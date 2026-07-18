@@ -1,0 +1,12 @@
+{
+  "snippet": {
+    "title": "An AI finds my website's biggest conversion leak every Monday",
+    "description": "I gave an AI access to my website's code. Every Monday it finds the biggest conversion leak, writes the code fix, and sends it to my Telegram. I reply YES and it ships. If bounce rate rises after a change, one YES rolls it back.\n\nThis is Velyr, an AI growth agent for conversion rate optimization. Works with your GitHub repo or your Shopify store — you approve every change before it goes live.\n\nhttps://velyr.io — 14-day free trial, cancel anytime.\n\n#Shorts #AI #CRO #ConversionRateOptimization #SaaS #Shopify",
+    "tags": ["conversion rate optimization", "CRO", "AI agent", "SaaS", "Shopify", "web development", "bounce rate", "growth"],
+    "categoryId": "28"
+  },
+  "status": {
+    "privacyStatus": "public",
+    "selfDeclaredMadeForKids": false
+  }
+}

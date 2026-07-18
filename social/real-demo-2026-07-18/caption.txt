@@ -1,0 +1,7 @@
+I gave an AI access to my website's code. Every Monday it finds the biggest conversion leak — the exact spot where visitors drop off — writes the code fix, and sends it to my Telegram. I reply YES and it ships. If bounce rate rises after a change, one YES rolls it back.
+
+This is Velyr, an AI growth agent for conversion rate optimization. It works with your GitHub repo or your Shopify store, and you approve every change before it goes live.
+
+velyr.io — 14-day free trial, cancel anytime.
+
+#conversionrateoptimization #cro #aiagent #saas #shopify #buildinpublic #webdevelopment
