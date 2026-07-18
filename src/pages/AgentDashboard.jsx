@@ -75,6 +75,21 @@ const STATUS = {
   shopify_needs_reconsent:   { label: 'Reconnect Shopify',      bg: C.redBg,    color: C.redText,    dot: C.red },
   shopify_token_failed:      { label: 'Failed',                 bg: C.redBg,    color: C.redText,    dot: C.red },
   shopify_theme_read_failed: { label: 'Failed',                 bg: C.redBg,    color: C.redText,    dot: C.red },
+  // Honest skip / no-fix outcomes. These are COMPLETED runs where the agent
+  // chose not to ship; without explicit entries they fell through to the
+  // "Pending" fallback — factually wrong (nothing is pending). Telegram got
+  // these labels in audit item A13; the React surfaces never did.
+  skipped_low_confidence:        { label: 'Skipped — low confidence',   bg: C.grayBg, color: C.grayText, dot: C.gray },
+  skipped_no_data:               { label: 'Skipped — not enough data',  bg: C.grayBg, color: C.grayText, dot: C.gray },
+  skipped_insufficient_graph:    { label: 'Skipped — site too small',   bg: C.grayBg, color: C.grayText, dot: C.gray },
+  skipped_repo_unavailable:      { label: 'Skipped — repo unreachable', bg: C.redBg,  color: C.redText,  dot: C.red },
+  skipped_unsupported_framework: { label: 'Skipped — unsupported site', bg: C.grayBg, color: C.grayText, dot: C.gray },
+  skipped_setup_pending:         { label: 'Skipped — setup PR open',    bg: C.grayBg, color: C.grayText, dot: C.gray },
+  skipped_cost_cap:              { label: 'Skipped — monthly cap',      bg: C.grayBg, color: C.grayText, dot: C.gray },
+  // The drafted fix could not be anchored in the current file (code moved
+  // between analysis and write) — no change was made.
+  find_mismatch:                 { label: 'Fix could not be applied',   bg: C.grayBg, color: C.grayText, dot: C.gray },
+  find_ambiguous:                { label: 'Fix could not be applied',   bg: C.grayBg, color: C.grayText, dot: C.gray },
 }
 
 // Cross-path status groups. The Shopify-direct lifecycle mirrors the GitHub one
@@ -90,6 +105,9 @@ const STATUS_GROUP = {
   rejected:         ['rejected', 'shopify_rejected'],
   rolled_back:      ['rolled_back', 'shopify_rolled_back'],
   failed:           ['failed', 'shopify_token_failed', 'shopify_theme_read_failed', 'shopify_needs_reconsent'],
+  skipped:          ['skipped_low_confidence', 'skipped_no_data', 'skipped_insufficient_graph',
+                     'skipped_repo_unavailable', 'skipped_unsupported_framework', 'skipped_setup_pending',
+                     'skipped_cost_cap', 'find_mismatch', 'find_ambiguous', 'shopify_concurrency_abort'],
 }
 
 const AGENT_STEPS = [
@@ -1106,6 +1124,7 @@ function RunsPage({runs, loading, onSelect, learnings=[], impactMetrics=[], subs
     { key:'rejected',         label:'Rejected' },
     { key:'rolled_back',      label:'Rolled back' },
     { key:'failed',           label:'Failed' },
+    { key:'skipped',          label:'Skipped' },
   ]
   const countFor = key => key==='all' ? runs.length : runs.filter(r=>(STATUS_GROUP[key]||[key]).includes(r.status)).length
 
@@ -2351,7 +2370,17 @@ function RunDetail({run, onClose, onDecision, busy, goalImpact, liveStepIdx}) {
     ? `${analysis.confidence}${analysis.confidence_reason ? ` — ${analysis.confidence_reason}` : ''}`
     : null
   const blindSpots = Array.isArray(analysis.blind_spots) ? analysis.blind_spots.filter(Boolean) : []
+  // Honest no-fix explanation. Skip runs carry the agent's own reason in
+  // analysis_result.reason (incl. verify-gate refutes); failed / find_* runs
+  // only have error_message. Without this block a skip week showed a modal
+  // with a status chip and nothing else — the reason never reached the owner.
+  const NO_FIX_STATUSES = ['failed', 'find_mismatch', 'find_ambiguous', 'shopify_token_failed',
+    'shopify_theme_read_failed', 'shopify_needs_reconsent', 'shopify_concurrency_abort']
+  const noFixText = (analysis.skip && analysis.reason)
+    ? analysis.reason
+    : (NO_FIX_STATUSES.includes(run.status) || run.status?.startsWith('skipped_')) ? run.error_message : null
   const fields   = [
+    {label:'Why no fix shipped',        text:noFixText},
     {label:'Why this is the problem',   text:analysis.hypothesis},
     {label:'What else I considered',    text:analysis.ranked_higher_than},
     {label:'Expected outcome',          text:expectedText},

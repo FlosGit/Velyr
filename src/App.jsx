@@ -22,6 +22,16 @@ const BlogIndex    = lazy(() => import('./pages/BlogIndex.jsx'))
 const BlogCategory = lazy(() => import('./pages/BlogCategory.jsx'))
 const BlogArticle  = lazy(() => import('./pages/BlogArticle.jsx'))
 
+// Captured at MODULE EVALUATION, which is fully synchronous — the supabase.js
+// import above has already constructed the client, but its detectSessionInUrl
+// exchange (which consumes and then STRIPS the #access_token/#type=recovery
+// hash) is async and cannot have run yet. Reading the hash later, inside a
+// React effect, raced that strip: when supabase-js won, the auth-return hash
+// was gone and a logged-in user landed on Home instead of the dashboard /
+// reset page. Route decisions below use this captured value; the live
+// window.location.hash is only used for what to KEEP in the URL.
+const INITIAL_AUTH_HASH = window.location.hash
+
 const RESERVED_AGENT_PATHS = new Set(['login', 'register', 'dashboard', 'onboarding', 'reset-password', 'post-signup'])
 const PUBLIC_AGENT_REGEX   = /^\/agent\/([a-z0-9][a-z0-9-]{1,28}[a-z0-9])$/
 
@@ -124,14 +134,21 @@ export default function App() {
   const [path, setPath] = useState(window.location.pathname)
 
   // Auth redirect handler. Supabase email links (confirmation, recovery, magic
-  // link) deposit the user at the configured Site URL with a `#access_token=…`
-  // or `#type=recovery` hash. We route those into the right place — and for a
-  // confirmed signup, honour any pending Stripe checkout intent persisted to
-  // localStorage by SubscribeButton.
+  // link) and the Google OAuth implicit-flow return deposit the user at the
+  // configured Site URL with a `#access_token=…` or `#type=recovery` hash. We
+  // route those into the right place — and for a confirmed signup, honour any
+  // pending Stripe checkout intent persisted to localStorage by SubscribeButton.
+  //
+  // Routing keys off INITIAL_AUTH_HASH (module-scope capture) — NEVER the live
+  // hash — so the decision can't race supabase-js's async hash consumption.
+  // The live hash decides only whether there is still anything to preserve in
+  // the URL: still present → keep it so supabase-js can exchange it; already
+  // consumed → append nothing (the session exists; re-adding spent tokens
+  // would just leave them sitting in the address bar).
   useEffect(() => {
-    const hash = window.location.hash
+    const hash = INITIAL_AUTH_HASH
     if (hash.includes('type=recovery')) {
-      window.history.replaceState({}, '', '/agent/reset-password' + hash)
+      window.history.replaceState({}, '', '/agent/reset-password' + window.location.hash)
       setPath('/agent/reset-password')
       return
     }
@@ -154,16 +171,16 @@ export default function App() {
       }
       if (pending === 'subscription') {
         // Send the user through PostSignup which will wait for the Supabase
-        // session and then trigger Stripe. Keep the hash so supabase-js can
-        // still consume it if it hasn't already.
-        window.history.replaceState({}, '', `/agent/post-signup?next=${encodeURIComponent(pending)}` + hash)
+        // session and then trigger Stripe. Keep the LIVE hash so supabase-js
+        // can still consume it if it hasn't already.
+        window.history.replaceState({}, '', `/agent/post-signup?next=${encodeURIComponent(pending)}` + window.location.hash)
         setPath('/agent/post-signup')
       } else {
-        // Keep the hash so supabase-js (detectSessionInUrl, implicit flow) can
-        // still exchange the #access_token into a session — mirrors the intent
-        // branch above. Stripping it here loses the session before _initialize
-        // reads window.location.href.
-        window.history.replaceState({}, '', '/agent/dashboard' + hash)
+        // Keep the LIVE hash so supabase-js (detectSessionInUrl, implicit flow)
+        // can still exchange the #access_token into a session. If supabase-js
+        // already consumed it (the race this handler used to lose), the live
+        // hash is empty and the user still lands on the dashboard — logged in.
+        window.history.replaceState({}, '', '/agent/dashboard' + window.location.hash)
         setPath('/agent/dashboard')
       }
     }

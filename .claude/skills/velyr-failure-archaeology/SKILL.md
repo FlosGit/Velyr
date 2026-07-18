@@ -27,10 +27,10 @@ Status vocabulary: **RESOLVED (commit)** = fixed, verified; **PARKED** = deliber
 | 12 | `write_themes` exemption denied → granted | RESOLVED (ticket 68049335) |
 | 13 | OpenRouter slug: dot, not dash | RESOLVED (2026-06-23) |
 | 14 | Local `npm run build` pings production IndexNow | OPEN by design — behavioral rule |
-| 15 | "Cormorant Garant" font typo | MOSTLY RESOLVED — `index.html` + `scripts/prerender.mjs` remain |
+| 15 | "Cormorant Garant" font typo | RESOLVED (2026-07-18 — remainder fixed) |
 | 16 | Blog "Discovered, currently not indexed" — thin internal linking | RESOLVED (2026-06-23) |
 | 17 | Audit waves 2026-07-04 → 2026-07-10 — do not re-audit | RESOLVED |
-| 18 | Parked list (double-fire, schema split, OAuth race, …) | PARKED (each with unpark condition) |
+| 18 | Parked list (schema split, OAuth race, …) — M2-B/M5 double-fire RESOLVED (e4f1f55) | PARKED (each with unpark condition) |
 | 19 | Trial-abuse ledger — why it exists, what must never touch it | RESOLVED (4c14998) |
 
 ---
@@ -141,9 +141,9 @@ Status vocabulary: **RESOLVED (commit)** = fixed, verified; **PARKED** = deliber
 ## 15. "Cormorant Garant" font typo
 
 - **Symptom:** the brand serif was requested app-wide as `Cormorant Garant` — a font that does not exist — so serif headings silently fell back to generic serif.
-- **State as of 2026-07-12 (verified by grep):** all `src/` files now use `Cormorant Garamond`; the typo remains in the crawler-fallback markup in TWO places — `index.html` (6 occurrences: lines 231/235/242/250/254/258) and `scripts/prerender.mjs` (4 occurrences: lines 39/46/59/342), which is the *generator* of that same fallback markup. Each has a `Georgia,serif` fallback — low visual impact, crawler-only. Fix both together or the generated HTML re-introduces it. (velyr-docs-and-writing §4 is the current-state home for this residue.)
+- **State as of 2026-07-18:** fully eradicated. The last remainder — the crawler-fallback markup in `index.html` (6×) and its generator `scripts/prerender.mjs` (4×) — was fixed together on 2026-07-18 (they must always change together or the generated HTML re-introduces the typo).
 - **Trap:** dashboard surfaces (and the landing's dashboard mock) deliberately use **Instrument Serif** — never "fix" those to Cormorant.
-- **Status: MOSTLY RESOLVED; OPEN remainder = `index.html` + `scripts/prerender.mjs` (cosmetic, crawler-fallback only).**
+- **Status: RESOLVED.** Regression check: any `Cormorant Garant` hit outside `.claude/` history docs is a regression.
 
 ## 16. Blog "Discovered, currently not indexed"
 
@@ -169,16 +169,14 @@ Established facts from those waves that keep saving audit time: **guardrails are
 
 | Item | What | Unpark when |
 |------|------|-------------|
-| M2 Part B | Two concurrent YES on `shopify_awaiting_approval`/`shopify_rollback_pending` can both enter apply/rollback (harm bounded: writes idempotent + checksum-guarded; loser mislabels status) | Adding interim statuses `shopify_applying`/`shopify_rolling_back` to `agent_runs_status_check` via manual migration (grep confirms neither exists as of 2026-07-11) |
-| M5 | No `shopify_writing` interim status — a crash mid-write leaves `shopify_awaiting_approval` (recoverable: `applied_write` persisted first) | Same migration effort as M2-B |
 | Schema split | Stripe webhook keys `user_id` (`api/webhooks/stripe.js:202`), agent keys `auth_user_id`; `subscription_id` text-vs-uuid inconsistency | A deliberate unification project; touches billing — high blast radius |
-| OAuth routing race | `App.jsx` routes by synchronously sniffing `window.location.hash`, racing supabase-js's async exchange | **Before adding any 2nd OAuth provider**, migrate to `onAuthStateChange`; must preserve all four landings (recovery, email-confirm, checkout-intent, plain login) |
-| Legacy null codes | `finalize` lets a `auth_user_id IS NULL` Telegram verification code pass once (`api/onboarding.js:646`) | Remove the null-allow once pre-stamping codes have aged out |
+| OAuth routing race | **RESOLVED 2026-07-18**: `App.jsx` captures the hash at MODULE EVALUATION (`INITIAL_AUTH_HASH`, synchronous — supabase-js's strip is async and cannot have run yet) and routes from the capture; the live hash is only used for what to keep in the URL. All four landings preserved. Residual guidance: if a 2nd OAuth provider using PKCE (`?code=`) is added, the hash heuristic won't see it — extend the capture or move to `onAuthStateChange` then | — |
+| Legacy null codes | **RESOLVED 2026-07-18**: the null-allow was removed in both `finalize` and `verify_telegram_code` — every mint path stamps `auth_user_id` (bare `/start` refused; token always carries the id), and pre-B3 NULL codes expired under the 30-min TTL long ago | — |
 | Vue App Router | Snippet Setup-PR unsupported for vue-vite/sveltekit etc. — manual-paste Telegram fallback only (TODO at `supabase/functions/agent-run/index.ts:2634`) | Framework-specific entry-point detection |
 | Fingerprint gaps | Email fingerprint type reserved but unrecorded (plus-addressing, PII); subdomain bypass accepted (no PSL dependency) | Only if trial abuse is observed in practice |
 | Shopify apply-confirm (b) | Future stronger confirm must BRANCH on `themeFilesUpsert` job: small upserts complete synchronously with `job = null` (`api/_lib/shopify-approval.js:157,176` persist `up.jobId ?? null`) → confirm via checksumMd5 re-query, never poll-assume | If option-(b) confirmation is built |
 
-**Formerly parked, now RESOLVED — do not re-report:** L3 slug TOCTOU: the UNIQUE index exists (`supabase/migrations/20260702_public_slug_unique.sql`) and `handleUpdateSettings` catches 23505 → 409 (`api/agent/run.js:2191-2194`). B3 code-binding: `telegram_start_token` stamps `auth_user_id` at `/start`. Token-refresh 401: both 400 and 401 map to `needs_reconsent` in both twins.
+**Formerly parked, now RESOLVED — do not re-report:** **M2 Part B + M5** (verified 2026-07-18): resolved **migration-free** in e4f1f55 (2026-07-02) — `applyShopifyDirectWrite` / `executeShopifyDirectRollback` atomically CAS-claim the run into the EXISTING `'running'` status before any theme write (loser of a concurrent YES bails on 0 rows), token-refresh failure un-claims back to the waiting status, and a crash mid-write is stale-swept `running`→`failed` (honest) with `applied_write` already persisted as the recovery basis. The old re-verification grep for `shopify_applying|shopify_writing` was testing the WRONG design — the shipped fix deliberately avoided new statuses; that stale test kept this listed as parked for two weeks (entry-7 lesson, again). L3 slug TOCTOU: the UNIQUE index exists (`supabase/migrations/20260702_public_slug_unique.sql`) and `handleUpdateSettings` catches 23505 → 409 (`api/agent/run.js:2191-2194`). B3 code-binding: `telegram_start_token` stamps `auth_user_id` at `/start`. Token-refresh 401: both 400 and 401 map to `needs_reconsent` in both twins.
 
 ## 19. Trial-abuse ledger — why, and what must never touch it
 
@@ -208,7 +206,7 @@ Re-verification one-liners (run from repo root):
 - Rollback reconcile branch: `grep -n "metrics_dropped" api/_lib/run-reconcile.js`
 - Fan-out still default-on: `grep -n "AGENT_FULLRUN_FANOUT" supabase/functions/agent-run/index.ts`
 - Stale-sweep twins: `grep -n "STALE_RUN_THRESHOLD_MS" api/agent/run.js supabase/functions/agent-run/index.ts`
-- M2-B/M5 still parked: `grep -rn "shopify_applying\|shopify_writing" api supabase` (no hits = still parked)
+- M2-B/M5 resolved via 'running'-claim: `grep -n "status: 'running'" api/_lib/shopify-approval.js` (2 hits = the CAS claims exist; commit e4f1f55)
 - L3 still resolved: `grep -n "23505" api/agent/run.js` + `ls supabase/migrations | grep public_slug`
 - Font typo remainder: `grep -rln "Cormorant Garant" --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.claude .` (expect: `index.html` + `scripts/prerender.mjs` only; any `src/` hit is a regression)
 - Vue TODO still open: `sed -n '2630,2638p' supabase/functions/agent-run/index.ts`

@@ -382,12 +382,13 @@ async function handleFinalize(req, res) {
     return res.status(400).json({ error: 'This code has expired.' })
   }
   // B3: the code must belong to the caller. auth_user_id is stamped by the
-  // bot's /start (from the deep-link token). A NULL value is a legacy/deploy-
-  // window code minted before /start started stamping it — allowed through once;
-  // these all drain within the 30-min code TTL (removing the null-allow is a
-  // parked 24h follow-up). A non-null mismatch is the B3 attack (someone trying
-  // to finalize a code that was started under a different account) → reject.
-  if (codeRow.auth_user_id !== null && codeRow.auth_user_id !== auth.user.id) {
+  // bot's /start (from the deep-link token) on EVERY mint path — a bare /start
+  // without a token is refused, so a NULL value can only be a pre-B3 legacy
+  // code, all long expired under the 30-min TTL. The former null-allow (a
+  // deploy-window bridge) was removed 2026-07-18: NULL now rejects like any
+  // mismatch. A non-null mismatch is the B3 attack (someone trying to finalize
+  // a code that was started under a different account) → reject.
+  if (codeRow.auth_user_id !== auth.user.id) {
     return res.status(403).json({ error: 'This code belongs to a different account.' })
   }
   if (String(codeRow.chat_id) !== String(telegramChatId)) {
@@ -643,9 +644,10 @@ async function handleVerifyTelegramCode(req, res) {
   // user's code (or even that it exists). If the code is bound to a different
   // account, return the SAME response as not-found (400 "Invalid code") rather
   // than a distinguishable 403, so a caller can't probe which codes are live
-  // for other users. NULL auth_user_id = legacy/deploy-window code, allowed
-  // through (drains within the 30-min TTL).
-  if (row.auth_user_id !== null && row.auth_user_id !== auth.user.id) {
+  // for other users. Every mint path stamps auth_user_id (bare /start is
+  // refused), so a NULL value is a long-expired pre-B3 code — the former
+  // null-allow was removed 2026-07-18; NULL rejects like any mismatch.
+  if (row.auth_user_id !== auth.user.id) {
     return res.status(400).json({ error: 'Invalid code. Make sure you sent /start to the Velyr bot first.' })
   }
   if (row.used) {

@@ -288,9 +288,11 @@ export default async function handler(req, res) {
             sub.telegram_chat_id,
             '⏳ <b>Your Velyr trial ends in 3 days.</b>' + recap +
             "\n\nThere's no card on file, so your Growth Agent will pause when the trial ends — you won't be charged.\n\n" +
-            // Price deliberately not stated: trials started before a price change
-            // convert at their grandfathered rate, newer ones at the current price
-            // — the dashboard/checkout shows the exact amount.
+            // Price deliberately not stated: only PAYING pre-change subscribers
+            // are grandfathered — a running trial converts at the CURRENT price
+            // (the conversion checkout charges STRIPE_PRICE_GROWTH), so naming a
+            // number here could quote a trial the wrong one. The dashboard/
+            // checkout shows the exact amount.
             'To keep your improvements coming, add your card from your dashboard to continue your subscription. Cancel anytime.'
           )
         }

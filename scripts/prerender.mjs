@@ -36,14 +36,14 @@ const esc = (s) =>
 const MAIN_OPEN =
   '<main style="display:none;max-width:680px;margin:0 auto;padding:80px 24px;font-family:Jost,system-ui,sans-serif;color:#1c1917;background:#f7f4ef">'
 const H1 = (t) =>
-  `<h1 style="font-family:Cormorant Garant,Georgia,serif;font-weight:300;font-size:48px;line-height:1.1;letter-spacing:-.025em;margin:16px 0">${esc(t)}</h1>`
+  `<h1 style="font-family:Cormorant Garamond,Georgia,serif;font-weight:300;font-size:48px;line-height:1.1;letter-spacing:-.025em;margin:16px 0">${esc(t)}</h1>`
 const HOME_LINK =
   '<p style="margin-top:32px"><a href="/" style="color:#2a5c45">← Back to Velyr</a></p>'
 
 function faqFallback() {
   const items = FAQS.map(
     (f) =>
-      `<h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(f.q)}</h2><p style="font-size:15px;line-height:1.78;color:#6b6460">${esc(f.a)}</p>`
+      `<h2 style="font-family:Cormorant Garamond,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(f.q)}</h2><p style="font-size:15px;line-height:1.78;color:#6b6460">${esc(f.a)}</p>`
   ).join('')
   return `<div id="root">${MAIN_OPEN}${H1('Frequently Asked Questions')}<p style="font-size:16px;color:#6b6460;max-width:640px">Common questions about the Velyr Growth Agent — how it ships weekly conversion fixes to your GitHub repo or Shopify store, the approval and rollback model, and the 14-day free trial.</p>${items}${HOME_LINK}</main></div>`
 }
@@ -56,7 +56,7 @@ function legalFallback(title, intro) {
 // plain HTML. Keep the claims in sync with src/pages/CodeVsOverlay.jsx.
 function compareFallback() {
   const h2 = (t) =>
-    `<h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(t)}</h2>`
+    `<h2 style="font-family:Cormorant Garamond,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(t)}</h2>`
   const p = (t) => `<p style="font-size:15px;line-height:1.78;color:#6b6460">${esc(t)}</p>`
   const body = [
     p('AI conversion tools apply changes to your site in one of two fundamentally different ways. The difference decides what you actually own — and what happens the day you cancel.'),
@@ -339,7 +339,7 @@ submitToIndexNow([ORIGIN + '/blog', ...indexNowUrls]).catch(() => {})
         .filter((a) => a.cluster.slug === c.slug)
         .map((a) => `<li><a href="/blog/${esc(a.slug)}">${esc(a.fm.title)}</a> — ${esc(a.fm.description)}</li>`)
         .join('')
-      return `<h2 style="font-family:Cormorant Garant,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(c.title)}</h2><ul style="line-height:1.78;color:#6b6460;font-size:15px;padding-left:20px">${items}</ul>`
+      return `<h2 style="font-family:Cormorant Garamond,Georgia,serif;font-weight:400;font-size:22px;margin:32px 0 8px">${esc(c.title)}</h2><ul style="line-height:1.78;color:#6b6460;font-size:15px;padding-left:20px">${items}</ul>`
     })
     .join('')
   const fallback =

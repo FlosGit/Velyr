@@ -27,7 +27,29 @@ const STATUS_BADGE = {
   waiting_approval: { label: 'Pending',      color: C.yellow, bg: C.yellowSoft },
   running:          { label: 'In Progress',  color: C.yellow, bg: C.yellowSoft },
   failed:           { label: 'Failed',       color: C.red,    bg: C.redSoft    },
+  // Shopify-direct lifecycle — same concepts as the GitHub statuses above.
+  // Without these a Shopify merchant's public page rendered raw machine
+  // strings ("shopify_deployed") for every run.
+  shopify_deployed:          { label: 'Deployed',    color: C.green,  bg: C.greenSoft  },
+  shopify_rejected:          { label: 'Rolled Back', color: C.red,    bg: C.redSoft    },
+  shopify_rolled_back:       { label: 'Rolled Back', color: C.red,    bg: C.redSoft    },
+  shopify_awaiting_approval: { label: 'Pending',     color: C.yellow, bg: C.yellowSoft },
+  shopify_rollback_pending:  { label: 'Pending',     color: C.yellow, bg: C.yellowSoft },
+  shopify_needs_reconsent:   { label: 'Failed',      color: C.red,    bg: C.redSoft    },
+  shopify_token_failed:      { label: 'Failed',      color: C.red,    bg: C.redSoft    },
+  shopify_theme_read_failed: { label: 'Failed',      color: C.red,    bg: C.redSoft    },
 }
+
+// Honest no-fix outcomes: the agent ran and deliberately shipped nothing (or
+// could not apply the drafted edit). One neutral public label — the specific
+// internal reason stays in the owner's dashboard, but the raw snake_case
+// status must never leak onto this marketing surface.
+const NO_FIX_BADGE = { label: 'No Fix This Week', color: C.textLight, bg: 'rgba(28,25,23,0.06)' }
+const NO_FIX_STATUSES = new Set([
+  'skipped_low_confidence', 'skipped_no_data', 'skipped_insufficient_graph',
+  'skipped_repo_unavailable', 'skipped_unsupported_framework', 'skipped_setup_pending',
+  'skipped_cost_cap', 'find_mismatch', 'find_ambiguous', 'shopify_concurrency_abort',
+])
 
 function formatDate(iso) {
   if (!iso) return '—'
@@ -81,7 +103,11 @@ function LineChart({ data, label, color = C.accent, suffix = '', invertColor = f
 // ─── Run card ─────────────────────────────────────────────────────────────────
 function RunCard({ run }) {
   const [showCompetitor, setShowCompetitor] = useState(false)
-  const badge = STATUS_BADGE[run.status] || { label: run.status, color: C.textLight, bg: 'rgba(28,25,23,0.06)' }
+  const isNoFix = NO_FIX_STATUSES.has(run.status)
+  // Unknown/future statuses prettify (underscores → spaces) instead of leaking
+  // raw snake_case onto the public page.
+  const badge = isNoFix ? NO_FIX_BADGE
+    : (STATUS_BADGE[run.status] || { label: String(run.status || '').replace(/_/g, ' '), color: C.textLight, bg: 'rgba(28,25,23,0.06)' })
   // Matched deploy±2d pair from impact_metrics (run.impact), never the
   // mixed-window agent_runs columns — the API no longer exposes that pair.
   const impact = run.impact
@@ -101,8 +127,10 @@ function RunCard({ run }) {
 
       {/* Short problem_title as headline when the run carries one; the full
           problem text moves to a smaller line below. Old runs: unchanged. */}
-      <p style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 22, fontWeight: 300, color: C.text, lineHeight: 1.3, letterSpacing: '-.01em', marginBottom: run.problem_title ? 6 : 18 }}>
-        {run.problem_title || run.problem || 'No problem description'}
+      <p style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: 22, fontWeight: 300, color: isNoFix ? C.textLight : C.text, lineHeight: 1.3, letterSpacing: '-.01em', marginBottom: run.problem_title ? 6 : 18 }}>
+        {run.problem_title || run.problem || (isNoFix
+          ? 'Nothing met the bar to ship this week — the agent skips rather than force a change.'
+          : 'No problem description')}
       </p>
       {run.problem_title && run.problem && (
         <p style={{ fontSize: 13, color: C.textLight, lineHeight: 1.55, marginBottom: 18 }}>{run.problem}</p>
@@ -120,7 +148,7 @@ function RunCard({ run }) {
             <p style={{ fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: C.textFaint, fontWeight: 500, marginBottom: 6 }}>After</p>
             {run.screenshot_after
               ? <img src={run.screenshot_after} alt="After" style={{ width: '100%', borderRadius: 8, border: `1px solid ${C.border}`, display: 'block' }} />
-              : <div style={{ aspectRatio: '16/10', background: C.bg, borderRadius: 8, border: `1px dashed ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: C.textFaint }}>{run.status === 'deployed' ? 'Capturing soon…' : 'Not captured'}</div>}
+              : <div style={{ aspectRatio: '16/10', background: C.bg, borderRadius: 8, border: `1px dashed ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: C.textFaint }}>{/* the daily after-shot backfill covers BOTH deployed statuses */}{run.status === 'deployed' || run.status === 'shopify_deployed' ? 'Capturing soon…' : 'Not captured'}</div>}
           </div>
         </div>
       )}
