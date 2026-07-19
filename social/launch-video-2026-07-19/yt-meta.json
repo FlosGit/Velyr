@@ -1,0 +1,12 @@
+{
+  "snippet": {
+    "title": "Velyr — The AI growth agent that ships the fix, not a to-do list",
+    "description": "Velyr reads your analytics every week, finds your biggest conversion leak, and writes the fix itself — a pull request on your GitHub repo or a change on your Shopify store.\n\nYou approve every change with one tap in Telegram. Nothing ships without your YES. Every deploy is watched for 48 hours — if bounce rates jump, Velyr proposes a one-tap revert.\n\nEvery fix comes with receipts: what the agent read, its confidence, and its blind spots. When the data is too thin, it skips the week instead of guessing.\n\nWorks with React, Next.js and Vite repos, and Shopify stores.\n\n→ https://velyr.io\n€49/mo · 14-day free trial · no credit card required\n\nBuilt solo in Germany.",
+    "tags": ["conversion rate optimization", "CRO", "AI agent", "shopify conversion", "github automation", "growth engineering", "website conversion", "AI growth agent", "autonomous agent", "web analytics"],
+    "categoryId": "28"
+  },
+  "status": {
+    "privacyStatus": "public",
+    "selfDeclaredMadeForKids": false
+  }
+}
