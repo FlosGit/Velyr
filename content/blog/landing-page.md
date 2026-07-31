@@ -13,6 +13,7 @@ related:
   - "above-fold-web-design"
   - "anatomy-high-converting-saas-hero-section"
   - "get-first-100-saas-signups-as-solo-founder"
+  - "what-is-answer-engine-optimization-aeo"
 faqs:
   - q: "What is a landing page?"
     a: "A landing page is a standalone web page built around a single goal — usually one conversion such as a signup, demo request, or purchase. It strips away the navigation and competing links a homepage carries, so everything on the page points the visitor at one action."

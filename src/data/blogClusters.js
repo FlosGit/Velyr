@@ -12,7 +12,7 @@ export const CLUSTERS = [
     slug: 'framework-fixes',
     title: 'Framework Conversion Fixes',
     description:
-      'Framework-specific conversion fixes for Next.js, React, Astro, SvelteKit, Remix, Nuxt, Vue, and plain HTML sites — hero, CTA, pricing, forms, and mobile.',
+      'Framework-specific conversion fixes for Next.js, React, Astro, SvelteKit, Remix, Nuxt, Vue, Shopify Liquid, and plain HTML sites — hero, CTA, pricing, forms, and mobile.',
     intent: 'How do I improve conversion on my [framework] [surface]?',
     schemaType: 'TechArticle',
   },

@@ -14,6 +14,7 @@ related:
   - "good-trial-to-paid-conversion-rate-saas"
   - "cut-signup-abandonment-remix-action-and-usefetcher"
   - "reduce-form-abandonment-plain-html-signup-form"
+  - "improve-conversion-shopify-product-page-without-app"
 faqs:
   - q: "What is a form action in SvelteKit?"
     a: "A form action is a server-side function exported from a +page.server.js file that a form posts to. The form submits as a native HTML POST, so it works without client JavaScript; adding use:enhance progressively upgrades it to a no-reload submit while keeping that resilient baseline."

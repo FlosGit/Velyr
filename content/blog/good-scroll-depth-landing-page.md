@@ -14,6 +14,7 @@ related:
   - "fix-low-converting-react-hero-section"
   - "above-fold-web-design"
   - "average-time-page-saas-landing-page"
+  - "improve-conversion-shopify-product-page-without-app"
 faqs:
   - q: "What is a good average scroll depth for a landing page?"
     a: "As a rough, unattributed guide, an average maximum scroll around 40–60% is common, but it depends on page length — a short page is read more fully than a long one. That's a general estimate, not a published standard. What matters is whether your CTA sits above the depth most visitors reach."

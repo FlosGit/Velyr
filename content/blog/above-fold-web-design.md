@@ -12,6 +12,7 @@ related:
   - "good-scroll-depth-landing-page"
   - "call-action-cta"
   - "anatomy-high-converting-saas-hero-section"
+  - "what-is-answer-engine-optimization-aeo"
 faqs:
   - q: "What does above the fold mean?"
     a: "It's the portion of a web page visible without scrolling — the first viewport a visitor sees when the page loads. The term comes from newspapers, where the top half of the folded front page had to sell the issue. On the web it's where most of your conversion weight sits, because many visitors never scroll past it."

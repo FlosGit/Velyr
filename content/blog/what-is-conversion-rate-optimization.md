@@ -13,6 +13,7 @@ related:
   - "what-is-a-micro-conversion"
   - "measure-scroll-depth-posthog"
   - "conversion-funnel"
+  - "what-is-answer-engine-optimization-aeo"
 faqs:
   - q: "What does CRO stand for?"
     a: "CRO stands for Conversion Rate Optimization — the systematic practice of increasing the percentage of visitors who complete a desired action on your site."
@@ -45,6 +46,8 @@ The whole practice reduces to a four-step loop you repeat:
 4. **Measure.** Compare the conversion rate before and after (or run an A/B test if you have the traffic). Keep the win, revert the loss, and feed what you learned back into step 1.
 
 The discipline is in doing this *continuously* against your own baseline — not in any single clever idea.
+
+One thing worth checking in step 1 is where the visitor came from, because arrival channel changes how much convincing the page still has to do. Traffic referred by an AI assistant behaves differently from a cold search click, which is the conversion side of [answer engine optimization](/blog/what-is-answer-engine-optimization-aeo).
 
 ## A worked example
 

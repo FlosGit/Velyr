@@ -44,11 +44,17 @@ const ALLOWED_PROPERTIES_BASE = [
 //                     track-cta-clicks-posthog + average-bounce-rate-developer-tools.
 //   - $session_id   — session identifier; used by average-bounce-rate-developer-tools
 //                     to group events into sessions.
-// Remove these two lines to enforce the literal prompt list (the two seeds above
+//   - $referring_domain — referring site's domain (e.g. 'www.google.com'), a
+//                     PostHog client-side default property; used by
+//                     what-is-answer-engine-optimization-aeo to split AI-assistant
+//                     referrals from classic search. Verified against
+//                     https://posthog.com/docs/data/events (2026-07-31).
+// Remove these lines to enforce the literal prompt list (the seeds above
 // would then need rewriting). Flagged for review.
 const ALLOWED_PROPERTIES_EXTENSIONS = [
   '$event_type',
   '$session_id',
+  '$referring_domain',
 ]
 
 export const ALLOWED_PROPERTIES = new Set([

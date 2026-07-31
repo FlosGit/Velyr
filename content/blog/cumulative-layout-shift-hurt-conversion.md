@@ -13,6 +13,7 @@ related:
   - "optimise-astro-image-component-fast-hero-lcp"
   - "lcp-affect-conversion-rate-evidence-shows"
   - "inp-affect-conversion-landing-page"
+  - "improve-conversion-shopify-product-page-without-app"
 faqs:
   - q: "Does layout shift hurt conversion?"
     a: "Yes. When content moves as the page loads, visitors mis-click — sometimes tapping the wrong button or an ad instead of your CTA — and a jumpy page reads as broken or untrustworthy. Both reduce the chance someone completes the action you want."
@@ -31,7 +32,7 @@ CLS measures how much visible content moves *unexpectedly* as the page loads. It
 1. **Mis-clicks.** The classic failure: a visitor goes to click "Start trial," a late-loading image or banner pushes the layout down, and their tap lands on the wrong element. On mobile, where the thumb is already moving, this is common and infuriating.
 2. **Eroded trust.** A page that jumps around looks unfinished and unreliable. For a tool you're asking people to connect to their codebase or card, that impression is expensive.
 
-Neither requires a study to believe — they're direct consequences of the layout moving while someone is trying to act.
+Neither requires a study to believe — they're direct consequences of the layout moving while someone is trying to act. The worst version is a page whose shifting elements were injected by something you didn't write, which is the normal situation on a [Shopify product page carrying several apps](/blog/improve-conversion-shopify-product-page-without-app).
 
 ## The thresholds
 
