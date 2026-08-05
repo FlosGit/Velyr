@@ -13,6 +13,8 @@ related:
   - "good-scroll-depth-landing-page"
   - "cumulative-layout-shift-hurt-conversion"
   - "track-cta-clicks-posthog"
+  - "mobile-vs-desktop-conversion-rate-gap"
+  - "find-rage-clicks-dead-clicks-posthog"
 faqs:
   - q: "Do I need an app for a sticky add-to-cart button on Shopify?"
     a: "No. A sticky add-to-cart bar is a Liquid snippet, a CSS block, and a short IntersectionObserver script. Writing it into the theme keeps the code on product pages only, whereas most apps load their JavaScript on every page of the store."

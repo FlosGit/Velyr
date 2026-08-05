@@ -49,12 +49,27 @@ const ALLOWED_PROPERTIES_BASE = [
 //                     what-is-answer-engine-optimization-aeo to split AI-assistant
 //                     referrals from classic search. Verified against
 //                     https://posthog.com/docs/data/events (2026-07-31).
+//   - $device_type  — 'Mobile' | 'Desktop' | 'Tablet'; used by
+//                     mobile-vs-desktop-conversion-rate-gap and
+//                     find-rage-clicks-dead-clicks-posthog for device splits.
+//   - $rageclick    — event posthog-js emits on 3 clicks each within 30px and 1s
+//                     of the previous one (ships with autocapture).
+//   - $dead_click   — event for a click not followed by a page change; OFF by
+//                     default (project setting / capture_dead_clicks: true).
+//                     Both used by find-rage-clicks-dead-clicks-posthog.
+//                     All three verified 2026-08-04 against PostHog's autocapture
+//                     docs AND against Velyr's own production queries in
+//                     supabase/functions/agent-run/index.ts (getPostHogAnalytics,
+//                     ~lines 1580–1662), which read exactly these three.
 // Remove these lines to enforce the literal prompt list (the seeds above
 // would then need rewriting). Flagged for review.
 const ALLOWED_PROPERTIES_EXTENSIONS = [
   '$event_type',
   '$session_id',
   '$referring_domain',
+  '$device_type',
+  '$rageclick',
+  '$dead_click',
 ]
 
 export const ALLOWED_PROPERTIES = new Set([

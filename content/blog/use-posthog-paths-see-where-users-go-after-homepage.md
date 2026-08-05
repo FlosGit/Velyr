@@ -13,6 +13,7 @@ related:
   - "build-signup-funnel-posthog"
   - "measure-scroll-depth-posthog"
   - "create-cohort-high-intent-visitors-posthog"
+  - "find-rage-clicks-dead-clicks-posthog"
 faqs:
   - q: "What does the PostHog Paths insight show?"
     a: "It visualises the sequences of pages and events users move through, branching at each step. Set a start point — like your homepage — and it shows the most common next steps, how traffic splits, and where people exit. It's built to understand event order, which a raw query can't easily do."

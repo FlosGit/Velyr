@@ -13,6 +13,7 @@ related:
   - "call-action-cta"
   - "anatomy-high-converting-saas-hero-section"
   - "what-is-answer-engine-optimization-aeo"
+  - "mobile-vs-desktop-conversion-rate-gap"
 faqs:
   - q: "What does above the fold mean?"
     a: "It's the portion of a web page visible without scrolling — the first viewport a visitor sees when the page loads. The term comes from newspapers, where the top half of the folded front page had to sell the issue. On the web it's where most of your conversion weight sits, because many visitors never scroll past it."
@@ -36,7 +37,7 @@ Unlike a newspaper, the web has no fixed fold — it depends on the device:
 - A laptop might show ~800px.
 - A large monitor shows much more.
 
-So "above the fold" is really "visible on the smallest common screen." The practical rule: design so your headline and primary CTA fit in a short mobile viewport, because that's the constraint that bites.
+So "above the fold" is really "visible on the smallest common screen." The practical rule: design so your headline and primary CTA fit in a short mobile viewport, because that's the constraint that bites. It's also where a good share of the [mobile-to-desktop conversion gap](/blog/mobile-vs-desktop-conversion-rate-gap) comes from — a CTA that sits above the fold on a laptop can land well below it on a phone.
 
 ## What belongs above the fold
 
