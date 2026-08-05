@@ -18,6 +18,7 @@ import { FAQS } from '../src/data/faqs.js'
 import { loadArticles, toArticleJson } from './lib/blog.mjs'
 import { CLUSTERS } from '../src/data/blogClusters.js'
 import { submitToIndexNow } from '../src/utils/indexNow.js'
+import { submitToBing } from './lib/bing-url-submission.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DIST = join(__dirname, '..', 'dist')
@@ -323,9 +324,38 @@ for (const article of published) {
 }
 
 // Notify IndexNow (Bing/Yandex) about all published articles once per deploy.
-// Fire-and-forget: never awaited and errors are swallowed so it can't block or
-// break the build. The blog index itself is included so the listing re-crawls too.
-submitToIndexNow([ORIGIN + '/blog', ...indexNowUrls]).catch(() => {})
+// The blog index is included so the listing re-crawls too.
+//
+// Started HERE, awaited at the very end so the network round-trip overlaps the
+// remaining prerender work. It is REPORTED rather than swallowed: this call
+// silently returned 403 UserForbiddedToAccessSite on every deploy under the old
+// key (rotated 2026-08-04) and a bare `.catch(() => {})` meant nobody could see
+// it. Submission failure still must not fail the build, so the result is logged,
+// never thrown.
+const indexNowSubmission = submitToIndexNow([ORIGIN + '/blog', ...indexNowUrls]).catch((err) => ({
+  ok: false,
+  status: 0,
+  meaning: 'unexpected error',
+  submitted: 0,
+  detail: String(err?.message || ''),
+}))
+
+// Second, independent channel: the Bing Webmaster Tools URL Submission API
+// (see scripts/lib/bing-url-submission.mjs for why it is NOT the same thing as
+// IndexNow, and why its key is a secret while the IndexNow key is not).
+//
+// `indexNowUrls` is newest-article-first because loadArticles() sorts by
+// publishedAt descending — which matters, since Bing's daily quota is often far
+// smaller than the article count and only the head of the list gets through.
+//
+// Started HERE but awaited at the very end of the build: two sequential HTTP
+// round-trips (quota, then submit) overlap the remaining prerender work instead
+// of adding their latency to it. No-op when BING_WEBMASTER_API_KEY is unset.
+const bingSubmission = submitToBing([ORIGIN + '/blog', ...indexNowUrls]).catch((err) => ({
+  ok: false,
+  reason: 'unexpected_error',
+  message: err?.message,
+}))
 
 // --- blog index ---
 {
@@ -446,3 +476,38 @@ writeFileSync(join(DIST, 'llms-full.txt'), llmsFull, 'utf8')
 console.log(
   `prerender: wrote ${blogCount} blog articles, blog index, ${clustersWithPosts.length} cluster pages, sitemap.xml (${allUrls.length} urls), llms-full.txt`
 )
+
+// Report the IndexNow submission started above. A non-2xx here means search
+// engines are NOT being notified, so it prints loudly enough to notice in the
+// Vercel deploy log — but never throws, because an SEO ping must not fail a build.
+const indexNowResult = await indexNowSubmission
+if (indexNowResult === null) {
+  console.log('indexnow: skipped — no urls to submit')
+} else if (indexNowResult.ok) {
+  console.log(
+    `indexnow: submitted ${indexNowResult.submitted} url(s) — HTTP ${indexNowResult.status} (${indexNowResult.meaning})`
+  )
+} else {
+  console.log(
+    `indexnow: FAILED — HTTP ${indexNowResult.status} (${indexNowResult.meaning})` +
+      (indexNowResult.detail ? `: ${indexNowResult.detail}` : '')
+  )
+}
+
+// Report the Bing URL submission started above. Awaited here so the outcome is
+// visible in the deploy log, but never thrown: an SEO ping must not fail a build.
+const bingResult = await bingSubmission
+if (bingResult.ok && bingResult.submitted > 0) {
+  console.log(
+    `bing-url-submission: submitted ${bingResult.submitted} url(s), skipped ${bingResult.skipped}` +
+      ` (daily quota was ${bingResult.dailyQuotaBefore})`
+  )
+} else if (bingResult.reason === 'no_api_key') {
+  console.log('bing-url-submission: skipped — BING_WEBMASTER_API_KEY not set')
+} else {
+  console.log(
+    `bing-url-submission: skipped — ${bingResult.reason}` +
+      (bingResult.status ? ` (HTTP ${bingResult.status})` : '') +
+      (bingResult.message ? `: ${bingResult.message}` : '')
+  )
+}
